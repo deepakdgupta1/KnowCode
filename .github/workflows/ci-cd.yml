@@ -5,6 +5,10 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   test:
@@ -71,17 +75,21 @@ jobs:
   changelog:
     name: Generate Changelog
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' # Only runs on push to main
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 100 # Fetch enough history for the log
+          fetch-depth: 0 # Fetch all history for the log
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
 
       - name: Generate Changelog Entry
-        # We run the script directly. In a real scenario, this step might modify the file
-        # and create a PR, or just upload the artifact.
-        # For now, it appends to CHANGELOG.md in the runner.
+        # We run the script directly.
+        # It appends to CHANGELOG.md in the runner.
         run: python3 scripts/generate_changelog.py
 
       - name: Upload Changelog Artifact

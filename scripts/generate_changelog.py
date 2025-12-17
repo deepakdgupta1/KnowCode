@@ -133,9 +133,13 @@ def generate_entry(commits):
 def main():
     changelog_path = Path("CHANGELOG.md")
     
+    # Allow range to be passed as argument
+    range_str = "HEAD~5..HEAD"
+    if len(sys.argv) > 1:
+        range_str = sys.argv[1]
+
     # In a real CI, we might compare against the last tag. 
-    # For now, we'll just grab the inputs or default to last 10 commits for demo.
-    commits_raw = get_git_log("HEAD~5..HEAD") 
+    commits_raw = get_git_log(range_str) 
     parsed_commits = [parse_commit(c) for c in commits_raw if c]
     parsed_commits = [c for c in parsed_commits if c] # filter Nones
 
