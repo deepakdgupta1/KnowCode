@@ -1,0 +1,91 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Test & Lint (${{ matrix.os }} / py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Fetch all history for changelog/commit analysis if needed
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Install dependencies
+        run: uv sync --all-extras --dev
+
+      - name: Lint with Ruff
+        run: uv run ruff check .
+
+      - name: Test with pytest (and coverage)
+        run: uv run pytest -v --cov=src --cov-report=xml
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          file: ./coverage.xml
+          fail_ci_if_error: false # Don't fail the build if codecov is just down/unconfigured
+
+      - name: Prune uv cache
+        run: uv cache prune --ci
+
+  docs:
+    name: Build Documentation
+    runs-on: ubuntu-latest
+    needs: test # Only build docs if tests pass
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Install dependencies
+        run: uv sync --all-extras --dev
+
+      - name: Build MkDocs
+        run: uv run mkdocs build
+
+      # Optional: Deploy to GitHub Pages (disabled for this example, but ready to enable)
+      # - name: Deploy to GitHub Pages
+      #   uses: mkdocs/gh-deployer@...
+
+  changelog:
+    name: Generate Changelog
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' # Only runs on push to main
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 100 # Fetch enough history for the log
+
+      - name: Generate Changelog Entry
+        # We run the script directly. In a real scenario, this step might modify the file
+        # and create a PR, or just upload the artifact.
+        # For now, it appends to CHANGELOG.md in the runner.
+        run: python3 scripts/generate_changelog.py
+
+      - name: Upload Changelog Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: changelog-update
+          path: CHANGELOG.md

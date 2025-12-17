@@ -205,3 +205,8 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# KnowCode generated files
+knowcode_knowledge.json
+docs_test/
+

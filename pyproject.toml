@@ -1,0 +1,42 @@
+[project]
+name = "knowcode"
+version = "0.1.0"
+description = "Efficient codebase knowledge graph builder"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "click>=8.1",
+    "networkx>=3.0",
+    "pyyaml>=6.0",
+    "pathspec>=0.11",
+]
+
+[project.scripts]
+knowcode = "knowcode.cli:cli"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/knowcode"]
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=7.4",
+    "ruff>=0.1.5",
+    "mypy>=1.7",
+    "types-pyyaml",
+    "pytest-cov",
+    "mkdocs",
+    "mkdocs-material",
+    "mkdocstrings[python]",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.mypy]
+strict = true
+ignore_missing_imports = true
