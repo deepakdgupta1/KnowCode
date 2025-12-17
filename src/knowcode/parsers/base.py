@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Any, Optional
 
-from tree_sitter import Language, Parser, Tree
+from tree_sitter import Parser
 import tree_sitter_languages
 
 from knowcode.models import (
@@ -12,7 +12,6 @@ from knowcode.models import (
     Location,
     ParseResult,
     Relationship,
-    RelationshipKind,
 )
 
 

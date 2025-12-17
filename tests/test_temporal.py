@@ -1,7 +1,5 @@
 """Tests for Temporal Integration."""
 
-import shutil
-from pathlib import Path
 import pytest
 from git import Repo, Actor
 

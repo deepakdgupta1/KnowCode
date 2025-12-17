@@ -11,7 +11,7 @@ from knowcode import __version__
 from knowcode.context_synthesizer import ContextSynthesizer
 from knowcode.graph_builder import GraphBuilder
 from knowcode.knowledge_store import KnowledgeStore
-from knowcode.models import EntityKind, RelationshipKind
+from knowcode.models import EntityKind
 
 
 @click.group()

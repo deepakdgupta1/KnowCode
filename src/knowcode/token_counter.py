@@ -1,7 +1,5 @@
 """Token counting utility using tiktoken."""
 
-from functools import lru_cache
-from typing import Optional
 
 import tiktoken
 

@@ -26,7 +26,7 @@ class JavaParser(TreeSitterParser):
         entities: list[Entity] = []
         relationships: list[Relationship] = []
 
-        is_top_level = parent_id.endswith("::" + file_path.stem)
+
         
         # In Java, file usually maps to a class, but we have a module entity for the file anyway.
         # Package declaration defines the logic module/package.

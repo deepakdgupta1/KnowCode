@@ -26,10 +26,9 @@ class JavaScriptParser(TreeSitterParser):
         entities: list[Entity] = []
         relationships: list[Relationship] = []
 
-        is_top_level = parent_id.endswith("::" + file_path.stem)
+
 
         # Traverse children
-        cursor = node.walk()
         
         # We need to iterate over all children. walk() gives a cursor.
         # Tree-sitter cursors are stateful.
@@ -114,7 +113,6 @@ class JavaScriptParser(TreeSitterParser):
         class_id = f"{file_path}::{qualified_name}"
         
         # Check parent info for inheritance
-        extends_clause = node.child_by_field_name("super_class")
         # In tree-sitter-javascript: class_heritage -> extends_clause -> call_expression or identifier
         # Actually structure is class_declaration -> class_heritage -> extends_clause
         # Let's check node children for "class_heritage"
@@ -263,7 +261,8 @@ class JavaScriptParser(TreeSitterParser):
     def _extract_call(self, node, source_id):
         # call_expression: function: (identifier) arguments: (arguments)
         func_node = node.child_by_field_name("function")
-        if not func_node: return None
+        if not func_node:
+            return None
         
         callee_name = self._get_text(func_node, None)
         # Verify it's not a keyword/syntax

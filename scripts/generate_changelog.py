@@ -1,4 +1,3 @@
-import os
 import subprocess
 import sys
 from datetime import datetime
@@ -72,8 +71,10 @@ def generate_entry(commits):
     output.append("")
     # Determine intent from the most common type or the first commit
     focus = "Routine Maintenance"
-    if 'feat' in groups: focus = "Feature Development"
-    if 'fix' in groups: focus = "Bug Fixes"
+    if 'feat' in groups:
+        focus = "Feature Development"
+    if 'fix' in groups:
+        focus = "Bug Fixes"
     
     output.append(f"**Focus:** {focus}")
     output.append("")

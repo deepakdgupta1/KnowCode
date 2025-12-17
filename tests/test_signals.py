@@ -1,7 +1,6 @@
 """Tests for Signal Ingestion."""
 
 import pytest
-from pathlib import Path
 from knowcode.signals import CoverageProcessor
 from knowcode.models import EntityKind, RelationshipKind
 

@@ -3,11 +3,9 @@
 import tempfile
 from pathlib import Path
 
-import pytest
 
 from knowcode.graph_builder import GraphBuilder
 from knowcode.knowledge_store import KnowledgeStore
-from knowcode.models import EntityKind
 
 
 def test_python_parsing() -> None:
