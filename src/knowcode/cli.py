@@ -34,18 +34,25 @@ def main() -> None:
     multiple=True,
     help="Additional patterns to ignore",
 )
-def analyze(directory: str, output: str, ignore: tuple[str, ...]) -> None:
-    """Analyze a codebase and build the knowledge store.
+@click.option(
+    "--temporal/--no-temporal",
+    default=False,
+    help="Analyze git history and add temporal context.",
+)
+def analyze(directory: str, output: str, ignore: tuple[str, ...], temporal: bool) -> None:
+    """Scan and analyze a codebase.
 
     DIRECTORY: Path to the codebase to analyze.
     """
     click.echo(f"Analyzing: {directory}")
+    click.echo(f"Temporal analysis: {'Enabled' if temporal else 'Disabled'}")
 
     # Build graph
     builder = GraphBuilder()
     builder.build_from_directory(
         root_dir=directory,
-        additional_ignores=list(ignore) if ignore else None,
+        additional_ignores=list(ignore),
+        analyze_temporal=temporal,
     )
 
     # Create store and save
@@ -315,3 +322,87 @@ def stats(store: str) -> None:
 
 if __name__ == "__main__":
     main()
+@main.command()
+@click.argument("target", required=False)
+@click.option(
+    "--store", "-s",
+    type=click.Path(exists=True),
+    default=".",
+    help="Path to knowledge store file or directory",
+)
+@click.option(
+    "--limit", "-l",
+    type=int,
+    default=10,
+    help="Limit number of revisions",
+)
+def history(target: Optional[str], store: str, limit: int) -> None:
+    """Show history of the codebase or a specific entity.
+    
+    TARGET: Optional entity ID or search pattern. If omitted, shows commit log.
+    """
+    try:
+        knowledge = KnowledgeStore.load(store)
+    except FileNotFoundError:
+        click.echo("Error: Knowledge store not found. Run 'knowcode analyze' first.", err=True)
+        sys.exit(1)
+        
+    if not target:
+        # Show recent commits
+        commits = knowledge.get_entities_by_kind("commit")
+        # Sort by timestamp (metadata)
+        commits.sort(key=lambda x: x.metadata.get("timestamp", "0"), reverse=True)
+        
+        click.echo(f"Recent History (showing {min(limit, len(commits))} of {len(commits)}):")
+        for commit in commits[:limit]:
+            date = commit.metadata.get("date", "Unknown date")
+            author_rels = knowledge.get_incoming_relationships(commit.id)
+            author = "Unknown"
+            for rel in author_rels:
+                if rel.kind == "authored":
+                    # rel.source_id is author
+                    a_ent = knowledge.get_entity(rel.source_id)
+                    if a_ent:
+                         author = a_ent.name
+            
+            click.echo(f"[{date}] {commit.name} - {author}")
+            click.echo(f"  {commit.docstring.splitlines()[0] if commit.docstring else ''}")
+            
+    else:
+        # Show history for specific entity
+        entity = knowledge.get_entity(target)
+        if not entity:
+             matches = knowledge.search(target)
+             if matches:
+                 entity = matches[0]
+                 click.echo(f"Using: {entity.id}\n")
+        
+        if not entity:
+             click.echo(f"Entity not found: {target}")
+             return
+
+        click.echo(f"History for {entity.qualified_name} ({entity.kind.value}):")
+        
+        # Build history from relationships
+        # Entity -> CHANGED_BY -> Commit
+        rels = knowledge.get_outgoing_relationships(entity.id)
+        changes = []
+        for rel in rels:
+            if rel.kind == "changed_by":
+                commit = knowledge.get_entity(rel.target_id)
+                if commit:
+                    # Get modification stats from edge metadata
+                    stats = f"(+{rel.metadata.get('insertions', 0)}/-{rel.metadata.get('deletions', 0)})"
+                    timestamp = commit.metadata.get("timestamp", "0")
+                    changes.append((timestamp, commit, stats))
+        
+        changes.sort(key=lambda x: x[0], reverse=True)
+        
+        if not changes:
+            click.echo("  No recorded history (scan with --temporal).")
+            return
+            
+        for _, commit, stats in changes[:limit]:
+            date = commit.metadata.get("date", "")
+            click.echo(f"  {date} {commit.name} {stats}: {commit.docstring.splitlines()[0]}")
+

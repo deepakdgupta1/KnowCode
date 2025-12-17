@@ -21,7 +21,7 @@ class FileInfo:
 class Scanner:
     """Scans directories for source files with gitignore support."""
 
-    SUPPORTED_EXTENSIONS = {".py", ".md", ".yaml", ".yml"}
+    SUPPORTED_EXTENSIONS = {".py", ".md", ".yaml", ".yml", ".js", ".ts", ".java"}
 
     def __init__(
         self,

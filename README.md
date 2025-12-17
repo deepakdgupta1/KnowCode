@@ -113,6 +113,8 @@ knowcode stats [--store <path>]
 ## Supported Languages (MVP)
 
 - **Python** (.py) - Full AST parsing with functions, classes, methods, calls, imports
+- **JavaScript / TypeScript** (.js, .ts) - Classes, functions, imports (via tree-sitter)
+- **Java** (.java) - Classes, methods, imports, inheritance (via tree-sitter)
 - **Markdown** (.md) - Document structure with heading hierarchy
 - **YAML** (.yaml, .yml) - Configuration keys with nested structure
 

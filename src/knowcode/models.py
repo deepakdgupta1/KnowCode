@@ -18,6 +18,9 @@ class EntityKind(str, Enum):
     SECTION = "section"
     # Configuration entities
     CONFIG_KEY = "config_key"
+    # Temporal entities
+    COMMIT = "commit"
+    AUTHOR = "author"
 
 
 class RelationshipKind(str, Enum):
@@ -28,6 +31,10 @@ class RelationshipKind(str, Enum):
     CONTAINS = "contains"
     INHERITS = "inherits"
     REFERENCES = "references"
+    # Temporal relationships
+    CHANGED_BY = "changed_by"  # Entity -> Commit
+    AUTHORED = "authored"      # Author -> Commit
+    MODIFIED = "modified"      # Commit -> Entity
 
 
 @dataclass

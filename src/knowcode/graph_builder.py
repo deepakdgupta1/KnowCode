@@ -5,7 +5,10 @@ from typing import Optional
 
 from knowcode.models import Entity, ParseResult, Relationship
 from knowcode.parsers import MarkdownParser, PythonParser, YamlParser
+from knowcode.parsers.javascript_parser import JavaScriptParser
+from knowcode.parsers.java_parser import JavaParser
 from knowcode.scanner import FileInfo, Scanner
+from knowcode.temporal import TemporalAnalyzer
 
 
 class GraphBuilder:
@@ -16,6 +19,8 @@ class GraphBuilder:
         self.python_parser = PythonParser()
         self.markdown_parser = MarkdownParser()
         self.yaml_parser = YamlParser()
+        self.js_parser = JavaScriptParser()
+        self.java_parser = JavaParser()
 
         self.entities: dict[str, Entity] = {}
         self.relationships: list[Relationship] = []
@@ -25,6 +30,7 @@ class GraphBuilder:
         self,
         root_dir: str | Path,
         additional_ignores: Optional[list[str]] = None,
+        analyze_temporal: bool = False,
     ) -> "GraphBuilder":
         """Build graph by scanning and parsing a directory.
 
@@ -42,7 +48,17 @@ class GraphBuilder:
         )
 
         files = scanner.scan_all()
-        return self.build_from_files(files)
+        
+        # Static Analysis
+        self.build_from_files(files)
+
+        # Temporal Analysis
+        if analyze_temporal:
+            temporal_analyzer = TemporalAnalyzer(root_dir)
+            result = temporal_analyzer.analyze_history()
+            self._merge_result(result)
+            
+        return self
 
     def build_from_files(self, files: list[FileInfo]) -> "GraphBuilder":
         """Build graph from a list of files.
@@ -70,6 +86,10 @@ class GraphBuilder:
             return self.markdown_parser.parse_file(file_info.path)
         elif file_info.extension in {".yaml", ".yml"}:
             return self.yaml_parser.parse_file(file_info.path)
+        elif file_info.extension in {".js", ".ts"}:
+            return self.js_parser.parse_file(file_info.path)
+        elif file_info.extension == ".java":
+            return self.java_parser.parse_file(file_info.path)
         else:
             return ParseResult(
                 file_path=str(file_info.path),
