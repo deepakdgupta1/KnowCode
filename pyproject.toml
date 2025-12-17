@@ -3,7 +3,7 @@ name = "knowcode"
 version = "0.1.0"
 description = "Efficient codebase knowledge graph builder"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.9, <3.13"
 dependencies = [
     "click>=8.1",
     "networkx>=3.0",
