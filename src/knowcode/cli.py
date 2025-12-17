@@ -11,17 +11,17 @@ from knowcode import __version__
 from knowcode.context_synthesizer import ContextSynthesizer
 from knowcode.graph_builder import GraphBuilder
 from knowcode.knowledge_store import KnowledgeStore
-from knowcode.models import EntityKind
+from knowcode.models import EntityKind, RelationshipKind
 
 
 @click.group()
 @click.version_option(version=__version__)
-def main() -> None:
+def cli() -> None:
     """KnowCode - Transform your codebase into an effective knowledge base."""
     pass
 
 
-@main.command()
+@cli.command()
 @click.argument("directory", type=click.Path(exists=True, file_okay=False))
 @click.option(
     "--output", "-o",
@@ -39,13 +39,20 @@ def main() -> None:
     default=False,
     help="Analyze git history and add temporal context.",
 )
-def analyze(directory: str, output: str, ignore: tuple[str, ...], temporal: bool) -> None:
+@click.option(
+    "--coverage",
+    type=click.Path(exists=True, dir_okay=False),
+    help="Path to Cobertura XML coverage report.",
+)
+def analyze(directory: str, output: str, ignore: tuple[str, ...], temporal: bool, coverage: Optional[str]) -> None:
     """Scan and analyze a codebase.
 
     DIRECTORY: Path to the codebase to analyze.
     """
     click.echo(f"Analyzing: {directory}")
     click.echo(f"Temporal analysis: {'Enabled' if temporal else 'Disabled'}")
+    if coverage:
+        click.echo(f"Coverage report: {coverage}")
 
     # Build graph
     builder = GraphBuilder()
@@ -53,6 +60,7 @@ def analyze(directory: str, output: str, ignore: tuple[str, ...], temporal: bool
         root_dir=directory,
         additional_ignores=list(ignore),
         analyze_temporal=temporal,
+        coverage_path=Path(coverage) if coverage else None,
     )
 
     # Create store and save
@@ -72,7 +80,7 @@ def analyze(directory: str, output: str, ignore: tuple[str, ...], temporal: bool
     click.echo(f"\n  Saved to: {save_path}")
 
 
-@main.command()
+@cli.command()
 @click.argument("query_type", type=click.Choice(["callers", "callees", "deps", "search"]))
 @click.argument("target")
 @click.option(
@@ -179,7 +187,7 @@ def query(query_type: str, target: str, store: str, as_json: bool) -> None:
                 click.echo(f"  • {name}{extra}")
 
 
-@main.command()
+@cli.command()
 @click.argument("target")
 @click.option(
     "--store", "-s",
@@ -227,7 +235,7 @@ def context(target: str, store: str, max_tokens: int) -> None:
             click.echo("(truncated)", err=True)
 
 
-@main.command()
+@cli.command()
 @click.option(
     "--store", "-s",
     type=click.Path(exists=True),
@@ -280,7 +288,7 @@ def export(store: str, output: str) -> None:
     click.echo(f"  Index: {index_path}")
 
 
-@main.command()
+@cli.command()
 @click.option(
     "--store", "-s",
     type=click.Path(exists=True),
@@ -320,9 +328,8 @@ def stats(store: str) -> None:
         click.echo(f"  {kind}: {count}")
 
 
-if __name__ == "__main__":
-    main()
-@main.command()
+
+@cli.command()
 @click.argument("target", required=False)
 @click.option(
     "--store", "-s",
@@ -406,3 +413,6 @@ def history(target: Optional[str], store: str, limit: int) -> None:
             date = commit.metadata.get("date", "")
             click.echo(f"  {date} {commit.name} {stats}: {commit.docstring.splitlines()[0]}")
 
+
+if __name__ == "__main__":
+    cli()

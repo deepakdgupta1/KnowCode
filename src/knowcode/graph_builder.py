@@ -8,6 +8,7 @@ from knowcode.parsers import MarkdownParser, PythonParser, YamlParser
 from knowcode.parsers.javascript_parser import JavaScriptParser
 from knowcode.parsers.java_parser import JavaParser
 from knowcode.scanner import FileInfo, Scanner
+from knowcode.signals import CoverageProcessor
 from knowcode.temporal import TemporalAnalyzer
 
 
@@ -31,6 +32,7 @@ class GraphBuilder:
         root_dir: str | Path,
         additional_ignores: Optional[list[str]] = None,
         analyze_temporal: bool = False,
+        coverage_path: Optional[Path] = None,
     ) -> "GraphBuilder":
         """Build graph by scanning and parsing a directory.
 
@@ -56,6 +58,12 @@ class GraphBuilder:
         if analyze_temporal:
             temporal_analyzer = TemporalAnalyzer(root_dir)
             result = temporal_analyzer.analyze_history()
+            self._merge_result(result)
+            
+        # Coverage Analysis
+        if coverage_path:
+            coverage_processor = CoverageProcessor(root_dir)
+            result = coverage_processor.process_cobertura(coverage_path)
             self._merge_result(result)
             
         return self

@@ -105,11 +105,12 @@ class YamlParser:
     ) -> None:
         """Recursively extract configuration keys."""
         for key, value in data.items():
-            qualified_name = f"{prefix}{key}" if prefix else key
+            str_key = str(key)
+            qualified_name = f"{prefix}{str_key}" if prefix else str_key
             key_id = f"{file_path}::{qualified_name}"
 
             # Try to find line number for this key
-            line_num = self._find_key_line(key, prefix, lines)
+            line_num = self._find_key_line(str_key, prefix, lines)
 
             # Determine value representation
             if isinstance(value, dict):
@@ -122,7 +123,7 @@ class YamlParser:
             key_entity = Entity(
                 id=key_id,
                 kind=EntityKind.CONFIG_KEY,
-                name=key,
+                name=str_key,
                 qualified_name=qualified_name,
                 location=Location(
                     file_path=str(file_path),

@@ -21,6 +21,9 @@ class EntityKind(str, Enum):
     # Temporal entities
     COMMIT = "commit"
     AUTHOR = "author"
+    # Runtime entities
+    TEST_RUN = "test_run"
+    COVERAGE_REPORT = "coverage_report"
 
 
 class RelationshipKind(str, Enum):
@@ -35,6 +38,9 @@ class RelationshipKind(str, Enum):
     CHANGED_BY = "changed_by"  # Entity -> Commit
     AUTHORED = "authored"      # Author -> Commit
     MODIFIED = "modified"      # Commit -> Entity
+    # Runtime relationships
+    COVERS = "covers"           # Report/Test -> Entity
+    EXECUTED_BY = "executed_by" # Entity -> Report/Test
 
 
 @dataclass
