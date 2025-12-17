@@ -5,6 +5,7 @@ from typing import Optional
 
 from knowcode.knowledge_store import KnowledgeStore
 from knowcode.models import Entity, EntityKind
+from knowcode.token_counter import TokenCounter
 
 
 @dataclass
@@ -15,27 +16,31 @@ class ContextBundle:
     context_text: str
     included_entities: list[str]
     total_chars: int
+    total_tokens: int
     truncated: bool
 
 
 class ContextSynthesizer:
     """Synthesizes context bundles for entities."""
 
-    DEFAULT_MAX_CHARS = 8000  # Rough proxy for ~2K tokens
+    DEFAULT_MAX_TOKENS = 2000
 
     def __init__(
         self,
         store: KnowledgeStore,
-        max_chars: int = DEFAULT_MAX_CHARS,
+        max_tokens: int = DEFAULT_MAX_TOKENS,
+        model: str = "gpt-4",
     ) -> None:
         """Initialize context synthesizer.
 
         Args:
             store: Knowledge store to query.
-            max_chars: Maximum characters in context bundle.
+            max_tokens: Maximum tokens in context bundle.
+            model: Model name for token counting.
         """
         self.store = store
-        self.max_chars = max_chars
+        self.max_tokens = max_tokens
+        self.tokenizer = TokenCounter(model)
 
     def synthesize(self, entity_id: str) -> Optional[ContextBundle]:
         """Synthesize context bundle for an entity.
@@ -52,79 +57,113 @@ class ContextSynthesizer:
 
         sections: list[str] = []
         included: list[str] = [entity_id]
-        truncated = False
-
-        # Section 1: Entity header
-        sections.append(self._format_entity_header(entity))
-
-        # Section 2: Docstring/description
+        
+        # We build sections in priority order but display them in logical order usually.
+        # However, for simplicity, we'll append and check budget.
+        
+        # Priority 1: Entity Core (Header, Signature, Description)
+        header = self._format_entity_header(entity)
+        current_tokens = self.tokenizer.count_tokens(header)
+        sections.append(header)
+        
+        desc = ""
         if entity.docstring:
-            sections.append(f"## Description\n\n{entity.docstring}")
-
-        # Section 3: Signature (for functions/methods)
+            desc = f"## Description\n\n{entity.docstring}"
+            
+        sig = ""
         if entity.signature:
-            sections.append(f"## Signature\n\n```python\n{entity.signature}\n```")
+            sig = f"## Signature\n\n```python\n{entity.signature}\n```"
+            
+        # Add high priority sections if they fit
+        if desc:
+            t = self.tokenizer.count_tokens(desc)
+            if current_tokens + t < self.max_tokens:
+                sections.append(desc)
+                current_tokens += t
+        
+        if sig:
+            t = self.tokenizer.count_tokens(sig)
+            if current_tokens + t < self.max_tokens:
+                sections.append(sig)
+                current_tokens += t
 
-        # Section 4: Source code (if available and fits)
+        # Priority 2: Source Code (Huge consumer, often truncated)
         if entity.source_code:
-            code_section = f"## Source Code\n\n```python\n{entity.source_code}\n```"
-            if self._would_fit(sections, code_section):
-                sections.append(code_section)
+            code_header = "## Source Code\n\n```python\n"
+            code_footer = "\n```"
+            overhead = self.tokenizer.count_tokens(code_header + code_footer)
+            remaining = self.max_tokens - current_tokens - overhead
+            
+            if remaining > 100: # Only add if we have decent space
+                code_body = entity.source_code
+                code_tokens = self.tokenizer.count_tokens(code_body)
+                
+                if code_tokens > remaining:
+                    code_body = self.tokenizer.truncate(code_body, remaining) + "\n# ... (truncated)"
+                    # We technically truncated the content
+                    # But we will rely on full budget exhaustion check often
+                
+                sections.append(f"{code_header}{code_body}{code_footer}")
+                current_tokens += self.tokenizer.count_tokens(sections[-1])
+            else:
+                 # Skipped source code due to budget
+                 # We consider this truncation/loss of info
+                 pass 
 
-        # Section 5: Parent context
+        # Priority 3: Parent Context
         parent = self.store.get_parent(entity_id)
         if parent:
             parent_section = self._format_parent_context(parent)
-            if self._would_fit(sections, parent_section):
+            t = self.tokenizer.count_tokens(parent_section)
+            if current_tokens + t < self.max_tokens:
                 sections.append(parent_section)
                 included.append(parent.id)
+                current_tokens += t
 
-        # Section 6: Callers (who calls this?)
+        # Priority 4: Relationships (Callers, Callees, Children)
+        # We add them greedily until budget exhaust
+        
+        # Unified list of potential sections
+        rel_sections = []
+        
         callers = self.store.get_callers(entity_id)
         if callers:
-            callers_section = self._format_callers(callers)
-            if self._would_fit(sections, callers_section):
-                sections.append(callers_section)
-                included.extend(c.id for c in callers)
+            rel_sections.append((self._format_callers(callers), [c.id for c in callers]))
 
-        # Section 7: Callees (what does this call?)
         callees = self.store.get_callees(entity_id)
         if callees:
-            callees_section = self._format_callees(callees)
-            if self._would_fit(sections, callees_section):
-                sections.append(callees_section)
-                included.extend(c.id for c in callees)
-
-        # Section 8: Children (for classes/modules)
+             rel_sections.append((self._format_callees(callees), [c.id for c in callees]))
+             
         if entity.kind in {EntityKind.CLASS, EntityKind.MODULE, EntityKind.DOCUMENT}:
             children = self.store.get_children(entity_id)
             if children:
-                children_section = self._format_children(children)
-                if self._would_fit(sections, children_section):
-                    sections.append(children_section)
-                    included.extend(c.id for c in children)
+                rel_sections.append((self._format_children(children), [c.id for c in children]))
 
-        # Build final context
+        is_truncated = False
+        
+        for text, ids in rel_sections:
+            t = self.tokenizer.count_tokens(text)
+            if current_tokens + t < self.max_tokens:
+                sections.append(text)
+                included.extend(ids)
+                current_tokens += t
+            else:
+                is_truncated = True
+
         context_text = "\n\n---\n\n".join(sections)
-
-        # Final truncation if still too long
-        if len(context_text) > self.max_chars:
-            context_text = context_text[: self.max_chars - 20] + "\n\n[TRUNCATED]"
-            truncated = True
+        
+        # Check if we skipped source code but had it
+        if entity.source_code and "## Source Code" not in context_text:
+             is_truncated = True
 
         return ContextBundle(
             target_entity=entity,
             context_text=context_text,
             included_entities=included,
             total_chars=len(context_text),
-            truncated=truncated,
+            total_tokens=current_tokens,
+            truncated=is_truncated or (current_tokens >= self.max_tokens),
         )
-
-    def _would_fit(self, current_sections: list[str], new_section: str) -> bool:
-        """Check if adding a section would stay within budget."""
-        current_len = sum(len(s) for s in current_sections)
-        new_len = current_len + len(new_section) + 10  # +10 for separators
-        return new_len < self.max_chars
 
     def _format_entity_header(self, entity: Entity) -> str:
         """Format entity header."""

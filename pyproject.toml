@@ -12,6 +12,7 @@ dependencies = [
     "tree-sitter==0.21.3",
     "tree-sitter-languages>=1.10.0",
     "GitPython>=3.1.0",
+    "tiktoken>=0.7.0",
 ]
 
 [project.scripts]

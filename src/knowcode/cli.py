@@ -188,12 +188,12 @@ def query(query_type: str, target: str, store: str, as_json: bool) -> None:
     help="Path to knowledge store file or directory",
 )
 @click.option(
-    "--max-chars", "-m",
+    "--max-tokens", "-m",
     type=int,
-    default=8000,
-    help="Maximum characters in context (default: 8000)",
+    default=2000,
+    help="Maximum tokens in context (default: 2000)",
 )
-def context(target: str, store: str, max_chars: int) -> None:
+def context(target: str, store: str, max_tokens: int) -> None:
     """Generate context bundle for an entity.
 
     TARGET: Entity ID or search pattern
@@ -204,7 +204,7 @@ def context(target: str, store: str, max_chars: int) -> None:
         click.echo("Error: Knowledge store not found. Run 'knowcode analyze' first.", err=True)
         sys.exit(1)
 
-    synthesizer = ContextSynthesizer(knowledge, max_chars=max_chars)
+    synthesizer = ContextSynthesizer(knowledge, max_tokens=max_tokens)
 
     # Try exact match first
     entity = knowledge.get_entity(target)
@@ -222,7 +222,7 @@ def context(target: str, store: str, max_chars: int) -> None:
     bundle = synthesizer.synthesize(entity.id)
     if bundle:
         click.echo(bundle.context_text)
-        click.echo(f"\n--- {bundle.total_chars} chars, {len(bundle.included_entities)} entities ---", err=True)
+        click.echo(f"\n--- {bundle.total_chars} chars, {bundle.total_tokens} tokens, {len(bundle.included_entities)} entities ---", err=True)
         if bundle.truncated:
             click.echo("(truncated)", err=True)
 
