@@ -1,4 +1,7 @@
-"""Python source code parser using AST."""
+"""Python parser using standard ast module."""
+
+from __future__ import annotations
+
 
 import ast
 from pathlib import Path
