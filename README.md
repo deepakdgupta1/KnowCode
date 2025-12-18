@@ -2,7 +2,8 @@
 
 Transform your codebase into an effective knowledge base that provides accurate, relevant context for AI coding assistants—using minimal tokens.
 
-[![codecov](https://codecov.io/gh/deepakdgupta1/KnowCode/graph/badge.svg?token=placeholder)](https://codecov.io/gh/deepakdgupta1/KnowCode)
+[![codecov](https://codecov.io/gh/deepakdgupta1/KnowCode/graph/badge.svg?token=placeholder)](https://codecov.io/gh/deepakdgupta1/KnowCode) [![CI/CD Pipeline](https://github.com/deepakdgupta1/KnowCode/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/deepakdgupta1/KnowCode/actions/workflows/ci-cd.yml)
+
 
 ## Overview
 
@@ -112,7 +113,7 @@ knowcode stats [--store <path>]
 
 ## Supported Languages (MVP)
 
-- **Python** (.py) - Full AST parsing with functions, classes, methods, calls, imports
+- **Python** (.py) - Full AST parsing (Supports Python 3.9 - 3.12)
 - **JavaScript / TypeScript** (.js, .ts) - Classes, functions, imports (via tree-sitter)
 - **Java** (.java) - Classes, methods, imports, inheritance (via tree-sitter)
 - **Markdown** (.md) - Document structure with heading hierarchy
@@ -123,10 +124,10 @@ knowcode stats [--store <path>]
 KnowCode follows a layered architecture:
 
 1. **Scanner** - Discovers files with gitignore support
-2. **Parsers** - Language-specific parsing (Python AST, Markdown, YAML)
+2. **Parsers** - Language-specific parsing (Python AST, Tree-sitter for others)
 3. **Graph Builder** - Constructs semantic graph with entities and relationships
 4. **Knowledge Store** - In-memory graph with JSON persistence
-5. **Context Synthesizer** - Generates token-efficient context bundles
+5. **Context Synthesizer** - Generates token-efficient context bundles with priority ranking
 6. **CLI** - User interface for all operations
 
 See [KnowCode.md](KnowCode.md) for the complete reference architecture.
@@ -198,11 +199,13 @@ See [KnowCode.md](KnowCode.md) for the full vision. The MVP focuses on:
 - ✅ Snapshot-only analysis (no temporal tracking)
 - ✅ Local CLI tool
 
+**Released:**
+- ✅ v1.1: Additional languages (JavaScript, TypeScript, Java)
+- ✅ v1.2: Git history integration, temporal tracking
+- ✅ v1.3: Token budget optimization, priority ranking
+- ✅ v1.4: Runtime signal integration
+
 **Future releases:**
-- v1.1: Additional languages (JavaScript, TypeScript, Java)
-- v1.2: Git history integration, temporal tracking
-- v1.3: Token budget optimization, priority ranking
-- v1.4: Runtime signal integration
 - v2.0: Server mode, team sharing, enterprise features
 
 ## License
