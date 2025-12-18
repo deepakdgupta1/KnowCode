@@ -208,5 +208,6 @@ __marimo__/
 
 # KnowCode generated files
 knowcode_knowledge.json
+CHANGELOG.md
 docs_test/
 
