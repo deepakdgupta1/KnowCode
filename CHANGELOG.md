@@ -40,3 +40,31 @@
 
 #### 📦 Other Changes
 * ci: add step to commit and push generated changelog. (`4039499`)
+
+
+---
+
+## [Unreleased] - 2025-12-18
+
+**Focus:** Bug Fixes
+
+### 🧠 Temporal Context & Intent
+> *Auto-generated: Add context about why these changes were made.*
+
+### 🏗️ Architectural Impact
+> *Auto-generated: Describe high-level architectural shifts.*
+
+### 📝 Delta Changes
+
+#### 🐛 Fixes
+* fix linting errors add future annotations import to all modules (`d6559d2`)
+
+#### 📚 Documentation
+* Enhance README with CI/CD badge, updated Python version support, refined architecture descriptions, and an updated release roadmap. (`754fa6b`)
+* update changelog [skip ci] (`06dbf4c`)
+
+#### 🔨 Refactoring
+* Remove unused imports and update Python version range in lock file. Also, fixed linting issues. (`72a63ec`)
+
+#### 📦 Other Changes
+* ci: add step to commit and push generated changelog. (`4039499`)
