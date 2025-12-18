@@ -6,34 +6,37 @@ from typing import Optional
 
 
 class EntityKind(str, Enum):
-    """Types of code entities."""
+    """Types of code entities tracked by the system.
+    
+    These correspond to semantic nodes in the knowledge graph.
+    """
 
-    MODULE = "module"
-    CLASS = "class"
-    FUNCTION = "function"
-    METHOD = "method"
-    VARIABLE = "variable"
+    MODULE = "module"          # Python modules, Java packages
+    CLASS = "class"            # Classes, Interfaces, Enums
+    FUNCTION = "function"      # Top-level functions
+    METHOD = "method"          # Class methods
+    VARIABLE = "variable"      # (Future) Top-level variables/constants
     # Documentation entities
-    DOCUMENT = "document"
-    SECTION = "section"
+    DOCUMENT = "document"      # Markdown files
+    SECTION = "section"        # Headings within documents
     # Configuration entities
-    CONFIG_KEY = "config_key"
+    CONFIG_KEY = "config_key"  # YAML/JSON keys
     # Temporal entities
-    COMMIT = "commit"
-    AUTHOR = "author"
+    COMMIT = "commit"          # Git commits
+    AUTHOR = "author"          # Git authors
     # Runtime entities
-    TEST_RUN = "test_run"
+    TEST_RUN = "test_run"      # Test execution result
     COVERAGE_REPORT = "coverage_report"
 
 
 class RelationshipKind(str, Enum):
-    """Types of relationships between entities."""
+    """Types of relationships (edges) between entities."""
 
-    CALLS = "calls"
-    IMPORTS = "imports"
-    CONTAINS = "contains"
-    INHERITS = "inherits"
-    REFERENCES = "references"
+    CALLS = "calls"            # Static function/method call
+    IMPORTS = "imports"        # Module import / dependency
+    CONTAINS = "contains"      # Structural containment (Class -> Method)
+    INHERITS = "inherits"      # Class inheritance / Interface implementation
+    REFERENCES = "references"  # General reference (e.g., config usage)
     # Temporal relationships
     CHANGED_BY = "changed_by"  # Entity -> Commit
     AUTHORED = "authored"      # Author -> Commit
@@ -41,7 +44,6 @@ class RelationshipKind(str, Enum):
     # Runtime relationships
     COVERS = "covers"           # Report/Test -> Entity
     EXECUTED_BY = "executed_by" # Entity -> Report/Test
-
 
 @dataclass
 class Location:
@@ -58,14 +60,18 @@ class Location:
 class Entity:
     """A code entity (function, class, module, etc.)."""
 
-    id: str  # file_path::qualified_name
+    id: str  # Unique identifier: file_path::qualified_name
     kind: EntityKind
-    name: str
-    qualified_name: str
+    name: str  # Short name (e.g., "MyClass")
+    qualified_name: str  # Full name (e.g., "my_pkg.module.MyClass")
     location: Location
     docstring: Optional[str] = None
     signature: Optional[str] = None
     source_code: Optional[str] = None
+    # Flexible metadata storage. Common keys:
+    # - "language": "python", "javascript", etc.
+    # - "complexity": Cyclomatic complexity score
+    # - "is_async": "true" if async function
     metadata: dict[str, str] = field(default_factory=dict)
 
     def __hash__(self) -> int:

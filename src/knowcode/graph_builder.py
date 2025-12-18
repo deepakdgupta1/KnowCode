@@ -116,7 +116,13 @@ class GraphBuilder:
         self.errors.extend(result.errors)
 
     def _resolve_references(self) -> None:
-        """Resolve reference-based relationships to actual entity IDs."""
+        """Resolve reference-based relationships to actual entity IDs.
+        
+        Some parsers (like Tree-sitter) may produce relationships pointing to 
+        'ref::SomeName' because they don't know the full qualified name at parse time.
+        This pass iterates through all relationships and attempts to link these 
+        placeholders to concrete Entity IDs in the graph.
+        """
         resolved_relationships: list[Relationship] = []
 
         for rel in self.relationships:

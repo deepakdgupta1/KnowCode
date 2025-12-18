@@ -109,6 +109,8 @@ class Scanner:
                 relative_path = str(file_path.relative_to(self.root_dir))
 
                 # Check if ignored
+                # We check relative_path to ensure ignore patterns match correctly 
+                # against the project root (e.g., "src/" vs "/abs/path/to/src/")
                 if self._should_ignore(relative_path):
                     continue
 

@@ -110,8 +110,20 @@ class TreeSitterParser:
         source_code: str,
         source_lines: list[str],
     ) -> tuple[list[Entity], list[Relationship]]:
-        """Extract entities from the AST. Must be implemented by subclasses."""
+        """Extract entities from the AST. Must be implemented by subclasses.
+        
+        Args:
+            node: Current AST node to process.
+            file_path: Path to the file being parsed.
+            parent_id: ID of the parent entity (for containment).
+            source_code: Full source code text.
+            source_lines: Source code split by lines.
+            
+        Returns:
+            Tuple of (entities list, relationships list).
+        """
         raise NotImplementedError
+
 
     def _get_text(self, node: Any, source_bytes: bytes) -> str:
         """Get text content of a node."""

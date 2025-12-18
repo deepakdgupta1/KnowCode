@@ -58,6 +58,13 @@ class ContextSynthesizer:
         sections: list[str] = []
         included: list[str] = [entity_id]
         
+        # STRATEGY: 
+        # We construct the context bundle by adding sections in order of "Semantic Priority".
+        # 1. Core Identity (Header, Signature, Docstring) - Essential
+        # 2. Source Code - High value, but expensive. Truncated if necessary.
+        # 3. Parent Context - Helps LLM understand where this fits.
+        # 4. Incoming/Outgoing Relationships - Additional context, added greedily until budget fills.
+        
         # We build sections in priority order but display them in logical order usually.
         # However, for simplicity, we'll append and check budget.
         

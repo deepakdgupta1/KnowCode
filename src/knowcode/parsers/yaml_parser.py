@@ -162,7 +162,14 @@ class YamlParser:
     def _find_key_line(
         self, key: str, prefix: str, lines: list[str]
     ) -> int:
-        """Try to find the line number for a key."""
+        """Try to find the line number for a key.
+        
+        Note: This is a simple heuristic that searches for "key:" matches.
+        It attempts to verify indentation depth but may fail on:
+        - Duplicate keys at similar indentation (valid in some contexts, or invalid YAML)
+        - Keys inside multiline strings
+        - Commented out keys that look like real keys
+        """
         # Simple heuristic: find first occurrence of "key:"
         search_pattern = f"{key}:"
 

@@ -673,22 +673,25 @@ You've essentially defined a **code intelligence system**, not a chatbot with em
 
 ---
 
-## **Implementation Priority Roadmap**
+## **Implementation Status & Roadmap**
 
-### Phase 1: Foundation (Must Have)
-1. Schema versioning for semantic graph (Layer 3)
-2. Incremental processing pipeline (Layer 1)
-3. Token budget specification (Layer 9)
-4. Query language definition (Layer 8)
+### **Phase 1: Foundation (COMPLETED)**
+1. **[x] Unified Semantic Graph (Layer 3)**: Multi-language support (Python, JS, Java, MD, YAML).
+2. **[x] Token-Budgeted Synthesis (Layer 9)**: Priority-ranked context generation.
+3. **[x] Local Knowledge Store (Layer 8)**: JSON persistence with graph-like querying.
+4. **[x] Service Layer (Architecture Substrate)**: Unified business logic for CLI and API.
 
-### Phase 2: Robustness (Should Have)
-5. Confidence scoring on all inferences (Layers 3, 4, 6)
-6. Parse error recovery strategy (Layer 2)
-7. Cross-language boundary detection (Layer 2)
-8. Intent staleness detection (Layer 6)
+### **Phase 2: Intelligence Server (COMPLETED)**
+5. **[x] FastAPI Server (Layer 10)**: REST API for local IDE agent integration.
+6. **[x] Hot Reload (Layer 8)**: Dynamic refresh of knowledge store without downtime.
+7. **[x] Granular API (Layer 8)**: Programmatic access to raw entities and relationships.
 
-### Phase 3: Enterprise (Nice to Have)
-9. Security model (Cross-cutting)
-10. Scalability architecture (Cross-cutting)
-11. Observability infrastructure (Cross-cutting)
-12. Multi-tenant knowledge store (Layer 8)
+### **Phase 3: Deep Analysis (NEXT)**
+8. **[ ] Static Behavioral Analysis (Layer 4)**: Data flow and state transition tracking.
+9. **[ ] Intent Extraction (Layer 6)**: Linking commit messages and ADRs to semantic nodes.
+10. **[ ] Confidence Scoring (Layer 3)**: Weighted edges based on analysis source quality.
+
+### **Phase 4: Enterprise (FUTURE)**
+11. **[ ] Security & RBAC**: Who can query what modules.
+12. **[ ] Scalability**: Supporting monorepos > 1M LOC.
+13. **[ ] Team Sharing**: Remote knowledge store synchronization.

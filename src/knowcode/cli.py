@@ -3,15 +3,14 @@
 import json
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import click
 
 from knowcode import __version__
-from knowcode.context_synthesizer import ContextSynthesizer
-from knowcode.graph_builder import GraphBuilder
-from knowcode.knowledge_store import KnowledgeStore
 from knowcode.models import EntityKind
+from knowcode.service import KnowCodeService
+from knowcode.knowledge_store import KnowledgeStore
 
 
 @click.group()
@@ -54,28 +53,22 @@ def analyze(directory: str, output: str, ignore: tuple[str, ...], temporal: bool
     if coverage:
         click.echo(f"Coverage report: {coverage}")
 
-    # Build graph
-    builder = GraphBuilder()
-    builder.build_from_directory(
-        root_dir=directory,
-        additional_ignores=list(ignore),
-        analyze_temporal=temporal,
-        coverage_path=Path(coverage) if coverage else None,
+    service = KnowCodeService()
+    stats = service.analyze(
+        directory=directory,
+        output=output,
+        ignore=list(ignore),
+        temporal=temporal,
+        coverage=coverage,
     )
 
-    # Create store and save
-    store = KnowledgeStore.from_graph_builder(builder)
-    output_path = Path(output)
-    store.save(output_path)
-
-    # Print summary
-    stats = builder.stats()
     click.echo("\n✓ Analysis complete!")
     click.echo(f"  Entities: {stats['total_entities']}")
     click.echo(f"  Relationships: {stats['total_relationships']}")
-    if stats['total_errors'] > 0:
+    if stats.get('total_errors', 0) > 0:
         click.echo(f"  Errors: {stats['total_errors']}")
 
+    output_path = Path(output)
     save_path = output_path / KnowledgeStore.DEFAULT_FILENAME if output_path.is_dir() else output_path
     click.echo(f"\n  Saved to: {save_path}")
 
@@ -101,68 +94,26 @@ def query(query_type: str, target: str, store: str, as_json: bool) -> None:
     TARGET: Entity ID or search pattern
     """
     try:
-        knowledge = KnowledgeStore.load(store)
+        service = KnowCodeService(store_path=store)
     except FileNotFoundError:
         click.echo("Error: Knowledge store not found. Run 'knowcode analyze' first.", err=True)
         sys.exit(1)
 
-    results: list[dict[str, str]] = []
+    results: list[dict[str, Any]] = []
 
     if query_type == "search":
-        entities = knowledge.search(target)
-        for e in entities:
-            results.append({
-                "id": e.id,
-                "kind": e.kind.value,
-                "name": e.qualified_name,
-                "file": e.location.file_path,
-                "line": str(e.location.line_start),
-            })
+        results = service.search(target)
 
     elif query_type == "callers":
-        entity = knowledge.get_entity(target)
-        if not entity:
-            # Try searching
-            matches = knowledge.search(target)
-            if matches:
-                entity = matches[0]
-                click.echo(f"Using: {entity.id}")
-
-        if entity:
-            callers = knowledge.get_callers(entity.id)
-            for c in callers:
-                results.append({
-                    "id": c.id,
-                    "name": c.qualified_name,
-                    "file": c.location.file_path,
-                })
+        results = service.get_callers(target)
 
     elif query_type == "callees":
-        entity = knowledge.get_entity(target)
-        if not entity:
-            matches = knowledge.search(target)
-            if matches:
-                entity = matches[0]
-                click.echo(f"Using: {entity.id}")
-
-        if entity:
-            callees = knowledge.get_callees(entity.id)
-            for c in callees:
-                results.append({
-                    "id": c.id,
-                    "name": c.qualified_name,
-                })
+        results = service.get_callees(target)
 
     elif query_type == "deps":
-        entity = knowledge.get_entity(target)
-        if not entity:
-            matches = knowledge.search(target)
-            if matches:
-                entity = matches[0]
-                click.echo(f"Using: {entity.id}")
-
+        entity = service.store.get_entity(target) or next(iter(service.store.search(target)), None)
         if entity:
-            deps = knowledge.get_dependencies(entity.id)
+            deps = service.store.get_dependencies(entity.id)
             for d in deps:
                 results.append({
                     "id": d.id,
@@ -179,6 +130,8 @@ def query(query_type: str, target: str, store: str, as_json: bool) -> None:
         else:
             for r in results:
                 name = r.get("name", r.get("id", "unknown"))
+                if "qualified_name" in r:
+                    name = r["qualified_name"]
                 extra = ""
                 if "file" in r:
                     extra = f" ({r['file']}:{r.get('line', '')})"
@@ -207,32 +160,20 @@ def context(target: str, store: str, max_tokens: int) -> None:
     TARGET: Entity ID or search pattern
     """
     try:
-        knowledge = KnowledgeStore.load(store)
+        service = KnowCodeService(store_path=store)
     except FileNotFoundError:
         click.echo("Error: Knowledge store not found. Run 'knowcode analyze' first.", err=True)
         sys.exit(1)
 
-    synthesizer = ContextSynthesizer(knowledge, max_tokens=max_tokens)
-
-    # Try exact match first
-    entity = knowledge.get_entity(target)
-    if not entity:
-        # Try search
-        matches = knowledge.search(target)
-        if matches:
-            entity = matches[0]
-            click.echo(f"Using: {entity.id}\n", err=True)
-
-    if not entity:
-        click.echo(f"Entity not found: {target}", err=True)
-        sys.exit(1)
-
-    bundle = synthesizer.synthesize(entity.id)
-    if bundle:
-        click.echo(bundle.context_text)
-        click.echo(f"\n--- {bundle.total_chars} chars, {bundle.total_tokens} tokens, {len(bundle.included_entities)} entities ---", err=True)
-        if bundle.truncated:
+    try:
+        bundle_dict = service.get_context(target, max_tokens=max_tokens)
+        click.echo(bundle_dict["context_text"])
+        click.echo(f"\n--- {len(bundle_dict['context_text'])} chars, {bundle_dict['total_tokens']} tokens, {len(bundle_dict['included_entities'])} entities ---", err=True)
+        if bundle_dict["truncated"]:
             click.echo("(truncated)", err=True)
+    except ValueError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
 
 
 @cli.command()
@@ -251,11 +192,12 @@ def context(target: str, store: str, max_tokens: int) -> None:
 def export(store: str, output: str) -> None:
     """Export knowledge store as Markdown documentation."""
     try:
-        knowledge = KnowledgeStore.load(store)
+        service = KnowCodeService(store_path=store)
     except FileNotFoundError:
         click.echo("Error: Knowledge store not found. Run 'knowcode analyze' first.", err=True)
         sys.exit(1)
 
+    knowledge = service.store
     output_dir = Path(output)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -298,35 +240,49 @@ def export(store: str, output: str) -> None:
 def stats(store: str) -> None:
     """Show statistics about the knowledge store."""
     try:
-        knowledge = KnowledgeStore.load(store)
+        service = KnowCodeService(store_path=store)
     except FileNotFoundError:
         click.echo("Error: Knowledge store not found. Run 'knowcode analyze' first.", err=True)
         sys.exit(1)
 
+    s = service.get_stats()
     click.echo("Knowledge Store Statistics")
     click.echo("-" * 30)
 
-    # Count by kind
-    by_kind: dict[str, int] = {}
-    for entity in knowledge.entities.values():
-        kind = entity.kind.value
-        by_kind[kind] = by_kind.get(kind, 0) + 1
-
-    click.echo(f"\nTotal Entities: {len(knowledge.entities)}")
-    for kind, count in sorted(by_kind.items()):
+    click.echo(f"\nTotal Entities: {s['total_entities']}")
+    for kind, count in sorted(s['entities_by_kind'].items()):
         click.echo(f"  {kind}: {count}")
 
-    click.echo(f"\nTotal Relationships: {len(knowledge.relationships)}")
-
-    # Relationship types
-    rel_types: dict[str, int] = {}
-    for rel in knowledge.relationships:
-        kind = rel.kind.value
-        rel_types[kind] = rel_types.get(kind, 0) + 1
-
-    for kind, count in sorted(rel_types.items()):
+    click.echo(f"\nTotal Relationships: {s['total_relationships']}")
+    for kind, count in sorted(s['relationships_by_type'].items()):
         click.echo(f"  {kind}: {count}")
 
+
+@cli.command()
+@click.option(
+    "--store", "-s",
+    type=click.Path(exists=True),
+    default=".",
+    help="Path to knowledge store file or directory",
+)
+@click.option(
+    "--host",
+    default="127.0.0.1",
+    help="Host to bind the server to (default: 127.0.0.1)",
+)
+@click.option(
+    "--port",
+    default=8000,
+    help="Port to bind the server to (default: 8000)",
+)
+def server(store: str, host: str, port: int) -> None:
+    """Start the KnowCode intelligence server."""
+    from knowcode.server.main import start_server
+    
+    click.echo(f"Starting KnowCode server on {host}:{port}")
+    click.echo(f"Using knowledge store: {store}")
+    
+    start_server(host=host, port=port, store_path=store)
 
 
 @cli.command()
@@ -349,11 +305,13 @@ def history(target: Optional[str], store: str, limit: int) -> None:
     TARGET: Optional entity ID or search pattern. If omitted, shows commit log.
     """
     try:
-        knowledge = KnowledgeStore.load(store)
+        service = KnowCodeService(store_path=store)
     except FileNotFoundError:
         click.echo("Error: Knowledge store not found. Run 'knowcode analyze' first.", err=True)
         sys.exit(1)
         
+    knowledge = service.store
+    
     if not target:
         # Show recent commits
         commits = knowledge.get_entities_by_kind("commit")

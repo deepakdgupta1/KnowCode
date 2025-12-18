@@ -227,10 +227,14 @@ class JavaScriptParser(TreeSitterParser):
         return entity, relationships
 
     def _walk_for_calls(self, node, source_id):
+        """Recursive walk to find call_expression.
+        
+        Note: We use a cursor walk here which is significantly more performant 
+        than recursively creating Node objects for every child in the tree.
+        """
         rels = []
-        # Recursive walk to find call_expression
-        # node.walk() is efficient
         cursor = node.walk()
+
         visited_children = False
         
         while True:

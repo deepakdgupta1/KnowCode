@@ -49,6 +49,12 @@ class KnowledgeStore:
 
     def save(self, path: str | Path) -> None:
         """Save knowledge store to JSON file.
+        
+        The format includes:
+        - version: Schema version for compatibility.
+        - metadata: Global scan stats and errors.
+        - entities: Dictionary mapping Entity IDs to their full data.
+        - relationships: List of all edges in the graph.
 
         Args:
             path: Path to save file (directory or file).

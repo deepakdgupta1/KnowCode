@@ -42,7 +42,10 @@ knowcode context "MyClass.important_method"
 # 4. Export documentation
 knowcode export -o docs/
 
-# 5. View statistics
+# 5. Start the intelligence server
+knowcode server --port 8080
+
+# 6. View statistics
 knowcode stats
 ```
 
@@ -110,6 +113,23 @@ Show statistics about the knowledge store.
 ```bash
 knowcode stats [--store <path>]
 ```
+
+### `server`
+Start the FastAPI intelligence server. This is the preferred way for locally hosted AI agents (IDEs) to interact with KnowCode.
+
+```bash
+knowcode server [--host <host>] [--port <port>] [--store <path>]
+```
+
+**Example:**
+```bash
+knowcode server --port 8080
+```
+
+Once running, you can access endpoints like:
+- `GET /api/v1/context?target=MyClass`
+- `GET /api/v1/search?q=parser`
+- `POST /api/v1/reload` (to refresh data after a new `analyze` run)
 
 ## Supported Languages (MVP)
 
@@ -204,9 +224,11 @@ See [KnowCode.md](KnowCode.md) for the full vision. The MVP focuses on:
 - ✅ v1.2: Git history integration, temporal tracking
 - ✅ v1.3: Token budget optimization, priority ranking
 - ✅ v1.4: Runtime signal integration
+- ✅ v2.0: Intelligence Server mode (local API for local IDE agents)
 
 **Future releases:**
-- v2.0: Server mode, team sharing, enterprise features
+- v2.1: Semantic search with embeddings
+- v3.0: Team sharing & Enterprise features (RBAC, SSO, etc.)
 
 ## License
 
