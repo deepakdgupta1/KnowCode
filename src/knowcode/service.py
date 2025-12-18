@@ -144,7 +144,11 @@ class KnowCodeService:
         if not entity:
             return None
         
+        # Convert to dictionary (using internal helper or creating one)
+        # We can reuse the knowledge store's _entity_to_dict if exposed, 
+        # or just construct it manually here to be safe and explicit.
         from dataclasses import asdict
+
         return {
             "id": entity.id,
             "kind": entity.kind.value,
