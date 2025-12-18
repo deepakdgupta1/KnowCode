@@ -120,3 +120,29 @@
 * update changelog [skip ci] (`c4b5e02`)
 * update changelog [skip ci] (`de306d0`)
 * Enhance README with CI/CD badge, updated Python version support, refined architecture descriptions, and an updated release roadmap. (`754fa6b`)
+
+
+---
+
+## [Unreleased] - 2025-12-18
+
+**Focus:** Feature Development
+
+### 🧠 Temporal Context & Intent
+> *Auto-generated: Add context about why these changes were made.*
+
+### 🏗️ Architectural Impact
+> *Auto-generated: Describe high-level architectural shifts.*
+
+### 📝 Delta Changes
+
+#### 🚀 Features
+* Introduce KnowCode server with a new service layer and API endpoints, add server tests, and update project roadmap documentation. (`9af0e3f`)
+
+#### 🔧 Maintenance
+* ignore CHANGELOG.md (`82189f9`)
+
+#### 📚 Documentation
+* Add comments explaining entity to dictionary conversion logic. (`578f886`)
+* update changelog [skip ci] (`4e6f30f`)
+* update changelog [skip ci] (`c4b5e02`)
