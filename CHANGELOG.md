@@ -217,3 +217,29 @@
 * update changelog [skip ci] (`fb54235`)
 * update changelog [skip ci] (`8a63644`)
 * Add comments explaining entity to dictionary conversion logic. (`578f886`)
+
+
+---
+
+## [Unreleased] - 2025-12-20
+
+**Focus:** Feature Development
+
+### 🧠 Temporal Context & Intent
+> *Auto-generated: Add context about why these changes were made.*
+
+### 🏗️ Architectural Impact
+> *Auto-generated: Describe high-level architectural shifts.*
+
+### 📝 Delta Changes
+
+#### 🚀 Features
+* Enhance chunking metadata and add comprehensive docstrings to core components. (`30c0fb1`)
+* Introduce core RAG system for code, including agent, indexer, chunker, embedding, and vector store components, with updated service and API integrations. (`6bf3194`)
+
+#### 📚 Documentation
+* update changelog [skip ci] (`9bc659c`)
+* update changelog [skip ci] (`fb54235`)
+
+#### 🔨 Refactoring
+* Reorganize codebase into modular subpackages for core components and introduce new tokenizer utility. (`f29933b`)
