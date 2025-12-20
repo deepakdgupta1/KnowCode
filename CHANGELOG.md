@@ -297,3 +297,29 @@
 
 #### ✅ Testing
 * Add unit tests for retrieval, analysis, LLM, CLI, storage, models, utils, API, and indexing components. Reorganize all tests into appropriate folder structure. (`e9b4a24`)
+
+
+---
+
+## [Unreleased] - 2025-12-20
+
+**Focus:** Bug Fixes
+
+### 🧠 Temporal Context & Intent
+> *Auto-generated: Add context about why these changes were made.*
+
+### 🏗️ Architectural Impact
+> *Auto-generated: Describe high-level architectural shifts.*
+
+### 📝 Delta Changes
+
+#### 🐛 Fixes
+* Fixed some test suite bugs (`efc66c1`)
+
+#### 📚 Documentation
+* update changelog [skip ci] (`bdba35c`)
+* update changelog [skip ci] (`3ea35e1`)
+
+#### 🔨 Refactoring
+* renamed models.py to data_models.py and updated the dependencies (`91cb347`)
+* Introduce new module-specific unit tests for various components and remove outdated general test files. (`f083e11`)
