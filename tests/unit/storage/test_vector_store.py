@@ -18,7 +18,8 @@ def test_vector_store_save_load(tmp_path) -> None:
     path = tmp_path / "vectors"
     store.save(path)
 
-    loaded = VectorStore(dimension=2, index_path=path)
+    loaded = VectorStore(dimension=2)
+    loaded.load(path)
     assert loaded.id_map
     results = loaded.search([1.0, 0.0], limit=1)
     assert results[0][0] == "c1"

@@ -8,7 +8,7 @@ from knowcode.models import CodeChunk
 
 
 class DummySearchEngine:
-    def search(self, _query, limit=5, expand_deps=True):
+    def search(self, query, limit=5, expand_deps=True, **_kwargs):
         return [CodeChunk(id="c1", entity_id="e1", content="hi", tokens=["hi"])]
 
 
