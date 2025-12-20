@@ -1,4 +1,27 @@
-## [Unreleased] - 2025-12-17
+## [2.1.0] - 2025-12-19
+
+**Focus:** Semantic Search & Retrieval Quality
+
+### 🚀 Features
+* **Semantic Search**: Implemented dense vector retrieval using FAISS and OpenAI embeddings.
+* **Hybrid Retrieval**: Combined BM25 sparse search with dense embeddings using Reciprocal Rank Fusion (RRF).
+* **Code Chunking**: Added intelligent code chunking for modules, imports, and entities.
+* **Watch Mode**: Integrated file system monitoring for real-time background re-indexing.
+* **Dependency Expansion**: Improved context quality by automatically including caller/callee dependencies in search results.
+* **New CLI Commands**: Added `knowcode index` and `knowcode semantic-search`.
+* **API Enhancement**: Added `/api/v1/context/query` endpoint for rich semantic queries.
+
+### 🐛 Fixes
+* Fixed `VectorStore` persistence bug where `id_map` was reset after loading.
+* Fixed `Chunker` instability issue where collected chunks were reset mid-parsing.
+* Resolved stubbed implementation in `completeness.py`.
+
+### 🏗️ Architectural Impact
+* Introduced a new retrieval pipeline: `Indexer` -> `ChunkRepository` -> `VectorStore` -> `HybridIndex` -> `SearchEngine`.
+* Added background processing and file monitoring for improved live updates.
+
+---
+
 
 **Focus:** Feature Development
 

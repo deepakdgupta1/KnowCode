@@ -74,6 +74,41 @@ def analyze(directory: str, output: str, ignore: tuple[str, ...], temporal: bool
 
 
 @cli.command()
+@click.argument("directory", type=click.Path(exists=True, file_okay=False))
+@click.option(
+    "--output",
+    "-o",
+    type=click.Path(),
+    default="knowcode_index",
+    help="Output directory for index (default: knowcode_index)",
+)
+def index(directory: str, output: str) -> None:
+    """Build semantic search index for a codebase.
+
+    DIRECTORY: Path to the codebase to index.
+    """
+    from knowcode.embedding import OpenAIEmbeddingProvider
+    from knowcode.indexer import Indexer
+    from knowcode.models import EmbeddingConfig
+
+    click.echo(f"Indexing: {directory}")
+
+    try:
+        config = EmbeddingConfig()
+        provider = OpenAIEmbeddingProvider(config)
+        indexer = Indexer(provider)
+
+        count = indexer.index_directory(directory)
+        indexer.save(output)
+
+        click.echo(f"✓ Indexing complete! Created {count} chunks.")
+        click.echo(f"  Saved to: {output}")
+    except Exception as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
+
+@cli.command()
 @click.argument("query_type", type=click.Choice(["callers", "callees", "deps", "search"]))
 @click.argument("target")
 @click.option(
@@ -138,6 +173,71 @@ def query(query_type: str, target: str, store: str, as_json: bool) -> None:
                 elif "kind" in r:
                     extra = f" [{r['kind']}]"
                 click.echo(f"  • {name}{extra}")
+
+
+@cli.command("semantic-search")
+@click.argument("query_text", nargs=-1, required=True)
+@click.option(
+    "--index",
+    "-i",
+    type=click.Path(exists=True, file_okay=False),
+    default="knowcode_index",
+    help="Path to index directory (default: knowcode_index)",
+)
+@click.option(
+    "--store",
+    "-s",
+    type=click.Path(exists=True),
+    default=".",
+    help="Path to knowledge store (directory or file)",
+)
+@click.option(
+    "--limit", "-l", type=int, default=5, help="Number of results (default: 5)"
+)
+def semantic_search(query_text: tuple[str], index: str, store: str, limit: int) -> None:
+    """Search codebase using semantic similarity.
+
+    QUERY_TEXT: The search query.
+    """
+    from knowcode.embedding import OpenAIEmbeddingProvider
+    from knowcode.hybrid_index import HybridIndex
+    from knowcode.indexer import Indexer
+    from knowcode.models import EmbeddingConfig
+    from knowcode.search_engine import SearchEngine
+
+    question = " ".join(query_text)
+    click.echo(f"Searching for: '{question}'...")
+
+    try:
+        service = KnowCodeService(store_path=store)
+        
+        config = EmbeddingConfig()
+        provider = OpenAIEmbeddingProvider(config)
+        indexer = Indexer(provider)
+        indexer.load(index)
+        
+        hybrid_index = HybridIndex(indexer.chunk_repo, indexer.vector_store)
+        engine = SearchEngine(
+            indexer.chunk_repo, provider, hybrid_index, service.store
+        )
+
+        results = engine.search(question, limit=limit)
+
+        if not results:
+            click.echo("No relevant code found.")
+        else:
+            for i, chunk in enumerate(results):
+                click.echo(f"\n[{i+1}] {chunk.entity_id}")
+                content = chunk.content
+                if len(content) > 300:
+                    content = content[:300] + "..."
+                click.echo("-" * 40)
+                click.echo(content)
+                click.echo("-" * 40)
+
+    except Exception as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
 
 
 @cli.command()
@@ -275,14 +375,21 @@ def stats(store: str) -> None:
     default=8000,
     help="Port to bind the server to (default: 8000)",
 )
-def server(store: str, host: str, port: int) -> None:
+@click.option(
+    "--watch",
+    is_flag=True,
+    help="Watch for file changes and re-index automatically",
+)
+def server(store: str, host: str, port: int, watch: bool) -> None:
     """Start the KnowCode intelligence server."""
     from knowcode.server.main import start_server
     
     click.echo(f"Starting KnowCode server on {host}:{port}")
     click.echo(f"Using knowledge store: {store}")
+    if watch:
+        click.echo("Watch mode enabled.")
     
-    start_server(host=host, port=port, store_path=store)
+    start_server(host=host, port=port, store_path=store, watch=watch)
 
 
 @cli.command()
@@ -370,6 +477,47 @@ def history(target: Optional[str], store: str, limit: int) -> None:
         for _, commit, stats in changes[:limit]:
             date = commit.metadata.get("date", "")
             click.echo(f"  {date} {commit.name} {stats}: {commit.docstring.splitlines()[0]}")
+
+
+@cli.command()
+@click.argument("query_text", nargs=-1, required=True)
+@click.option(
+    "--store", "-s",
+    type=click.Path(exists=True),
+    default=".",
+    help="Path to knowledge store file or directory",
+)
+@click.option(
+    "--model", "-m",
+    default="gpt-4o",
+    help="OpenAI model to use (default: gpt-4o)",
+)
+def ask(query_text: tuple[str], store: str, model: str) -> None:
+    """Ask a question about the codebase using AI.
+    
+    QUERY_TEXT: The question to ask.
+    """
+    from knowcode.agent import Agent
+    
+    question = " ".join(query_text)
+    
+    try:
+        service = KnowCodeService(store_path=store)
+    except FileNotFoundError:
+        click.echo("Error: Knowledge store not found. Run 'knowcode analyze' first.", err=True)
+        sys.exit(1)
+        
+    try:
+        agent = Agent(service, model=model)
+        click.echo(f"🤔 Asking KnowCode: '{question}'...")
+        answer = agent.answer(question)
+        click.echo("\n" + answer)
+    except ValueError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+    except Exception as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -31,6 +31,21 @@ class ContextResponse(BaseModel):
     truncated: bool
     included_entities: list[str]
 
+class ChunkResult(BaseModel):
+    id: str
+    content: str
+    entity_id: str
+    score: float
+
+class QueryRequest(BaseModel):
+    query: str
+    limit: Optional[int] = 5
+    expand_deps: Optional[bool] = True
+
+class QueryResponse(BaseModel):
+    chunks: list[ChunkResult]
+    total: int
+
 @router.get("/health", summary="Health Check")
 def health() -> dict[str, str]:
     """Check if the server is running and reachable."""
@@ -40,6 +55,33 @@ def health() -> dict[str, str]:
 def get_stats(service: KnowCodeService = Depends(get_service)) -> dict[str, Any]:
     """Returns statistics about the number of entities and relationships in the graph."""
     return service.get_stats()
+
+@router.post("/context/query", response_model=QueryResponse, summary="Query Codebase Semantically")
+def query_context(
+    request: QueryRequest,
+    service: KnowCodeService = Depends(get_service)
+) -> QueryResponse:
+    """Execute semantic search and return relevant code chunks with context."""
+    from knowcode.search_engine import SearchEngine
+    
+    engine = service.get_search_engine()
+    chunks = engine.search(
+        query=request.query,
+        limit=request.limit or 5,
+        expand_deps=request.expand_deps if request.expand_deps is not None else True
+    )
+    
+    results = [
+        ChunkResult(
+            id=c.id,
+            content=c.content,
+            entity_id=c.entity_id,
+            score=0.0 # Score not easily exposed from engine currently
+        )
+        for c in chunks
+    ]
+    
+    return QueryResponse(chunks=results, total=len(results))
 
 @router.get("/search", response_model=list[SearchResult], summary="Search Entities")
 def search(

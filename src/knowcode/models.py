@@ -113,3 +113,36 @@ class ParseResult:
     entities: list[Entity]
     relationships: list[Relationship]
     errors: list[str] = field(default_factory=list)
+
+
+@dataclass
+class ChunkingConfig:
+    """Configuration for code chunking."""
+
+    max_chunk_size: int = 1000
+    overlap: int = 100
+    include_signatures: bool = True
+    include_docstrings: bool = True
+
+
+@dataclass
+class CodeChunk:
+    """A chunk of code for indexing and retrieval."""
+
+    id: str  # Unique chunk ID: entity_id::chunk_index
+    entity_id: str  # Parent entity ID
+    content: str  # Raw text content
+    tokens: list[str] = field(default_factory=list)  # BM25 tokens
+    embedding: Optional[list[float]] = None  # Dense vector
+    metadata: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class EmbeddingConfig:
+    """Configuration for embedding generation."""
+
+    provider: str = "openai"  # "openai", "sentence-transformers", "local"
+    model_name: str = "text-embedding-3-small"
+    dimension: int = 1536
+    batch_size: int = 100
+    normalize: bool = True  # Normalize vectors for cosine similarity

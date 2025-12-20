@@ -42,10 +42,16 @@ knowcode context "MyClass.important_method"
 # 4. Export documentation
 knowcode export -o docs/
 
-# 5. Start the intelligence server
-knowcode server --port 8080
+# 5. Build semantic search index
+knowcode index src/
 
-# 6. View statistics
+# 6. Perform semantic search
+knowcode semantic-search "How does parsing work?"
+
+# 7. Start the intelligence server with watch mode
+knowcode server --port 8080 --watch
+
+# 8. View statistics
 knowcode stats
 ```
 
@@ -114,11 +120,31 @@ Show statistics about the knowledge store.
 knowcode stats [--store <path>]
 ```
 
+### `index`
+Build a semantic search index for your codebase.
+
+```bash
+knowcode index <directory> [--output <path>]
+```
+
+### `semantic-search`
+Perform a natural language search against the semantic index.
+
+```bash
+knowcode semantic-search <query> [--index <path>] [--limit <n>]
+```
+
+**Example:**
+```bash
+knowcode semantic-search "Where is the graph built?"
+```
+```
+
 ### `server`
 Start the FastAPI intelligence server. This is the preferred way for locally hosted AI agents (IDEs) to interact with KnowCode.
 
 ```bash
-knowcode server [--host <host>] [--port <port>] [--store <path>]
+knowcode server [--host <host>] [--port <port>] [--store <path>] [--watch]
 ```
 
 **Example:**
@@ -128,7 +154,8 @@ knowcode server --port 8080
 
 Once running, you can access endpoints like:
 - `GET /api/v1/context?target=MyClass`
-- `GET /api/v1/search?q=parser`
+- `GET /api/v1/search?q=parser` `(lexical search)`
+- `POST /api/v1/context/query` `(semantic search)`
 - `POST /api/v1/reload` (to refresh data after a new `analyze` run)
 
 ## Supported Languages (MVP)
@@ -147,8 +174,9 @@ KnowCode follows a layered architecture:
 2. **Parsers** - Language-specific parsing (Python AST, Tree-sitter for others)
 3. **Graph Builder** - Constructs semantic graph with entities and relationships
 4. **Knowledge Store** - In-memory graph with JSON persistence
-5. **Context Synthesizer** - Generates token-efficient context bundles with priority ranking
-6. **CLI** - User interface for all operations
+5. **Indexer** - Vector embedding and hybrid retrieval engine (FAISS + BM25)
+6. **Context Synthesizer** - Generates token-efficient context bundles with priority ranking
+7. **CLI** - User interface for all operations
 
 See [KnowCode.md](KnowCode.md) for the complete reference architecture.
 
@@ -225,9 +253,9 @@ See [KnowCode.md](KnowCode.md) for the full vision. The MVP focuses on:
 - ✅ v1.3: Token budget optimization, priority ranking
 - ✅ v1.4: Runtime signal integration
 - ✅ v2.0: Intelligence Server mode (local API for local IDE agents)
+- ✅ v2.1: Semantic search with embeddings, hybrid retrieval, and watch mode
 
 **Future releases:**
-- v2.1: Semantic search with embeddings
 - v3.0: Team sharing & Enterprise features (RBAC, SSO, etc.)
 
 ## License

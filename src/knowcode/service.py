@@ -8,6 +8,7 @@ from typing import Any, Optional
 from knowcode.context_synthesizer import ContextSynthesizer
 from knowcode.graph_builder import GraphBuilder
 from knowcode.knowledge_store import KnowledgeStore
+from knowcode.models import EmbeddingConfig
 
 
 class KnowCodeService:
@@ -21,6 +22,8 @@ class KnowCodeService:
         """
         self.store_path = Path(store_path)
         self._store: Optional[KnowledgeStore] = None
+        self._search_engine: Optional["SearchEngine"] = None
+        self._indexer: Optional["Indexer"] = None
 
     @property
     def store(self) -> KnowledgeStore:
@@ -28,6 +31,40 @@ class KnowCodeService:
         if self._store is None:
             self._store = KnowledgeStore.load(self.store_path)
         return self._store
+
+    def get_indexer(self, index_path: Optional[str | Path] = None) -> "Indexer":
+        """Get or create the indexer."""
+        if self._indexer is None:
+            from knowcode.embedding import OpenAIEmbeddingProvider
+            from knowcode.indexer import Indexer
+            
+            config = EmbeddingConfig()
+            provider = OpenAIEmbeddingProvider(config)
+            self._indexer = Indexer(provider)
+            
+            if index_path:
+                self._indexer.load(Path(index_path))
+            elif (self.store_path.parent / "knowcode_index").exists():
+                self._indexer.load(self.store_path.parent / "knowcode_index")
+                
+        return self._indexer
+
+    def get_search_engine(self, index_path: Optional[str | Path] = None) -> "SearchEngine":
+        """Get or create the search engine."""
+        if self._search_engine is None:
+            from knowcode.hybrid_index import HybridIndex
+            from knowcode.search_engine import SearchEngine
+            
+            indexer = self.get_indexer(index_path)
+            hybrid_index = HybridIndex(indexer.chunk_repo, indexer.vector_store)
+            
+            self._search_engine = SearchEngine(
+                indexer.chunk_repo, 
+                indexer.embedding_provider, 
+                hybrid_index, 
+                self.store
+            )
+        return self._search_engine
 
     def analyze(
         self,
@@ -108,12 +145,20 @@ class KnowCodeService:
             kind = rel.kind.value
             rel_types[kind] = rel_types.get(kind, 0) + 1
 
-        return {
+        stats = {
             "total_entities": len(self.store.entities),
             "entities_by_kind": by_kind,
             "total_relationships": len(self.store.relationships),
             "relationships_by_type": rel_types,
         }
+        
+        # Add index stats if indexer is loaded
+        if self._indexer:
+            stats["total_chunks"] = len(self._indexer.chunk_repo._chunks)
+            if hasattr(self._indexer.vector_store, "index") and self._indexer.vector_store.index:
+                stats["vector_index_size"] = self._indexer.vector_store.index.ntotal
+                
+        return stats
 
     def get_callers(self, entity_id: str) -> list[dict[str, Any]]:
         """Get callers of an entity."""

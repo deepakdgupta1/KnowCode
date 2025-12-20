@@ -135,6 +135,7 @@ Entity:
   id: UUID
   kind: function | class | module | config_key | feature_flag | api_endpoint
   source_location: Location
+  embeddings: vector (1536d)
   confidence: float (0.0-1.0)
   provenance: static_analysis | runtime_trace | llm_inference | human_annotation
   created_at: timestamp
@@ -160,6 +161,44 @@ Entity:
 * Impact analysis
 * Query & reasoning engines
 * Context synthesis
+
+---
+
+---
+
+## **4a. [NEW] Semantic Search & Indexing Layer (v2.1)**
+
+### **Purpose**
+
+Enable **retrieval-augmented generation (RAG)** by indexing code semantics in a high-dimensional vector space alongside traditional lexical search.
+
+### **Responsibilities**
+
+* **Chunking**: Break code into logical units (functions, classes, module headers)
+* **Embedding**: Generate dense vector representations (e.g., OpenAI text-embedding-3-small)
+* **Vector Storage**: Persist vectors for fast nearest-neighbor search
+* **Hybrid Retrieval**: Combine dense (vector) and sparse (BM25) search results
+* **Reranking**: Optimize results based on metadata, recency, and completeness
+* **[HARDENED]** Sliding window chunking with overlap
+* **[HARDENED]** Real-time incremental indexing (Watch Mode)
+* **[HARDENED]** Dependency-aware result expansion (Completeness)
+
+### **Inputs**
+
+* Code entities from Semantic Graph
+* Raw source code
+
+### **Outputs**
+
+* FAISS Vector Index
+* In-memory Chunk Repository
+* Ranked search results
+
+### **Downstream Consumers**
+
+* API `/context/query` endpoint
+* CLI `semantic-search` command
+* Context Synthesis Layer
 
 ---
 
