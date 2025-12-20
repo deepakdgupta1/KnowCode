@@ -243,3 +243,29 @@
 
 #### 🔨 Refactoring
 * Reorganize codebase into modular subpackages for core components and introduce new tokenizer utility. (`f29933b`)
+
+
+---
+
+## [Unreleased] - 2025-12-20
+
+**Focus:** Routine Maintenance
+
+### 🧠 Temporal Context & Intent
+> *Auto-generated: Add context about why these changes were made.*
+
+### 🏗️ Architectural Impact
+> *Auto-generated: Describe high-level architectural shifts.*
+
+### 📝 Delta Changes
+
+#### 📚 Documentation
+* update changelog [skip ci] (`83739d8`)
+* update changelog [skip ci] (`9bc659c`)
+
+#### 🔨 Refactoring
+* Introduce new module-specific unit tests for various components and remove outdated general test files. (`f083e11`)
+* Reorganize codebase into modular subpackages for core components and introduce new tokenizer utility. (`f29933b`)
+
+#### ✅ Testing
+* Add unit tests for retrieval, analysis, LLM, CLI, storage, models, utils, API, and indexing components. Reorganize all tests into appropriate folder structure. (`e9b4a24`)
