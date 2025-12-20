@@ -1,7 +1,7 @@
 """Tests for Java parser."""
 
 from pathlib import Path
-from knowcode.models import EntityKind, RelationshipKind
+from knowcode.data_models import EntityKind, RelationshipKind
 from knowcode.parsers.java_parser import JavaParser
 
 

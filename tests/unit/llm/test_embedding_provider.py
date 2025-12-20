@@ -1,7 +1,7 @@
 """Unit tests for embedding providers."""
 
 from knowcode.llm.embedding import OpenAIEmbeddingProvider
-from knowcode.models import EmbeddingConfig
+from knowcode.data_models import EmbeddingConfig
 
 
 def test_embedding_provider_empty_batch() -> None:

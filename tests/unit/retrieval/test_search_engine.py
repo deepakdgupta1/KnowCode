@@ -1,6 +1,6 @@
 """Unit tests for search engine dependency expansion."""
 
-from knowcode.models import CodeChunk, Entity, EntityKind, Location, Relationship, RelationshipKind
+from knowcode.data_models import CodeChunk, Entity, EntityKind, Location, Relationship, RelationshipKind
 from knowcode.retrieval.search_engine import SearchEngine
 from knowcode.storage.chunk_repository import InMemoryChunkRepository
 from knowcode.storage.knowledge_store import KnowledgeStore

@@ -6,7 +6,7 @@ from pathlib import Path
 from knowcode.indexing.indexer import Indexer
 from knowcode.retrieval.search_engine import SearchEngine
 from knowcode.llm.embedding import OpenAIEmbeddingProvider
-from knowcode.models import EmbeddingConfig, CodeChunk
+from knowcode.data_models import EmbeddingConfig, CodeChunk
 from knowcode.retrieval.hybrid_index import HybridIndex
 from knowcode.storage.chunk_repository import InMemoryChunkRepository
 from knowcode.storage.vector_store import VectorStore

@@ -7,7 +7,7 @@ from knowcode.retrieval.completeness import expand_dependencies
 from knowcode.llm.embedding import EmbeddingProvider
 from knowcode.retrieval.hybrid_index import HybridIndex
 from knowcode.storage.knowledge_store import KnowledgeStore
-from knowcode.models import CodeChunk
+from knowcode.data_models import CodeChunk
 from knowcode.retrieval.reranker import Reranker
 
 

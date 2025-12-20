@@ -2,5 +2,5 @@
 
 __version__ = "0.1.0"
 
-from knowcode.models import CodeChunk, EmbeddingConfig
+from knowcode.data_models import CodeChunk, EmbeddingConfig
 from knowcode.storage.chunk_repository import ChunkRepository, InMemoryChunkRepository

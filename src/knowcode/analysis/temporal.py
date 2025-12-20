@@ -6,7 +6,7 @@ from pathlib import Path
 
 from git import Repo
 
-from knowcode.models import (
+from knowcode.data_models import (
     Entity,
     EntityKind,
     Location,

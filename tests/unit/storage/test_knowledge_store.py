@@ -2,7 +2,7 @@
 
 import json
 
-from knowcode.models import Entity, EntityKind, Location, Relationship, RelationshipKind
+from knowcode.data_models import Entity, EntityKind, Location, Relationship, RelationshipKind
 from knowcode.storage.knowledge_store import KnowledgeStore
 
 

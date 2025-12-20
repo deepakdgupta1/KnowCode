@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from knowcode.api import api
-from knowcode.models import CodeChunk
+from knowcode.data_models import CodeChunk
 
 
 class DummySearchEngine:

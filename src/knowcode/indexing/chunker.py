@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from knowcode.models import ChunkingConfig, CodeChunk, ParseResult, Entity, EntityKind
+from knowcode.data_models import ChunkingConfig, CodeChunk, ParseResult, Entity, EntityKind
 from knowcode.utils.tokenizer import tokenize_code
 from knowcode.utils.logger import get_logger
 

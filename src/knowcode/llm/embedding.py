@@ -5,7 +5,7 @@ import os
 from typing import Optional
 
 from openai import OpenAI
-from knowcode.models import EmbeddingConfig
+from knowcode.data_models import EmbeddingConfig
 
 
 class EmbeddingProvider(ABC):

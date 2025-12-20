@@ -7,7 +7,7 @@ import ast
 from pathlib import Path
 from typing import Optional
 
-from knowcode.models import (
+from knowcode.data_models import (
     Entity,
     EntityKind,
     Location,

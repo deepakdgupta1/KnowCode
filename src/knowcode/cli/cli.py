@@ -8,7 +8,7 @@ from typing import Any, Optional
 import click
 
 from knowcode import __version__
-from knowcode.models import EntityKind, RelationshipKind
+from knowcode.data_models import EntityKind, RelationshipKind
 from knowcode.service import KnowCodeService
 from knowcode.storage.knowledge_store import KnowledgeStore
 

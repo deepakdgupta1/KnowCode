@@ -4,7 +4,7 @@ import pytest
 from git import Repo, Actor
 
 from knowcode.analysis.temporal import TemporalAnalyzer
-from knowcode.models import EntityKind, RelationshipKind
+from knowcode.data_models import EntityKind, RelationshipKind
 
 @pytest.fixture
 def git_repo(tmp_path):

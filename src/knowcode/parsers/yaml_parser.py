@@ -6,7 +6,7 @@ from typing import Any
 
 import yaml
 
-from knowcode.models import (
+from knowcode.data_models import (
     Entity,
     EntityKind,
     Location,

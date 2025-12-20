@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from knowcode.indexing.graph_builder import GraphBuilder
-from knowcode.models import (
+from knowcode.data_models import (
     Entity,
     EntityKind,
     Location,

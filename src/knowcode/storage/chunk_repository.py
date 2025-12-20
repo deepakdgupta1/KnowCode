@@ -3,7 +3,7 @@
 from abc import ABC, abstractmethod
 from typing import Optional
 
-from knowcode.models import CodeChunk
+from knowcode.data_models import CodeChunk
 
 
 class ChunkRepository(ABC):

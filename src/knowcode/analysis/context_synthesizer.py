@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from knowcode.storage.knowledge_store import KnowledgeStore
-from knowcode.models import Entity, EntityKind
+from knowcode.data_models import Entity, EntityKind
 from knowcode.utils.token_counter import TokenCounter
 
 

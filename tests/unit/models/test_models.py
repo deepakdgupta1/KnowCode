@@ -1,6 +1,6 @@
 """Unit tests for core models."""
 
-from knowcode.models import CodeChunk
+from knowcode.data_models import CodeChunk
 
 
 def test_code_chunk_defaults() -> None:

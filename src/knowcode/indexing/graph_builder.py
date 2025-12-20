@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from knowcode.models import Entity, ParseResult, Relationship
+from knowcode.data_models import Entity, ParseResult, Relationship
 from knowcode.parsers import MarkdownParser, PythonParser, YamlParser
 from knowcode.parsers.javascript_parser import JavaScriptParser
 from knowcode.parsers.java_parser import JavaParser

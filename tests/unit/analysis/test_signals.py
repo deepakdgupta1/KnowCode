@@ -2,7 +2,7 @@
 
 import pytest
 from knowcode.analysis.signals import CoverageProcessor
-from knowcode.models import EntityKind, RelationshipKind
+from knowcode.data_models import EntityKind, RelationshipKind
 
 @pytest.fixture
 def coverage_xml(tmp_path):

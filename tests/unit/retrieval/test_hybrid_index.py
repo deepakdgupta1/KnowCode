@@ -1,6 +1,6 @@
 """Unit tests for hybrid retrieval scoring."""
 
-from knowcode.models import CodeChunk
+from knowcode.data_models import CodeChunk
 from knowcode.retrieval.hybrid_index import HybridIndex
 
 

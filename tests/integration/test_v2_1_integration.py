@@ -3,7 +3,7 @@
 import pytest
 from unittest.mock import MagicMock
 from pathlib import Path
-from knowcode.models import EmbeddingConfig
+from knowcode.data_models import EmbeddingConfig
 from knowcode.llm.embedding import EmbeddingProvider
 from knowcode.indexing.indexer import Indexer
 from knowcode.storage.chunk_repository import InMemoryChunkRepository

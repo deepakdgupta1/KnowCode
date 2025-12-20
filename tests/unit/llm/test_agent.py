@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from knowcode.llm.agent import Agent
-from knowcode.models import Entity, EntityKind, Location
+from knowcode.data_models import Entity, EntityKind, Location
 
 
 @pytest.fixture

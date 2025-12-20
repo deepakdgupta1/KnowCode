@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from knowcode.models import (
+from knowcode.data_models import (
     Entity,
     EntityKind,
     Location,

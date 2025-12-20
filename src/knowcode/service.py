@@ -8,7 +8,7 @@ from typing import Any, Optional
 from knowcode.analysis.context_synthesizer import ContextSynthesizer
 from knowcode.indexing.graph_builder import GraphBuilder
 from knowcode.storage.knowledge_store import KnowledgeStore
-from knowcode.models import EmbeddingConfig
+from knowcode.data_models import EmbeddingConfig
 
 
 class KnowCodeService:

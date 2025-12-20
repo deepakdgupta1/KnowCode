@@ -7,7 +7,7 @@ from typing import Any, Optional
 from tree_sitter import Parser
 import tree_sitter_languages
 
-from knowcode.models import (
+from knowcode.data_models import (
     Entity,
     EntityKind,
     Location,

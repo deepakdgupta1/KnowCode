@@ -3,7 +3,7 @@
 from unittest.mock import MagicMock
 from knowcode.utils.token_counter import TokenCounter
 from knowcode.analysis.context_synthesizer import ContextSynthesizer
-from knowcode.models import Entity, EntityKind, Location
+from knowcode.data_models import Entity, EntityKind, Location
 
 def test_token_counter():
     """Test functionality of TokenCounter."""

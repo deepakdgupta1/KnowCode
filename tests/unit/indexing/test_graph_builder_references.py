@@ -1,7 +1,7 @@
 """Unit tests for graph builder reference resolution."""
 
 from knowcode.indexing.graph_builder import GraphBuilder
-from knowcode.models import Entity, EntityKind, Location, Relationship, RelationshipKind
+from knowcode.data_models import Entity, EntityKind, Location, Relationship, RelationshipKind
 
 
 def test_reference_resolution() -> None:
