@@ -169,3 +169,27 @@
 * Add comments explaining entity to dictionary conversion logic. (`578f886`)
 * update changelog [skip ci] (`4e6f30f`)
 * update changelog [skip ci] (`c4b5e02`)
+
+
+---
+
+## [Unreleased] - 2025-12-20
+
+**Focus:** Feature Development
+
+### 🧠 Temporal Context & Intent
+> *Auto-generated: Add context about why these changes were made.*
+
+### 🏗️ Architectural Impact
+> *Auto-generated: Describe high-level architectural shifts.*
+
+### 📝 Delta Changes
+
+#### 🚀 Features
+* Introduce core RAG system for code, including agent, indexer, chunker, embedding, and vector store components, with updated service and API integrations. (`6bf3194`)
+* Introduce KnowCode server with a new service layer and API endpoints, add server tests, and update project roadmap documentation. (`9af0e3f`)
+
+#### 📚 Documentation
+* update changelog [skip ci] (`8a63644`)
+* Add comments explaining entity to dictionary conversion logic. (`578f886`)
+* update changelog [skip ci] (`4e6f30f`)
