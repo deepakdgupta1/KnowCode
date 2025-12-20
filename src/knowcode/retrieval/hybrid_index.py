@@ -2,10 +2,10 @@
 
 from typing import Optional
 
-from knowcode.chunk_repository import ChunkRepository
+from knowcode.storage.chunk_repository import ChunkRepository
 from knowcode.models import CodeChunk
-from knowcode.tokenizer import tokenize_code
-from knowcode.vector_store import VectorStore
+from knowcode.utils.tokenizer import tokenize_code
+from knowcode.storage.vector_store import VectorStore
 
 
 class HybridIndex:

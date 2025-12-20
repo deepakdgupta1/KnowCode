@@ -2,13 +2,13 @@
 
 from typing import Optional
 
-from knowcode.chunk_repository import ChunkRepository
-from knowcode.completeness import expand_dependencies
-from knowcode.embedding import EmbeddingProvider
-from knowcode.hybrid_index import HybridIndex
-from knowcode.knowledge_store import KnowledgeStore
+from knowcode.storage.chunk_repository import ChunkRepository
+from knowcode.retrieval.completeness import expand_dependencies
+from knowcode.llm.embedding import EmbeddingProvider
+from knowcode.retrieval.hybrid_index import HybridIndex
+from knowcode.storage.knowledge_store import KnowledgeStore
 from knowcode.models import CodeChunk
-from knowcode.reranker import Reranker
+from knowcode.retrieval.reranker import Reranker
 
 
 class SearchEngine:

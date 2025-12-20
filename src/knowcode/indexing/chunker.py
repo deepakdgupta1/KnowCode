@@ -5,8 +5,8 @@ from pathlib import Path
 from typing import Optional
 
 from knowcode.models import ChunkingConfig, CodeChunk, ParseResult, Entity, EntityKind
-from knowcode.tokenizer import tokenize_code
-from knowcode.logger import get_logger
+from knowcode.utils.tokenizer import tokenize_code
+from knowcode.utils.logger import get_logger
 
 logger = get_logger(__name__)
 

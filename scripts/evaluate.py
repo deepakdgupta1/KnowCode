@@ -3,10 +3,10 @@
 import json
 import sys
 from pathlib import Path
-from knowcode.chunk_repository import InMemoryChunkRepository
-from knowcode.vector_store import VectorStore
-from knowcode.hybrid_index import HybridIndex
-from knowcode.embedding import OpenAIEmbeddingProvider
+from knowcode.storage.chunk_repository import InMemoryChunkRepository
+from knowcode.storage.vector_store import VectorStore
+from knowcode.retrieval.hybrid_index import HybridIndex
+from knowcode.llm.embedding import OpenAIEmbeddingProvider
 from knowcode.models import EmbeddingConfig, CodeChunk
 
 def evaluate(ground_truth_path: Path, index_path: Path) -> dict:

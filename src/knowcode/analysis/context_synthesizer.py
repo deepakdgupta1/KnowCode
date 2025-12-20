@@ -3,9 +3,9 @@
 from dataclasses import dataclass
 from typing import Optional
 
-from knowcode.knowledge_store import KnowledgeStore
+from knowcode.storage.knowledge_store import KnowledgeStore
 from knowcode.models import Entity, EntityKind
-from knowcode.token_counter import TokenCounter
+from knowcode.utils.token_counter import TokenCounter
 
 
 @dataclass

@@ -5,9 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Optional
 
-from knowcode.context_synthesizer import ContextSynthesizer
-from knowcode.graph_builder import GraphBuilder
-from knowcode.knowledge_store import KnowledgeStore
+from knowcode.analysis.context_synthesizer import ContextSynthesizer
+from knowcode.indexing.graph_builder import GraphBuilder
+from knowcode.storage.knowledge_store import KnowledgeStore
 from knowcode.models import EmbeddingConfig
 
 
@@ -42,8 +42,8 @@ class KnowCodeService:
             Initialized Indexer instance.
         """
         if self._indexer is None:
-            from knowcode.embedding import OpenAIEmbeddingProvider
-            from knowcode.indexer import Indexer
+            from knowcode.llm.embedding import OpenAIEmbeddingProvider
+            from knowcode.indexing.indexer import Indexer
             
             config = EmbeddingConfig()
             provider = OpenAIEmbeddingProvider(config)
@@ -66,8 +66,8 @@ class KnowCodeService:
             SearchEngine wired to the current knowledge store.
         """
         if self._search_engine is None:
-            from knowcode.hybrid_index import HybridIndex
-            from knowcode.search_engine import SearchEngine
+            from knowcode.retrieval.hybrid_index import HybridIndex
+            from knowcode.retrieval.search_engine import SearchEngine
             
             indexer = self.get_indexer(index_path)
             hybrid_index = HybridIndex(indexer.chunk_repo, indexer.vector_store)

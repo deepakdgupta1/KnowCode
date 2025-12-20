@@ -3,7 +3,7 @@
 import pytest
 from git import Repo, Actor
 
-from knowcode.temporal import TemporalAnalyzer
+from knowcode.analysis.temporal import TemporalAnalyzer
 from knowcode.models import EntityKind, RelationshipKind
 
 @pytest.fixture

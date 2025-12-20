@@ -8,9 +8,9 @@ from knowcode.models import Entity, ParseResult, Relationship
 from knowcode.parsers import MarkdownParser, PythonParser, YamlParser
 from knowcode.parsers.javascript_parser import JavaScriptParser
 from knowcode.parsers.java_parser import JavaParser
-from knowcode.scanner import FileInfo, Scanner
-from knowcode.signals import CoverageProcessor
-from knowcode.temporal import TemporalAnalyzer
+from knowcode.indexing.scanner import FileInfo, Scanner
+from knowcode.analysis.signals import CoverageProcessor
+from knowcode.analysis.temporal import TemporalAnalyzer
 
 
 class GraphBuilder:

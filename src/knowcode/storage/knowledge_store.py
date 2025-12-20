@@ -7,7 +7,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Optional
 
-from knowcode.graph_builder import GraphBuilder
+from knowcode.indexing.graph_builder import GraphBuilder
 from knowcode.models import (
     Entity,
     EntityKind,

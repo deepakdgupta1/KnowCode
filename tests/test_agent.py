@@ -4,7 +4,7 @@ import os
 from unittest.mock import MagicMock, patch
 
 import pytest
-from knowcode.agent import Agent
+from knowcode.llm.agent import Agent
 from knowcode.models import Entity, EntityKind, Location
 
 
@@ -16,7 +16,7 @@ def mock_service():
 
 @pytest.fixture
 def mock_openai():
-    with patch("knowcode.agent.OpenAI") as mock:
+    with patch("knowcode.llm.agent.OpenAI") as mock:
         yield mock
 
 

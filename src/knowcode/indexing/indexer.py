@@ -3,13 +3,13 @@
 from pathlib import Path
 from typing import Optional
 
-from knowcode.chunk_repository import InMemoryChunkRepository
-from knowcode.chunker import Chunker
-from knowcode.embedding import EmbeddingProvider
-from knowcode.graph_builder import GraphBuilder
-from knowcode.scanner import Scanner
-from knowcode.vector_store import VectorStore
-from knowcode.logger import get_logger
+from knowcode.storage.chunk_repository import InMemoryChunkRepository
+from knowcode.indexing.chunker import Chunker
+from knowcode.llm.embedding import EmbeddingProvider
+from knowcode.indexing.graph_builder import GraphBuilder
+from knowcode.indexing.scanner import Scanner
+from knowcode.storage.vector_store import VectorStore
+from knowcode.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -144,7 +144,7 @@ class Indexer:
         file_path = Path(file_path)
         # Simplified for Task 3.6
         builder = GraphBuilder()
-        from knowcode.scanner import FileInfo
+        from knowcode.indexing.scanner import FileInfo
         file_info = FileInfo(file_path, str(file_path), file_path.suffix, file_path.stat().st_size)
         parse_result = builder._parse_file(file_info)
         chunks = self.chunker.process_parse_result(parse_result)

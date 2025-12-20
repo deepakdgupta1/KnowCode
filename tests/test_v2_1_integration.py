@@ -4,12 +4,12 @@ import pytest
 from unittest.mock import MagicMock
 from pathlib import Path
 from knowcode.models import EmbeddingConfig
-from knowcode.embedding import EmbeddingProvider
-from knowcode.indexer import Indexer
-from knowcode.chunk_repository import InMemoryChunkRepository
-from knowcode.vector_store import VectorStore
-from knowcode.hybrid_index import HybridIndex
-from knowcode.search_engine import SearchEngine
+from knowcode.llm.embedding import EmbeddingProvider
+from knowcode.indexing.indexer import Indexer
+from knowcode.storage.chunk_repository import InMemoryChunkRepository
+from knowcode.storage.vector_store import VectorStore
+from knowcode.retrieval.hybrid_index import HybridIndex
+from knowcode.retrieval.search_engine import SearchEngine
 
 
 class MockEmbeddingProvider(EmbeddingProvider):

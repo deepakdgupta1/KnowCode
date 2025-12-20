@@ -3,14 +3,14 @@
 import pytest
 import time
 from pathlib import Path
-from knowcode.indexer import Indexer
-from knowcode.search_engine import SearchEngine
-from knowcode.embedding import OpenAIEmbeddingProvider
+from knowcode.indexing.indexer import Indexer
+from knowcode.retrieval.search_engine import SearchEngine
+from knowcode.llm.embedding import OpenAIEmbeddingProvider
 from knowcode.models import EmbeddingConfig, CodeChunk
-from knowcode.hybrid_index import HybridIndex
-from knowcode.chunk_repository import InMemoryChunkRepository
-from knowcode.vector_store import VectorStore
-from knowcode.knowledge_store import KnowledgeStore
+from knowcode.retrieval.hybrid_index import HybridIndex
+from knowcode.storage.chunk_repository import InMemoryChunkRepository
+from knowcode.storage.vector_store import VectorStore
+from knowcode.storage.knowledge_store import KnowledgeStore
 
 class MockEmbeddingProvider(OpenAIEmbeddingProvider):
     def __init__(self):

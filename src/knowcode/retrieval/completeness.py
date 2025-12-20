@@ -4,8 +4,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from knowcode.chunk_repository import ChunkRepository
-    from knowcode.knowledge_store import KnowledgeStore
+    from knowcode.storage.chunk_repository import ChunkRepository
+    from knowcode.storage.knowledge_store import KnowledgeStore
     from knowcode.models import CodeChunk
 
 

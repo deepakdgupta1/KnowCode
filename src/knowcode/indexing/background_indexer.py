@@ -5,7 +5,7 @@ import threading
 from pathlib import Path
 from typing import Optional
 
-from knowcode.indexer import Indexer
+from knowcode.indexing.indexer import Indexer
 
 
 class BackgroundIndexer:

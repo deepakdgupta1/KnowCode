@@ -1,8 +1,8 @@
 """Tests for Token Counter and Context Synthesizer."""
 
 from unittest.mock import MagicMock
-from knowcode.token_counter import TokenCounter
-from knowcode.context_synthesizer import ContextSynthesizer
+from knowcode.utils.token_counter import TokenCounter
+from knowcode.analysis.context_synthesizer import ContextSynthesizer
 from knowcode.models import Entity, EntityKind, Location
 
 def test_token_counter():

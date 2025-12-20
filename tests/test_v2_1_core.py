@@ -2,9 +2,9 @@
 
 import pytest
 from knowcode.models import CodeChunk, ChunkingConfig, EntityKind, Entity, Location
-from knowcode.chunk_repository import InMemoryChunkRepository
-from knowcode.tokenizer import tokenize_code
-from knowcode.chunker import Chunker
+from knowcode.storage.chunk_repository import InMemoryChunkRepository
+from knowcode.utils.tokenizer import tokenize_code
+from knowcode.indexing.chunker import Chunker
 
 
 def test_code_chunk_creation():

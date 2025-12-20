@@ -4,8 +4,8 @@ import tempfile
 from pathlib import Path
 
 
-from knowcode.graph_builder import GraphBuilder
-from knowcode.knowledge_store import KnowledgeStore
+from knowcode.indexing.graph_builder import GraphBuilder
+from knowcode.storage.knowledge_store import KnowledgeStore
 
 
 def test_python_parsing() -> None:

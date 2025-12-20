@@ -10,7 +10,7 @@ import click
 from knowcode import __version__
 from knowcode.models import EntityKind, RelationshipKind
 from knowcode.service import KnowCodeService
-from knowcode.knowledge_store import KnowledgeStore
+from knowcode.storage.knowledge_store import KnowledgeStore
 
 
 @click.group()
@@ -87,8 +87,8 @@ def index(directory: str, output: str) -> None:
 
     DIRECTORY: Path to the codebase to index.
     """
-    from knowcode.embedding import OpenAIEmbeddingProvider
-    from knowcode.indexer import Indexer
+    from knowcode.llm.embedding import OpenAIEmbeddingProvider
+    from knowcode.indexing.indexer import Indexer
     from knowcode.models import EmbeddingConfig
 
     click.echo(f"Indexing: {directory}")
@@ -199,11 +199,11 @@ def semantic_search(query_text: tuple[str], index: str, store: str, limit: int) 
 
     QUERY_TEXT: The search query.
     """
-    from knowcode.embedding import OpenAIEmbeddingProvider
-    from knowcode.hybrid_index import HybridIndex
-    from knowcode.indexer import Indexer
+    from knowcode.llm.embedding import OpenAIEmbeddingProvider
+    from knowcode.retrieval.hybrid_index import HybridIndex
+    from knowcode.indexing.indexer import Indexer
     from knowcode.models import EmbeddingConfig
-    from knowcode.search_engine import SearchEngine
+    from knowcode.retrieval.search_engine import SearchEngine
 
     question = " ".join(query_text)
     click.echo(f"Searching for: '{question}'...")
@@ -382,7 +382,7 @@ def stats(store: str) -> None:
 )
 def server(store: str, host: str, port: int, watch: bool) -> None:
     """Start the KnowCode intelligence server."""
-    from knowcode.server.main import start_server
+    from knowcode.api.main import start_server
     
     click.echo(f"Starting KnowCode server on {host}:{port}")
     click.echo(f"Using knowledge store: {store}")
@@ -497,7 +497,7 @@ def ask(query_text: tuple[str], store: str, model: str) -> None:
     
     QUERY_TEXT: The question to ask.
     """
-    from knowcode.agent import Agent
+    from knowcode.llm.agent import Agent
     
     question = " ".join(query_text)
     
