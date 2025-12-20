@@ -12,6 +12,11 @@ class BackgroundIndexer:
     """Runs indexing in background thread."""
 
     def __init__(self, indexer: Indexer) -> None:
+        """Initialize the background worker with an Indexer instance.
+
+        Args:
+            indexer: Indexer used to process queued files.
+        """
         self.indexer = indexer
         self._queue: queue.Queue = queue.Queue()
         self._thread: Optional[threading.Thread] = None
@@ -31,16 +36,21 @@ class BackgroundIndexer:
             self._thread.join(timeout=5.0)
 
     def queue_file(self, path: Path) -> None:
-        """Queue a file for indexing."""
+        """Queue a file for indexing.
+
+        Args:
+            path: File path to enqueue for processing.
+        """
         self._queue.put(path)
 
     def _worker(self) -> None:
-        """Worker thread that processes indexing queue."""
+        """Worker thread that processes the indexing queue."""
         while self._running:
             try:
                 # Use timeout to allow checking self._running
                 path = self._queue.get(timeout=1.0)
                 if path is None:
+                    self._queue.task_done()
                     break
                 self.indexer.index_file(path)
                 self._queue.task_done()

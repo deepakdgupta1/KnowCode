@@ -33,7 +33,14 @@ class KnowCodeService:
         return self._store
 
     def get_indexer(self, index_path: Optional[str | Path] = None) -> "Indexer":
-        """Get or create the indexer."""
+        """Get or create the indexer.
+
+        Args:
+            index_path: Optional path to load an existing index from.
+
+        Returns:
+            Initialized Indexer instance.
+        """
         if self._indexer is None:
             from knowcode.embedding import OpenAIEmbeddingProvider
             from knowcode.indexer import Indexer
@@ -50,7 +57,14 @@ class KnowCodeService:
         return self._indexer
 
     def get_search_engine(self, index_path: Optional[str | Path] = None) -> "SearchEngine":
-        """Get or create the search engine."""
+        """Get or create the search engine.
+
+        Args:
+            index_path: Optional path to load an existing index from.
+
+        Returns:
+            SearchEngine wired to the current knowledge store.
+        """
         if self._search_engine is None:
             from knowcode.hybrid_index import HybridIndex
             from knowcode.search_engine import SearchEngine
@@ -74,7 +88,18 @@ class KnowCodeService:
         temporal: bool = False,
         coverage: str | Path = None,
     ) -> dict[str, Any]:
-        """Analyze a codebase and save to store."""
+        """Analyze a codebase and persist the resulting knowledge store.
+
+        Args:
+            directory: Root directory to scan and parse.
+            output: Destination path for the knowledge store JSON.
+            ignore: Additional ignore patterns.
+            temporal: Whether to include git history analysis.
+            coverage: Optional Cobertura coverage report path.
+
+        Returns:
+            Statistics from the graph builder.
+        """
         builder = GraphBuilder()
         builder.build_from_directory(
             root_dir=directory,
@@ -91,7 +116,14 @@ class KnowCodeService:
         return builder.stats()
 
     def search(self, pattern: str) -> list[dict[str, Any]]:
-        """Search entities by pattern."""
+        """Search entities by pattern.
+
+        Args:
+            pattern: Substring match over names and qualified names.
+
+        Returns:
+            Lightweight entity metadata for display or API responses.
+        """
         entities = self.store.search(pattern)
         return [
             {
@@ -106,7 +138,18 @@ class KnowCodeService:
         ]
 
     def get_context(self, target: str, max_tokens: int = 2000) -> dict[str, Any]:
-        """Get context bundle for an entity."""
+        """Get a context bundle for an entity.
+
+        Args:
+            target: Entity ID or search pattern.
+            max_tokens: Maximum token budget for the context bundle.
+
+        Returns:
+            Dictionary containing context text and metadata.
+
+        Raises:
+            ValueError: If no matching entity is found or context synthesis fails.
+        """
         # Try exact match first
         entity = self.store.get_entity(target)
         if not entity:
@@ -133,7 +176,11 @@ class KnowCodeService:
         }
 
     def get_stats(self) -> dict[str, Any]:
-        """Get statistics from the current store."""
+        """Get statistics from the current store.
+
+        Returns:
+            Aggregated counts of entities, relationships, and index state.
+        """
         # This is slightly different from builder.stats() as we might not have the builder
         by_kind: dict[str, int] = {}
         for entity in self.store.entities.values():
@@ -161,7 +208,14 @@ class KnowCodeService:
         return stats
 
     def get_callers(self, entity_id: str) -> list[dict[str, Any]]:
-        """Get callers of an entity."""
+        """Get callers of an entity.
+
+        Args:
+            entity_id: Entity ID to look up.
+
+        Returns:
+            Caller metadata dictionaries.
+        """
         callers = self.store.get_callers(entity_id)
         return [{"id": c.id, "name": c.qualified_name, "file": c.location.file_path} for c in callers]
 
@@ -207,6 +261,13 @@ class KnowCodeService:
         }
 
     def get_callees(self, entity_id: str) -> list[dict[str, Any]]:
-        """Get callees of an entity."""
+        """Get callees of an entity.
+
+        Args:
+            entity_id: Entity ID to look up.
+
+        Returns:
+            Callee metadata dictionaries.
+        """
         callees = self.store.get_callees(entity_id)
         return [{"id": c.id, "name": c.qualified_name} for c in callees]

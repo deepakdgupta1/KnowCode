@@ -12,11 +12,13 @@ router = APIRouter(prefix="/api/v1")
 _service: Optional[KnowCodeService] = None
 
 def get_service() -> KnowCodeService:
+    """Return the global service instance or raise if uninitialized."""
     if _service is None:
         raise HTTPException(status_code=503, detail="Service not initialized")
     return _service
 
 class SearchResult(BaseModel):
+    """Response model for entity search results."""
     id: str
     kind: str
     name: str
@@ -25,6 +27,7 @@ class SearchResult(BaseModel):
     line: int
 
 class ContextResponse(BaseModel):
+    """Response model for synthesized entity context."""
     entity_id: str
     context_text: str
     total_tokens: int
@@ -32,17 +35,20 @@ class ContextResponse(BaseModel):
     included_entities: list[str]
 
 class ChunkResult(BaseModel):
+    """Response model for a retrieved chunk."""
     id: str
     content: str
     entity_id: str
     score: float
 
 class QueryRequest(BaseModel):
+    """Request model for semantic search queries."""
     query: str
     limit: Optional[int] = 5
     expand_deps: Optional[bool] = True
 
 class QueryResponse(BaseModel):
+    """Response model for semantic search queries."""
     chunks: list[ChunkResult]
     total: int
 

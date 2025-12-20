@@ -21,6 +21,14 @@ class SearchEngine:
         hybrid_index: HybridIndex,
         knowledge_store: KnowledgeStore,
     ) -> None:
+        """Initialize the search engine pipeline.
+
+        Args:
+            chunk_repo: Chunk repository backing BM25 search.
+            embedding_provider: Provider for generating query embeddings.
+            hybrid_index: Combined sparse+dense index used for retrieval.
+            knowledge_store: Graph store used to expand dependency context.
+        """
         self.chunk_repo = chunk_repo
         self.embedding_provider = embedding_provider
         self.hybrid_index = hybrid_index
@@ -33,7 +41,16 @@ class SearchEngine:
         limit: int = 10,
         expand_deps: bool = True
     ) -> list[CodeChunk]:
-        """Execute full search pipeline."""
+        """Execute the full search pipeline.
+
+        Args:
+            query: Natural language query string.
+            limit: Maximum number of chunks to return.
+            expand_deps: Whether to include dependency context from the graph.
+
+        Returns:
+            Ranked list of CodeChunk objects.
+        """
         # 1. Embed query
         query_embedding = self.embedding_provider.embed_single(query)
         
@@ -55,7 +72,7 @@ class SearchEngine:
         return top_chunks
 
     def _expand_dependencies(self, chunks: list[CodeChunk]) -> list[CodeChunk]:
-        """Add dependency context to results."""
+        """Add dependency context to the results using the knowledge graph."""
         expanded = []
         seen_ids = set()
         

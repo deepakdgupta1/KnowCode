@@ -34,7 +34,7 @@ class Reranker:
             adjusted_score = score
             
             # Boost documented code
-            if boost_documented and chunk.metadata.get("has_docstring"):
+            if boost_documented and str(chunk.metadata.get("has_docstring", "")).lower() == "true":
                 adjusted_score *= 1.2
             
             # Boost recently modified chunks (within 7 days)

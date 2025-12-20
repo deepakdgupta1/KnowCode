@@ -242,6 +242,37 @@ class KnowledgeStore:
             if did in self.entities
         ]
 
-    def list_by_kind(self, kind: EntityKind) -> list[Entity]:
-        """List all entities of a given kind."""
+    def list_by_kind(self, kind: EntityKind | str) -> list[Entity]:
+        """List all entities of a given kind.
+
+        Args:
+            kind: EntityKind enum or its string value (e.g., "class", "commit").
+
+        Returns:
+            Entities matching the requested kind.
+        """
+        return self.get_entities_by_kind(kind)
+
+    def get_entities_by_kind(self, kind: EntityKind | str) -> list[Entity]:
+        """Return entities filtered by kind.
+
+        Args:
+            kind: EntityKind enum or its string value.
+
+        Returns:
+            Entities whose kind matches the provided value.
+        """
+        if isinstance(kind, str):
+            try:
+                kind = EntityKind(kind)
+            except ValueError:
+                return []
         return [e for e in self.entities.values() if e.kind == kind]
+
+    def get_outgoing_relationships(self, entity_id: str) -> list[Relationship]:
+        """Return relationships where the entity is the source."""
+        return [r for r in self.relationships if r.source_id == entity_id]
+
+    def get_incoming_relationships(self, entity_id: str) -> list[Relationship]:
+        """Return relationships where the entity is the target."""
+        return [r for r in self.relationships if r.target_id == entity_id]

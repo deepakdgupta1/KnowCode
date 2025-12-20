@@ -11,6 +11,12 @@ def tokenize_code(text: str) -> list[str]:
     - snake_case splitting  
     - Punctuation removal
     - Lowercasing
+
+    Args:
+        text: Raw code or text to tokenize.
+
+    Returns:
+        List of normalized tokens suitable for BM25 matching.
     """
     # Split camelCase
     text = re.sub(r'([a-z])([A-Z])', r'\1 \2', text)

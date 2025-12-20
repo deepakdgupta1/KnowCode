@@ -17,6 +17,12 @@ class VectorStore:
     """FAISS-based vector store for code embeddings."""
 
     def __init__(self, dimension: int = 1536, index_path: Optional[Path] = None) -> None:
+        """Initialize the vector index.
+
+        Args:
+            dimension: Expected embedding dimensionality.
+            index_path: Optional path to load an existing index from disk.
+        """
         self.dimension = dimension
         self.index_path = index_path
         
@@ -32,7 +38,10 @@ class VectorStore:
             self.load(index_path)
 
     def add(self, chunk_id: str, embedding: list[float]) -> None:
-        """Add a chunk embedding to the index."""
+        """Add a chunk embedding to the index.
+
+        No-op if FAISS is unavailable.
+        """
         if not self.index:
              return
              
@@ -42,7 +51,15 @@ class VectorStore:
         self.id_map[idx] = chunk_id
 
     def search(self, embedding: list[float], limit: int = 10) -> list[tuple[str, float]]:
-        """Search for similar embeddings."""
+        """Search for similar embeddings.
+
+        Args:
+            embedding: Query embedding to search for.
+            limit: Maximum number of results to return.
+
+        Returns:
+            List of (chunk_id, score) tuples.
+        """
         if not self.index:
             return []
             
@@ -72,7 +89,10 @@ class VectorStore:
             json.dump({"id_map": {str(k): v for k, v in self.id_map.items()}, "dimension": self.dimension}, f)
 
     def load(self, path: Path) -> None:
-        """Load index and ID map from disk."""
+        """Load index and ID map from disk.
+
+        No-op if FAISS is unavailable.
+        """
         if not faiss:
             return
             
@@ -91,7 +111,7 @@ class VectorStore:
                 self.dimension = data.get("dimension", self.dimension)
                 
     def clear(self) -> None:
-        """Clear the index."""
+        """Clear the index and reset the ID map."""
         if faiss:
             self.index = faiss.IndexFlatIP(self.dimension)
         self.id_map = {}

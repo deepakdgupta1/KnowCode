@@ -8,7 +8,7 @@ from typing import Any, Optional
 import click
 
 from knowcode import __version__
-from knowcode.models import EntityKind
+from knowcode.models import EntityKind, RelationshipKind
 from knowcode.service import KnowCodeService
 from knowcode.knowledge_store import KnowledgeStore
 
@@ -431,7 +431,7 @@ def history(target: Optional[str], store: str, limit: int) -> None:
             author_rels = knowledge.get_incoming_relationships(commit.id)
             author = "Unknown"
             for rel in author_rels:
-                if rel.kind == "authored":
+                if rel.kind == RelationshipKind.AUTHORED:
                     # rel.source_id is author
                     a_ent = knowledge.get_entity(rel.source_id)
                     if a_ent:
@@ -460,7 +460,7 @@ def history(target: Optional[str], store: str, limit: int) -> None:
         rels = knowledge.get_outgoing_relationships(entity.id)
         changes = []
         for rel in rels:
-            if rel.kind == "changed_by":
+            if rel.kind == RelationshipKind.CHANGED_BY:
                 commit = knowledge.get_entity(rel.target_id)
                 if commit:
                     # Get modification stats from edge metadata

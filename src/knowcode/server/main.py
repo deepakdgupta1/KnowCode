@@ -1,4 +1,6 @@
-"""Main entry point for KnowCode server."""
+"""Main entry point for the KnowCode FastAPI server."""
+
+from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI
@@ -7,7 +9,15 @@ from knowcode.server import api
 from knowcode.service import KnowCodeService
 
 def create_app(store_path: str = ".", watch: bool = False) -> FastAPI:
-    """Create and configure the FastAPI application."""
+    """Create and configure the FastAPI application.
+
+    Args:
+        store_path: File or directory containing the knowledge store.
+        watch: Whether to enable background file watching and re-indexing.
+
+    Returns:
+        Configured FastAPI application instance.
+    """
     app = FastAPI(
         title="KnowCode API",
         description="Local intelligence server for Codebase Knowledge Graph",
@@ -40,6 +50,13 @@ def create_app(store_path: str = ".", watch: bool = False) -> FastAPI:
     return app
 
 def start_server(host: str = "127.0.0.1", port: int = 8000, store_path: str = ".", watch: bool = False):
-    """Start the uvicorn server."""
+    """Start the uvicorn server with the configured app.
+
+    Args:
+        host: Bind address for the server.
+        port: Port to listen on.
+        store_path: Knowledge store location used by the API.
+        watch: Whether to enable background file monitoring.
+    """
     app = create_app(store_path=store_path, watch=watch)
     uvicorn.run(app, host=host, port=port)

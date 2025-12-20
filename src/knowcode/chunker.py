@@ -12,14 +12,21 @@ logger = get_logger(__name__)
 
 
 class Chunker:
-    """Chunks code entities into smaller units."""
+    """Chunks code entities into smaller, searchable units."""
 
     def __init__(self, config: Optional[ChunkingConfig] = None) -> None:
         self.config = config or ChunkingConfig()
         self.chunks: list[CodeChunk] = []
 
     def process_parse_result(self, result: ParseResult) -> list[CodeChunk]:
-        """Process a ParseResult and generate chunks."""
+        """Convert a ParseResult into a list of CodeChunk objects.
+
+        Args:
+            result: Parsed entities, relationships, and errors for a single file.
+
+        Returns:
+            List of generated CodeChunk objects in priority order.
+        """
         self.chunks = []  # Single initialization at start of process
         
         file_path = result.file_path
@@ -44,14 +51,17 @@ class Chunker:
         for entity in result.entities:
             if entity.kind == EntityKind.MODULE:
                 continue
-            if entity.kind == EntityKind.MODULE:
-                continue
             self._chunk_entity(entity, last_modified)
             
         return self.chunks
 
     def _emit_module_chunks(self, file_path: str, source: str) -> None:
-        """Extract module-level header and imports."""
+        """Extract module-level header and imports into dedicated chunks.
+
+        Args:
+            file_path: File path used to namespace chunk IDs.
+            source: Full source code for the module.
+        """
         # Module Header
         header = self._extract_module_header(source)
         if header:
@@ -77,7 +87,7 @@ class Chunker:
             self.chunks.append(import_chunk)
 
     def _extract_module_header(self, source: str) -> str:
-        """Extract first docstring and module definition."""
+        """Extract the leading module header and docstring block."""
         lines = source.splitlines()
         header_lines = []
         in_docstring = False
@@ -112,7 +122,7 @@ class Chunker:
         return "\n".join(header_lines).strip()
 
     def _extract_imports(self, source: str) -> str:
-        """Extract all import statements."""
+        """Extract all import statements from the source."""
         lines = []
         for line in source.splitlines():
             stripped = line.strip()
@@ -121,7 +131,12 @@ class Chunker:
         return "\n".join(lines).strip()
 
     def _chunk_entity(self, entity: Entity, last_modified: Optional[str] = None) -> None:
-        """Create chunks for an entity."""
+        """Create chunks for an entity and append them to the in-memory list.
+
+        Args:
+            entity: Entity to chunk (class, function, method, etc.).
+            last_modified: Optional timestamp used for ranking signals.
+        """
         content = ""
         
         if self.config.include_signatures and entity.signature:
@@ -136,8 +151,10 @@ class Chunker:
             content += entity.name
             
         # Sliding window chunking
+        has_docstring = "true" if entity.docstring else "false"
+
         if len(content) <= self.config.max_chunk_size:
-            metadata = {"kind": entity.kind.value}
+            metadata = {"kind": entity.kind.value, "has_docstring": has_docstring}
             if last_modified:
                 metadata["last_modified"] = last_modified
 
@@ -157,7 +174,11 @@ class Chunker:
                 end = min(start + self.config.max_chunk_size, len(content))
                 chunk_content = content[start:end]
                 
-                metadata = {"kind": entity.kind.value, "chunk_index": str(chunk_index)}
+                metadata = {
+                    "kind": entity.kind.value,
+                    "chunk_index": str(chunk_index),
+                    "has_docstring": has_docstring,
+                }
                 if last_modified:
                     metadata["last_modified"] = last_modified
                 

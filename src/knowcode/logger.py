@@ -5,7 +5,14 @@ import sys
 
 
 def get_logger(name: str) -> logging.Logger:
-    """Get a standardized logger."""
+    """Get a standardized logger configured for console output.
+
+    Args:
+        name: Logger name to retrieve.
+
+    Returns:
+        A logger configured with a stream handler if none exists.
+    """
     logger = logging.getLogger(name)
     
     if not logger.handlers:

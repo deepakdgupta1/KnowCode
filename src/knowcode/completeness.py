@@ -15,10 +15,18 @@ def expand_dependencies(
     knowledge_store: KnowledgeStore,
     max_depth: int = 1
 ) -> list[CodeChunk]:
-    """Expand chunk to include dependency context.
-    
+    """Expand a chunk to include dependency context.
     Uses knowledge graph to find related entities,
     then retrieves their chunks.
+
+    Args:
+        chunk: Starting chunk whose dependencies should be expanded.
+        chunk_repo: Repository used to fetch chunks by entity.
+        knowledge_store: Graph store used to resolve dependencies.
+        max_depth: Depth of dependency expansion (1 = direct callees only).
+
+    Returns:
+        List of chunks including the input chunk and its dependencies.
     """
     expanded: list[CodeChunk] = [chunk]
     visited: set[str] = {chunk.entity_id}

@@ -39,10 +39,12 @@ class InMemoryChunkRepository(ChunkRepository):
     """In-memory implementation of ChunkRepository."""
 
     def __init__(self) -> None:
+        """Initialize the in-memory storage structures."""
         self._chunks: dict[str, CodeChunk] = {}
         self._by_entity: dict[str, list[str]] = {}  # entity_id -> chunk_ids
 
     def add(self, chunk: CodeChunk) -> None:
+        """Add a chunk to the in-memory index."""
         self._chunks[chunk.id] = chunk
         if chunk.entity_id not in self._by_entity:
             self._by_entity[chunk.entity_id] = []
@@ -50,13 +52,16 @@ class InMemoryChunkRepository(ChunkRepository):
             self._by_entity[chunk.entity_id].append(chunk.id)
 
     def get(self, chunk_id: str) -> Optional[CodeChunk]:
+        """Fetch a chunk by its ID."""
         return self._chunks.get(chunk_id)
 
     def get_by_entity(self, entity_id: str) -> list[CodeChunk]:
+        """Return all chunks associated with an entity."""
         chunk_ids = self._by_entity.get(entity_id, [])
         return [self._chunks[cid] for cid in chunk_ids if cid in self._chunks]
 
     def search_by_tokens(self, tokens: list[str], limit: int = 10) -> list[CodeChunk]:
+        """Perform a simple token-overlap search over stored chunks."""
         # Simple token overlap scoring
         scores: list[tuple[float, CodeChunk]] = []
         query_set = set(tokens)

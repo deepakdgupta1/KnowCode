@@ -23,13 +23,27 @@ class Indexer:
         chunk_repo: Optional[InMemoryChunkRepository] = None,
         vector_store: Optional[VectorStore] = None,
     ) -> None:
+        """Initialize an indexer with optional storage backends.
+
+        Args:
+            embedding_provider: Provider used to generate chunk embeddings.
+            chunk_repo: Optional chunk repository (defaults to in-memory).
+            vector_store: Optional vector store (defaults to FAISS-backed store).
+        """
         self.embedding_provider = embedding_provider
         self.chunk_repo = chunk_repo or InMemoryChunkRepository()
         self.vector_store = vector_store or VectorStore(dimension=embedding_provider.config.dimension)
         self.chunker = Chunker()
 
     def index_directory(self, root_dir: str | Path) -> int:
-        """Index all files in a directory."""
+        """Index all supported files under a directory.
+
+        Args:
+            root_dir: Root directory to scan for supported files.
+
+        Returns:
+            Total number of chunks added to the index.
+        """
         root_path = Path(root_dir)
         
         # Use existing GraphBuilder to get semantic entities
@@ -67,7 +81,11 @@ class Indexer:
         return total_chunks
 
     def save(self, path: str | Path) -> None:
-        """Save the entire index to disk."""
+        """Persist vector index and chunk metadata to disk.
+
+        Args:
+            path: Directory path to write index files into.
+        """
         path = Path(path)
         path.mkdir(parents=True, exist_ok=True)
         
@@ -92,7 +110,11 @@ class Indexer:
             json.dump(metadata, f)
 
     def load(self, path: str | Path) -> None:
-        """Load the entire index from disk."""
+        """Load the entire vector index and chunk metadata from disk.
+
+        Args:
+            path: Directory path containing previously saved index files.
+        """
         path = Path(path)
         
         # Load vector store
@@ -111,7 +133,14 @@ class Indexer:
                     self.chunk_repo.add(chunk)
                     
     def index_file(self, file_path: str | Path) -> int:
-        """Index a single file (incremental)."""
+        """Index a single file for incremental updates.
+
+        Args:
+            file_path: File path to process.
+
+        Returns:
+            Number of chunks created for the file.
+        """
         file_path = Path(file_path)
         # Simplified for Task 3.6
         builder = GraphBuilder()

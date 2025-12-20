@@ -12,6 +12,7 @@ class EmbeddingProvider(ABC):
     """Abstract interface for generating embeddings."""
 
     def __init__(self, config: EmbeddingConfig) -> None:
+        """Initialize the provider with the embedding configuration."""
         self.config = config
 
     @abstractmethod
@@ -29,6 +30,11 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
     """OpenAI embedding provider."""
 
     def __init__(self, config: EmbeddingConfig) -> None:
+        """Create an OpenAI-backed embedding provider.
+
+        Args:
+            config: Embedding configuration settings.
+        """
         super().__init__(config)
         api_key = os.environ.get("OPENAI_API_KEY")
         if not api_key:
@@ -38,6 +44,7 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
             self.client = OpenAI(api_key=api_key)
 
     def _get_client(self) -> OpenAI:
+        """Return an initialized OpenAI client, loading credentials if needed."""
         if not self.client:
             api_key = os.environ.get("OPENAI_API_KEY")
             if not api_key:
@@ -46,6 +53,14 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
         return self.client
 
     def embed(self, texts: list[str]) -> list[list[float]]:
+        """Generate embeddings for a batch of texts.
+
+        Args:
+            texts: Input texts to embed.
+
+        Returns:
+            List of embedding vectors (one per input).
+        """
         if not texts:
             return []
             
@@ -62,9 +77,11 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
         return embeddings
 
     def embed_single(self, text: str) -> list[float]:
+        """Generate an embedding for a single text input."""
         return self.embed([text])[0]
 
     def _normalize(self, vec: list[float]) -> list[float]:
+        """Normalize a vector to unit length for cosine similarity."""
         import math
         norm = math.sqrt(sum(x*x for x in vec))
         return [x / norm for x in vec] if norm > 0 else vec

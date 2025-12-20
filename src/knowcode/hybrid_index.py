@@ -17,6 +17,13 @@ class HybridIndex:
         vector_store: VectorStore,
         alpha: float = 0.5  # Weight for dense vs sparse (0.5 = equal weight)
     ) -> None:
+        """Initialize the hybrid index.
+
+        Args:
+            chunk_repo: Repository providing BM25-style token search.
+            vector_store: Dense vector store for semantic similarity.
+            alpha: Blend weight for dense vs sparse results.
+        """
         self.chunk_repo = chunk_repo
         self.vector_store = vector_store
         self.alpha = alpha
@@ -27,9 +34,17 @@ class HybridIndex:
         query_embedding: list[float],
         limit: int = 10
     ) -> list[tuple[CodeChunk, float]]:
-        """Search using hybrid retrieval.
-        
+        """Search using hybrid retrieval. 
+        Combines BM25 sparse retrieval with dense vector search.         
         Returns chunks with combined scores using Reciprocal Rank Fusion (RRF).
+
+        Args:
+            query: Raw query string for sparse matching.
+            query_embedding: Dense embedding of the query.
+            limit: Maximum number of chunks to return.
+
+        Returns:
+            List of (chunk, score) tuples ranked by reciprocal rank fusion.
         """
         # 1. BM25 Search
         query_tokens = tokenize_code(query)
