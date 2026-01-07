@@ -349,3 +349,34 @@
 #### 🔨 Refactoring
 * update .gitignore and remove obsolete documentation files; enhance README and KnowCode.md for clarity (`15cda76`)
 * renamed models.py to data_models.py and updated the dependencies (`91cb347`)
+
+
+---
+
+## [Unreleased] - 2026-01-07
+
+**Origin:** Generated
+**Range:** `HEAD~5..HEAD`
+**Commit Count:** 5
+**Confidence:** high
+
+**Focus:** Feature Development
+
+### 🧠 Temporal Context & Intent
+> *Auto-generated: Add context about why these changes were made.*
+
+### 🏗️ Architectural Impact
+> *Auto-generated: Describe high-level architectural shifts.*
+
+### 📝 Delta Changes
+
+#### 🚀 Features
+* enhance changelog generation with optional summary input and improved commit parsing (`9fdebad`)
+
+#### 📚 Documentation
+* update changelog [skip ci] (`b84bf72`)
+* update changelog [skip ci] (`9a69740`)
+
+#### 🔨 Refactoring
+* update .gitignore and remove obsolete documentation files; enhance README and KnowCode.md for clarity (`15cda76`)
+* renamed models.py to data_models.py and updated the dependencies (`91cb347`)
