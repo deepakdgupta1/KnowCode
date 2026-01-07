@@ -715,22 +715,38 @@ You've essentially defined a **code intelligence system**, not a chatbot with em
 ## **Implementation Status & Roadmap**
 
 ### **Phase 1: Foundation (COMPLETED)**
-1. **[x] Unified Semantic Graph (Layer 3)**: Multi-language support (Python, JS, Java, MD, YAML).
-2. **[x] Token-Budgeted Synthesis (Layer 9)**: Priority-ranked context generation.
-3. **[x] Local Knowledge Store (Layer 8)**: JSON persistence with graph-like querying.
-4. **[x] Service Layer (Architecture Substrate)**: Unified business logic for CLI and API.
+1. **[x] Source Scanning + Parsing (Layers 1-2)**: Scanner with gitignore support; parsers for Python (AST), JS/TS + Java (Tree-sitter), Markdown, YAML.
+2. **[x] Unified Semantic Graph (Layer 3)**: Entity/relationship model with reference resolution (calls/imports/contains/inherits).
+3. **[x] Local Knowledge Store (Layer 8)**: In-memory graph with JSON persistence and query helpers.
+4. **[x] Token-Budgeted Context Synthesis (Layer 9)**: Priority-ordered sections with truncation handling.
+5. **[x] Service Layer**: Shared business logic for CLI and API.
 
-### **Phase 2: Intelligence Server (COMPLETED)**
-5. **[x] FastAPI Server (Layer 10)**: REST API for local IDE agent integration.
-6. **[x] Hot Reload (Layer 8)**: Dynamic refresh of knowledge store without downtime.
-7. **[x] Granular API (Layer 8)**: Programmatic access to raw entities and relationships.
+### **Phase 2: Intelligence Server & RAG (COMPLETED)**
+6. **[x] FastAPI Server (Layer 10)**: Health, stats, search, context, semantic query, reload, entity details, callers/callees.
+7. **[x] Semantic Search & Indexing (Layer 4a)**: Chunker (module header/imports/entities), OpenAI embeddings, FAISS vector store, hybrid BM25+vector retrieval (RRF), reranking, dependency expansion.
+8. **[x] Indexer Persistence + CLI**: `index`/`semantic-search` commands with save/load.
+9. **[x] Watch Mode**: Background indexer + filesystem monitor for incremental re-indexing.
+10. **[x] CLI Workflows**: `analyze`, `query`, `context`, `export`, `stats`, `server`, `history`, `ask`.
 
-### **Phase 3: Deep Analysis (NEXT)**
-8. **[ ] Static Behavioral Analysis (Layer 4)**: Data flow and state transition tracking.
-9. **[ ] Intent Extraction (Layer 6)**: Linking commit messages and ADRs to semantic nodes.
-10. **[ ] Confidence Scoring (Layer 3)**: Weighted edges based on analysis source quality.
+### **Phase 3: Temporal & Runtime Signals (COMPLETED)**
+11. **[x] Git History Ingestion (Temporal)**: Commit/author entities, authored/modified/changed_by relationships; surfaced via `--temporal` and `history`.
+12. **[x] Coverage Signals (Layer 5)**: Cobertura ingestion with coverage report entities and covers/executed_by relationships.
 
-### **Phase 4: Enterprise (FUTURE)**
-11. **[ ] Security & RBAC**: Who can query what modules.
-12. **[ ] Scalability**: Supporting monorepos > 1M LOC.
-13. **[ ] Team Sharing**: Remote knowledge store synchronization.
+### **Phase 4: Documentation Synthesis (PARTIAL)**
+13. **[x] Markdown Export (MVP)**: CLI `export` produces an index-style Markdown doc (see `docs_test/index.md`).
+14. **[ ] Multi-Level Doc Synthesis (Layer 7)**: Architecture/module/function narratives, change summaries, and freshness tracking.
+
+### **Phase 5: Deep Analysis (NEXT)**
+15. **[ ] Static Behavioral Analysis (Layer 4)**: Data flow, state transitions, side-effect classification.
+16. **[ ] Intent Extraction (Layer 6)**: ADR/PR/commit intent linking beyond commit metadata.
+17. **[ ] Confidence Scoring (Layer 3)**: Weighted edges/entities by evidence source.
+
+### **Phase 6: Enterprise (FUTURE)**
+18. **[ ] Security & RBAC**: Permissioned access and audit trails.
+19. **[ ] Scalability**: Large monorepo support and distributed processing.
+20. **[ ] Team Sharing**: Remote knowledge store sync and collaboration.
+
+### **Supporting Tooling & QA (COMPLETED)**
+- **[x] Tests**: Unit/integration/e2e coverage for parsing, indexing, retrieval, API, CLI, storage, and analysis.
+- **[x] CI/CD**: Ruff linting, pytest + coverage, MkDocs build, and automated changelog generation.
+- **[x] Evaluation Utilities**: Retrieval-quality evaluation script (`scripts/evaluate.py`).

@@ -18,11 +18,11 @@ KnowCode analyzes your codebase and builds a semantic graph of entities (functio
 
 ```bash
 # Create and activate virtual environment
-python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+uv venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
-# Install KnowCode
-pip install -e ".[dev]"
+# Install KnowCode (with dev dependencies)
+uv sync --dev
 ```
 
 ## Quick Start
