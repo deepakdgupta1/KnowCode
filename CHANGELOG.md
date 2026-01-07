@@ -323,3 +323,29 @@
 #### 🔨 Refactoring
 * renamed models.py to data_models.py and updated the dependencies (`91cb347`)
 * Introduce new module-specific unit tests for various components and remove outdated general test files. (`f083e11`)
+
+
+---
+
+## [Unreleased] - 2026-01-07
+
+**Focus:** Bug Fixes
+
+### 🧠 Temporal Context & Intent
+> *Auto-generated: Add context about why these changes were made.*
+
+### 🏗️ Architectural Impact
+> *Auto-generated: Describe high-level architectural shifts.*
+
+### 📝 Delta Changes
+
+#### 🐛 Fixes
+* Fixed some test suite bugs (`efc66c1`)
+
+#### 📚 Documentation
+* update changelog [skip ci] (`9a69740`)
+* update changelog [skip ci] (`bdba35c`)
+
+#### 🔨 Refactoring
+* update .gitignore and remove obsolete documentation files; enhance README and KnowCode.md for clarity (`15cda76`)
+* renamed models.py to data_models.py and updated the dependencies (`91cb347`)
