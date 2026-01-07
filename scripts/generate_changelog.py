@@ -1,3 +1,4 @@
+import argparse
 import subprocess
 import sys
 from datetime import datetime
@@ -11,10 +12,36 @@ def get_git_log(range_str="HEAD~1..HEAD"):
     try:
         cmd = ["git", "log", range_str, "--pretty=format:%h|%an|%ad|%s%n%b", "--date=short"]
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-        return result.stdout.strip().split('\n\n') # Split by double newline to separate commits
+        output = result.stdout.strip()
+        if not output:
+            return []
+        # Split by double newline to separate commits
+        return output.split("\n\n")
     except subprocess.CalledProcessError:
         print(f"Error reading git log for range {range_str}")
         return []
+
+def get_latest_tag():
+    """Return the most recent git tag reachable from HEAD."""
+    try:
+        cmd = ["git", "describe", "--tags", "--abbrev=0"]
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        tag = result.stdout.strip()
+        return tag or None
+    except subprocess.CalledProcessError:
+        return None
+
+def compute_confidence(commits, known_types):
+    """Compute confidence based on conventional commit parsing coverage."""
+    if not commits:
+        return "low"
+    known = sum(1 for c in commits if c["type"].split("(")[0] in known_types)
+    ratio = known / len(commits)
+    if ratio == 1.0:
+        return "high"
+    if ratio >= 0.6:
+        return "medium"
+    return "low"
 
 def parse_commit(commit_text):
     """Parse a single commit block."""
@@ -47,7 +74,7 @@ def parse_commit(commit_text):
         "desc": desc
     }
 
-def generate_entry(commits):
+def generate_entry(commits, range_str, origin="generated", summary=None):
     if not commits:
         return ""
 
@@ -66,8 +93,15 @@ def generate_entry(commits):
     # We will put placeholders.
     
     now = datetime.now().strftime("%Y-%m-%d")
+    known_types = {"feat", "fix", "refactor", "perf", "test", "docs", "chore"}
+    confidence = compute_confidence(commits, known_types)
     output = []
     output.append(f"## [Unreleased] - {now}")
+    output.append("")
+    output.append(f"**Origin:** {origin.title()}")
+    output.append(f"**Range:** `{range_str}`")
+    output.append(f"**Commit Count:** {len(commits)}")
+    output.append(f"**Confidence:** {confidence}")
     output.append("")
     # Determine intent from the most common type or the first commit
     focus = "Routine Maintenance"
@@ -79,7 +113,10 @@ def generate_entry(commits):
     output.append(f"**Focus:** {focus}")
     output.append("")
     output.append("### 🧠 Temporal Context & Intent")
-    output.append("> *Auto-generated: Add context about why these changes were made.*")
+    if summary:
+        output.append(f"> {summary}")
+    else:
+        output.append("> *Auto-generated: Add context about why these changes were made.*")
     output.append("")
     output.append("### 🏗️ Architectural Impact")
     output.append("> *Auto-generated: Describe high-level architectural shifts.*")
@@ -133,18 +170,58 @@ def generate_entry(commits):
 
 def main():
     changelog_path = Path("CHANGELOG.md")
-    
-    # Allow range to be passed as argument
-    range_str = "HEAD~5..HEAD"
-    if len(sys.argv) > 1:
-        range_str = sys.argv[1]
 
-    # In a real CI, we might compare against the last tag. 
-    commits_raw = get_git_log(range_str) 
+    parser = argparse.ArgumentParser(description="Generate a changelog entry from git history.")
+    parser.add_argument(
+        "--range",
+        dest="range_str",
+        default=None,
+        help="Git commit range (e.g., v2.1.0..HEAD).",
+    )
+    parser.add_argument(
+        "--use-last-tag",
+        action="store_true",
+        help="Use the latest tag as the start of the range (falls back if none).",
+    )
+    parser.add_argument(
+        "--origin",
+        default="generated",
+        help="Origin label for the entry (generated or curated).",
+    )
+    parser.add_argument(
+        "--summary",
+        default=None,
+        help="Plain-English summary of the changes to include in the entry.",
+    )
+    parser.add_argument(
+        "--summary-file",
+        default=None,
+        help="Path to a file containing the plain-English summary.",
+    )
+    args = parser.parse_args()
+
+    if args.range_str:
+        range_str = args.range_str
+    elif args.use_last_tag:
+        tag = get_latest_tag()
+        range_str = f"{tag}..HEAD" if tag else "HEAD~5..HEAD"
+    else:
+        range_str = "HEAD~5..HEAD"
+
+    # In a real CI, we might compare against the last tag.
+    commits_raw = get_git_log(range_str)
     parsed_commits = [parse_commit(c) for c in commits_raw if c]
     parsed_commits = [c for c in parsed_commits if c] # filter Nones
 
-    new_entry = generate_entry(parsed_commits)
+    summary = args.summary
+    if args.summary_file:
+        try:
+            summary = Path(args.summary_file).read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            print(f"Failed to read summary file: {exc}")
+            sys.exit(1)
+
+    new_entry = generate_entry(parsed_commits, range_str, origin=args.origin, summary=summary)
     
     if not new_entry:
         print("No commits found to generate changelog.")

@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [ main ]
   workflow_dispatch:
+    inputs:
+      changelog_summary:
+        description: "Plain-English summary for CHANGELOG (optional)."
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -90,7 +95,14 @@ jobs:
       - name: Generate Changelog Entry
         # We run the script directly.
         # It appends to CHANGELOG.md in the runner.
-        run: python3 scripts/generate_changelog.py
+        env:
+          CHANGELOG_SUMMARY: ${{ inputs.changelog_summary }}
+        run: |
+          if [ -n "${CHANGELOG_SUMMARY}" ]; then
+            python3 scripts/generate_changelog.py --use-last-tag --summary "${CHANGELOG_SUMMARY}"
+          else
+            python3 scripts/generate_changelog.py --use-last-tag
+          fi
 
       - name: Commit and Push Changelog
         run: |
