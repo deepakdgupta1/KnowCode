@@ -1,6 +1,6 @@
 [project]
 name = "knowcode"
-version = "0.1.0"
+version = "0.2.1"
 description = "Efficient codebase knowledge graph builder"
 readme = "README.md"
 requires-python = ">=3.9, <3.13"

@@ -209,7 +209,7 @@ KnowCode follows a layered architecture:
 6. **Context Synthesizer** - Generates token-efficient context bundles with priority ranking
 7. **CLI** - User interface for all operations
 
-See [KnowCode.md](KnowCode.md) for the complete reference architecture.
+See [evolution.md](evolution.md) for the complete reference architecture.
 
 ## Example Output
 
@@ -271,7 +271,7 @@ ruff format src/
 
 ## Roadmap
 
-See [KnowCode.md](KnowCode.md) for the full vision. The MVP focuses on:
+See [evolution.md](evolution.md) for the full vision. The MVP focuses on:
 
 - ✅ Single monorepo support
 - ✅ Python, Markdown, YAML parsing

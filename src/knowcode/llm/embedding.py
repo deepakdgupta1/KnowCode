@@ -36,7 +36,7 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
             config: Embedding configuration settings.
         """
         super().__init__(config)
-        api_key = os.environ.get("OPENAI_API_KEY")
+        api_key = os.environ.get("GOOGLE_API_KEY")
         if not api_key:
             # We allow init without key, but embed() will fail if not provided later
             self.client = None
@@ -46,9 +46,9 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
     def _get_client(self) -> OpenAI:
         """Return an initialized OpenAI client, loading credentials if needed."""
         if not self.client:
-            api_key = os.environ.get("OPENAI_API_KEY")
+            api_key = os.environ.get("GOOGLE_API_KEY")
             if not api_key:
-                raise ValueError("OPENAI_API_KEY environment variable is not set.")
+                raise ValueError("GOOGLE_API_KEY environment variable is not set.")
             self.client = OpenAI(api_key=api_key)
         return self.client
 

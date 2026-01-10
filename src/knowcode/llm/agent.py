@@ -20,7 +20,7 @@ class Agent:
         """
         self.service = service
         self.model = model
-        api_key = os.environ.get("OPENAI_API_KEY")
+        api_key = os.environ.get("GOOGLE_API_KEY")
         if not api_key:
              # We allow initialization without key, but answer() will fail if not provided later or found.
              # This is to allow CLI to start up even if key is missing (until 'ask' is actually called).
@@ -37,13 +37,13 @@ class Agent:
             The agent's answer.
             
         Raises:
-            ValueError: If OPENAI_API_KEY is not set.
+            ValueError: If GOOGLE_API_KEY is not set.
             OpenAIError: If the API call fails.
         """
         if not self.client:
-            api_key = os.environ.get("OPENAI_API_KEY")
+            api_key = os.environ.get("GOOGLE_API_KEY")
             if not api_key:
-                raise ValueError("OPENAI_API_KEY environment variable is not set.")
+                raise ValueError("GOOGLE_API_KEY environment variable is not set.")
             self.client = OpenAI(api_key=api_key)
 
         # 1. Retrieve knowledge

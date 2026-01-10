@@ -23,7 +23,7 @@ def mock_openai():
 def test_agent_initialization(mock_service):
     """Test that agent initializes correctly."""
     # With API key
-    with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}):
+    with patch.dict(os.environ, {"GOOGLE_API_KEY": "sk-test"}):
         agent = Agent(mock_service)
         assert agent.client is not None
         
@@ -37,7 +37,7 @@ def test_agent_answer_no_key(mock_service):
     """Test error when answering without API key."""
     with patch.dict(os.environ, {}, clear=True):
         agent = Agent(mock_service)
-        with pytest.raises(ValueError, match="OPENAI_API_KEY"):
+        with pytest.raises(ValueError, match="GOOGLE_API_KEY"):
             agent.answer("test query")
 
 
@@ -62,7 +62,7 @@ def test_agent_answer_success(mock_service, mock_openai):
     mock_openai.return_value.chat.completions.create.return_value = mock_completion
     
     # Run test
-    with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}):
+    with patch.dict(os.environ, {"GOOGLE_API_KEY": "sk-test"}):
         agent = Agent(mock_service)
         answer = agent.answer("How does MyClass work?")
         
@@ -79,7 +79,7 @@ def test_agent_answer_no_entities(mock_service, mock_openai):
     mock_completion.choices[0].message.content = "I don't know."
     mock_openai.return_value.chat.completions.create.return_value = mock_completion
     
-    with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}):
+    with patch.dict(os.environ, {"GOOGLE_API_KEY": "sk-test"}):
         agent = Agent(mock_service)
         agent.answer("Unknown thing")
         
