@@ -380,3 +380,36 @@
 #### 🔨 Refactoring
 * update .gitignore and remove obsolete documentation files; enhance README and KnowCode.md for clarity (`15cda76`)
 * renamed models.py to data_models.py and updated the dependencies (`91cb347`)
+
+
+---
+
+## [Unreleased] - 2026-01-10
+
+**Origin:** Generated
+**Range:** `HEAD~5..HEAD`
+**Commit Count:** 5
+**Confidence:** medium
+
+**Focus:** Feature Development
+
+### 🧠 Temporal Context & Intent
+> *Auto-generated: Add context about why these changes were made.*
+
+### 🏗️ Architectural Impact
+> *Auto-generated: Describe high-level architectural shifts.*
+
+### 📝 Delta Changes
+
+#### 🚀 Features
+* enhance changelog generation with optional summary input and improved commit parsing (`9fdebad`)
+
+#### 📚 Documentation
+* update changelog [skip ci] (`a4bf068`)
+* update changelog [skip ci] (`b84bf72`)
+
+#### 🔨 Refactoring
+* update .gitignore and remove obsolete documentation files; enhance README and KnowCode.md for clarity (`15cda76`)
+
+#### 📦 Other Changes
+* Replaced OpenAI LLM API Key with Gemini API Key for the ability to ask questions in plain English. Updated documentation and project version to cover missing items. (`6e6d1e6`)
