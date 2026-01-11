@@ -413,3 +413,34 @@
 
 #### 📦 Other Changes
 * Replaced OpenAI LLM API Key with Gemini API Key for the ability to ask questions in plain English. Updated documentation and project version to cover missing items. (`6e6d1e6`)
+
+
+---
+
+## [Unreleased] - 2026-01-11
+
+**Origin:** Generated
+**Range:** `HEAD~5..HEAD`
+**Commit Count:** 5
+**Confidence:** medium
+
+**Focus:** Feature Development
+
+### 🧠 Temporal Context & Intent
+> *Auto-generated: Add context about why these changes were made.*
+
+### 🏗️ Architectural Impact
+> *Auto-generated: Describe high-level architectural shifts.*
+
+### 📝 Delta Changes
+
+#### 🚀 Features
+* enhance changelog generation with optional summary input and improved commit parsing (`9fdebad`)
+
+#### 📚 Documentation
+* update changelog [skip ci] (`374cfb5`)
+* update changelog [skip ci] (`a4bf068`)
+
+#### 📦 Other Changes
+* Built a mature search and retrieval soln. Enabled tool-based usage via MCP server. Introduced AI models - Devstral 2 and Gemini for natural language interactions, VoyageAI for embedding and reranking. (`7cf4de5`)
+* Replaced OpenAI LLM API Key with Gemini API Key for the ability to ask questions in plain English. Updated documentation and project version to cover missing items. (`6e6d1e6`)
