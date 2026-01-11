@@ -852,19 +852,21 @@ You've essentially defined a **code intelligence system**, not a chatbot with em
 19. **[ ] Scalability**: Large monorepo support and distributed processing.
 20. **[ ] Team Sharing**: Remote knowledge store sync and collaboration.
 
-### **Phase 7: Agentic Capabilities (IN PROGRESS)**
+### **Phase 7: Agentic Capabilities (COMPLETED v2.2)**
 21. **[x] Agent Architecture**: `Agent` class with configuration-driven model selection.
 22. **[x] Multi-Provider Support**: Google Gemini and OpenRouter/OpenAI integration.
 23. **[x] Rate Limiting**: Persistent RPM/RPD tracking and enforcement.
-24. **[ ] Tool Use (ReAct)**: file listing, reference searching, history querying.
-25. **[ ] Advanced Retrieval**: Cross-Encoder reranking and graph inquiry.
+24. **[x] Query Classification**: 6 task types (explain, debug, extend, review, locate, general).
+25. **[x] Smart Answer**: Local-first answering with configurable sufficiency threshold.
+26. **[x] VoyageAI Reranking**: Cross-encoder reranking with signal-based fallback.
 
-### **Phase 8: IDE Integration (PLANNED)**
-26. **[ ] MCP Server (Layer 10b)**: Tool exposure for external IDE agents.
-27. **[ ] Sufficiency Scoring**: Context confidence metrics for local-first answering.
-28. **[ ] Task-Specific Templates**: Implement debug/refactor/extend/review context prioritization.
-29. **[ ] Multi-hop Queries**: Reachability and impact analysis with configurable depth.
-30. **[ ] Structured Responses**: JSON schema support across all endpoints.
+### **Phase 8: IDE Integration (COMPLETED v2.2)**
+27. **[x] MCP Server (Layer 10b)**: Tool exposure via STDIO for IDE agents.
+28. **[x] Core 3 Tools**: `search_codebase`, `get_entity_context`, `trace_calls`.
+29. **[x] Sufficiency Scoring**: Context confidence metrics for local-first answering.
+30. **[x] Task-Specific Templates**: Debug/extend/review/explain/locate prioritization.
+31. **[x] Multi-hop Queries**: `trace_calls(depth=N)` and `get_impact()` analysis.
+32. **[x] Structured Responses**: JSON with `task_type` and `sufficiency_score`.
 
 ### **Supporting Tooling & QA (COMPLETED)**
 - **[x] Tests**: Unit/integration/e2e coverage for parsing, indexing, retrieval, API, CLI, storage, and analysis.

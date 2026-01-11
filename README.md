@@ -54,7 +54,10 @@ knowcode semantic-search "How does parsing work?"
 # 7. Start the intelligence server with watch mode
 knowcode server --port 8080 --watch
 
-# 8. View statistics
+# 8. Start MCP server for IDE integration
+knowcode mcp-server --store .
+
+# 9. View statistics
 knowcode stats
 ```
 
@@ -155,9 +158,11 @@ knowcode server --port 8080
 ```
 
 Once running, you can access endpoints like:
-- `GET /api/v1/context?target=MyClass`
+- `GET /api/v1/context?target=MyClass&task_type=debug`
 - `GET /api/v1/search?q=parser` `(lexical search)`
 - `POST /api/v1/context/query` `(semantic search)`
+- `GET /api/v1/trace_calls/{entity_id}?direction=callers&depth=3` `(multi-hop call graph)`
+- `GET /api/v1/impact/{entity_id}` `(deletion impact analysis)`
 - `POST /api/v1/reload` (to refresh data after a new `analyze` run)
 
 ### `history`
@@ -207,6 +212,33 @@ models:
 knowcode ask "How does the graph builder work?"
 ```
 
+### `mcp-server`
+Start an MCP (Model Context Protocol) server for IDE agent integration.
+
+```bash
+knowcode mcp-server [--store <path>]
+```
+
+**Tools Exposed:**
+- `search_codebase` - Search for code entities by name
+- `get_entity_context` - Get detailed context for an entity
+- `trace_calls` - Trace call graph (callers/callees) with depth
+
+**MCP Client Configuration (Claude Desktop, VS Code, etc.):**
+```json
+{
+  "knowcode": {
+    "command": "knowcode",
+    "args": ["mcp-server", "--store", "/path/to/project"]
+  }
+}
+```
+
+**Installation with MCP support:**
+```bash
+pip install "knowcode[mcp]"
+```
+
 ## Supported Languages (MVP)
 
 - **Python** (.py) - Full AST parsing (Supports Python 3.9 - 3.12)
@@ -228,6 +260,40 @@ KnowCode follows a layered architecture:
 7. **CLI** - User interface for all operations
 
 See [KnowCode.md](KnowCode.md) for the complete reference architecture.
+
+## Configuration
+
+**`aimodels.yaml`** supports:
+
+```yaml
+# LLM models for 'ask' command
+natural_language_models:
+  - name: gemini-2.0-flash-lite
+    provider: google
+    api_key_env: GOOGLE_API_KEY
+
+# Embedding models
+embedding_models:
+  - name: voyage-3-lite
+    provider: voyageai
+    api_key_env: VOYAGE_API_KEY_1
+
+# Reranking models (cross-encoder)
+reranking_models:
+  - name: rerank-2.5
+    provider: voyageai
+    api_key_env: VOYAGE_API_KEY_1
+
+# Config
+config:
+  sufficiency_threshold: 0.8  # For local-first answering
+```
+
+**Optional dependencies:**
+```bash
+pip install "knowcode[mcp]"      # MCP server support
+pip install "knowcode[voyageai]" # VoyageAI reranking
+```
 
 ## Example Output
 
@@ -303,6 +369,12 @@ See [KnowCode.md](KnowCode.md) for the full vision. The MVP focuses on:
 - ✅ v1.4: Runtime signal integration
 - ✅ v2.0: Intelligence Server mode (local API for local IDE agents)
 - ✅ v2.1: Semantic search with embeddings, hybrid retrieval, and watch mode
+- ✅ v2.2: Developer Q&A & IDE Agent Integration:
+  - Query classification and task-specific templates
+  - Multi-hop `trace_calls()` and impact analysis
+  - Local-first `smart_answer()` with sufficiency scoring
+  - MCP server for IDE integration
+  - VoyageAI cross-encoder reranking
 
 **Future releases:**
 - v3.0: Team sharing & Enterprise features (RBAC, SSO, etc.)
