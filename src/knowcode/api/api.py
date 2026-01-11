@@ -1,10 +1,12 @@
 """FastAPI endpoints for KnowCode."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from typing import Any, Optional
+from typing import Any, Optional, Literal
 from pydantic import BaseModel
+from enum import Enum
 
 from knowcode.service import KnowCodeService
+from knowcode.data_models import TaskType
 
 router = APIRouter(prefix="/api/v1")
 
@@ -16,6 +18,17 @@ def get_service() -> KnowCodeService:
     if _service is None:
         raise HTTPException(status_code=503, detail="Service not initialized")
     return _service
+
+
+class TaskTypeParam(str, Enum):
+    """Task type for context prioritization."""
+    explain = "explain"
+    debug = "debug"
+    extend = "extend"
+    review = "review"
+    locate = "locate"
+    general = "general"
+
 
 class SearchResult(BaseModel):
     """Response model for entity search results."""
@@ -33,6 +46,8 @@ class ContextResponse(BaseModel):
     total_tokens: int
     truncated: bool
     included_entities: list[str]
+    task_type: str = "general"
+    sufficiency_score: float = 0.0
 
 class ChunkResult(BaseModel):
     """Response model for a retrieved chunk."""
@@ -46,11 +61,13 @@ class QueryRequest(BaseModel):
     query: str
     limit: Optional[int] = 5
     expand_deps: Optional[bool] = True
+    task_type: Optional[TaskTypeParam] = TaskTypeParam.general
 
 class QueryResponse(BaseModel):
     """Response model for semantic search queries."""
     chunks: list[ChunkResult]
     total: int
+    task_type: str = "general"
 
 @router.get("/health", summary="Health Check")
 def health() -> dict[str, str]:
@@ -87,7 +104,11 @@ def query_context(
         for c in chunks
     ]
     
-    return QueryResponse(chunks=results, total=len(results))
+    return QueryResponse(
+        chunks=results,
+        total=len(results),
+        task_type=request.task_type.value if request.task_type else "general"
+    )
 
 @router.get("/search", response_model=list[SearchResult], summary="Search Entities")
 def search(
@@ -101,11 +122,25 @@ def search(
 def get_context(
     target: str = Query(..., min_length=1, description="Entity ID or name to get context for"),
     max_tokens: int = Query(2000, description="Maximum amount of tokens allowed in the returned context"),
+    task_type: TaskTypeParam = Query(TaskTypeParam.general, description="Task type for context prioritization"),
     service: KnowCodeService = Depends(get_service)
 ) -> Any:
-    """Generates a synthesized context bundle for an entity, optimized for LLM consumption."""
+    """Generates a synthesized context bundle for an entity, optimized for LLM consumption.
+    
+    The task_type parameter enables task-specific context prioritization:
+    - explain: Prioritizes docstrings, signatures, and callees for understanding
+    - debug: Prioritizes source code and callers for tracing issues
+    - extend: Prioritizes patterns, children, and signatures for adding code
+    - review: Prioritizes changes, callers, and callees for impact analysis
+    - locate: Minimal context, just location info
+    - general: Balanced context (default)
+    
+    Returns sufficiency_score (0.0-1.0) indicating if context is sufficient for local answering.
+    """
     try:
-        return service.get_context(target, max_tokens=max_tokens)
+        # Convert API enum to data model enum
+        data_task_type = TaskType(task_type.value)
+        return service.get_context(target, max_tokens=max_tokens, task_type=data_task_type)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -144,3 +179,48 @@ def get_callees(
 ) -> list[Any]:
     """Find all entities called by the specified entity."""
     return service.get_callees(entity_id)
+
+
+class DirectionParam(str, Enum):
+    """Direction for call graph traversal."""
+    callers = "callers"
+    callees = "callees"
+
+
+@router.get("/trace_calls/{entity_id:path}", summary="Multi-hop Call Trace")
+def trace_calls(
+    entity_id: str,
+    direction: DirectionParam = Query(DirectionParam.callees, description="Direction: callers or callees"),
+    depth: int = Query(1, ge=1, le=5, description="Traversal depth (1-5)"),
+    max_results: int = Query(50, ge=1, le=100, description="Max results"),
+    service: KnowCodeService = Depends(get_service)
+) -> list[dict[str, Any]]:
+    """Multi-hop call graph traversal.
+    
+    Traverse the call graph from a starting entity to find all callers or callees
+    up to the specified depth. Each result includes the call_depth indicating
+    how many hops from the starting entity.
+    """
+    return service.store.trace_calls(
+        entity_id,
+        direction=direction.value,
+        depth=depth,
+        max_results=max_results
+    )
+
+
+@router.get("/impact/{entity_id:path}", summary="Impact Analysis")
+def get_impact(
+    entity_id: str,
+    max_depth: int = Query(3, ge=1, le=5, description="Max depth for transitive analysis"),
+    service: KnowCodeService = Depends(get_service)
+) -> dict[str, Any]:
+    """Analyze the impact of modifying or deleting an entity.
+    
+    Returns:
+    - direct_dependents: Entities that directly depend on this entity
+    - transitive_dependents: Entities affected through the dependency chain
+    - affected_files: Files that would need review
+    - risk_score: 0.0-1.0 indicating modification risk
+    """
+    return service.store.get_impact(entity_id, max_depth=max_depth)

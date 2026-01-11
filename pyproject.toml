@@ -19,7 +19,13 @@ dependencies = [
     "faiss-cpu>=1.7.0",
     "numpy>=1.24.0",
     "watchdog>=3.0.0",
+    "google-genai>=0.3.0",
+    "google-api-core>=2.29.0",
 ]
+
+[project.optional-dependencies]
+mcp = ["mcp>=1.0.0"]
+voyageai = ["voyageai>=0.2.0"]
 
 [project.scripts]
 knowcode = "knowcode.cli:cli"

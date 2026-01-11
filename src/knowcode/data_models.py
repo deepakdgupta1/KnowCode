@@ -45,6 +45,20 @@ class RelationshipKind(str, Enum):
     COVERS = "covers"           # Report/Test -> Entity
     EXECUTED_BY = "executed_by" # Entity -> Report/Test
 
+
+class TaskType(str, Enum):
+    """Query/task types for context prioritization.
+    
+    These correspond to task-specific templates in KnowCode.md (Layer 9).
+    """
+
+    EXPLAIN = "explain"    # "How does X work?", "Explain the flow of Y"
+    DEBUG = "debug"        # "Why is X failing?", "What's causing bug in Y?"
+    EXTEND = "extend"      # "How do I add X?", "Where should I implement Y?"
+    REVIEW = "review"      # "What changed in X?", "Review this code"
+    LOCATE = "locate"      # "Where is X defined?", "Find usages of Y"
+    GENERAL = "general"    # Default fallback for unclassified queries
+
 @dataclass
 class Location:
     """Source location of an entity."""

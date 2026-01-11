@@ -276,3 +276,136 @@ class KnowledgeStore:
     def get_incoming_relationships(self, entity_id: str) -> list[Relationship]:
         """Return relationships where the entity is the target."""
         return [r for r in self.relationships if r.target_id == entity_id]
+
+    def trace_calls(
+        self,
+        entity_id: str,
+        direction: str = "callees",
+        depth: int = 1,
+        max_results: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Multi-hop call graph traversal.
+        
+        Traverses the call graph from a starting entity to find all callers
+        or callees up to the specified depth.
+        
+        Args:
+            entity_id: Starting entity ID.
+            direction: "callers" (who calls this) or "callees" (what this calls).
+            depth: Maximum traversal depth (1 = direct only).
+            max_results: Maximum results to return.
+            
+        Returns:
+            List of dicts with entity info and call_depth.
+        """
+        if direction not in ("callers", "callees"):
+            raise ValueError(f"direction must be 'callers' or 'callees', got {direction}")
+            
+        results: list[dict[str, Any]] = []
+        visited: set[str] = {entity_id}
+        frontier: list[tuple[str, int]] = [(entity_id, 0)]
+        
+        while frontier and len(results) < max_results:
+            current_id, current_depth = frontier.pop(0)
+            
+            if current_depth >= depth:
+                continue
+                
+            # Get next hop entities
+            if direction == "callees":
+                next_ids = [
+                    r.target_id for r in self.relationships
+                    if r.source_id == current_id and r.kind == RelationshipKind.CALLS
+                ]
+            else:  # callers
+                next_ids = [
+                    r.source_id for r in self.relationships
+                    if r.target_id == current_id and r.kind == RelationshipKind.CALLS
+                ]
+            
+            for next_id in next_ids:
+                if next_id in visited:
+                    continue
+                    
+                visited.add(next_id)
+                entity = self.entities.get(next_id)
+                
+                if entity:
+                    results.append({
+                        "entity_id": entity.id,
+                        "name": entity.name,
+                        "qualified_name": entity.qualified_name,
+                        "kind": entity.kind.value,
+                        "file": entity.location.file_path,
+                        "line": entity.location.line_start,
+                        "call_depth": current_depth + 1,
+                    })
+                    
+                    if current_depth + 1 < depth:
+                        frontier.append((next_id, current_depth + 1))
+        
+        return results
+
+    def get_impact(self, entity_id: str, max_depth: int = 3) -> dict[str, Any]:
+        """Analyze the impact of modifying or deleting an entity.
+        
+        Returns direct dependents (callers, importers) and transitive dependents
+        up to max_depth, with a risk score based on impact breadth.
+        
+        Args:
+            entity_id: Entity to analyze impact for.
+            max_depth: Maximum depth for transitive analysis.
+            
+        Returns:
+            Dict with direct_dependents, transitive_dependents, and risk_score.
+        """
+        entity = self.entities.get(entity_id)
+        if not entity:
+            return {
+                "entity_id": entity_id,
+                "direct_dependents": [],
+                "transitive_dependents": [],
+                "risk_score": 0.0,
+                "error": "Entity not found",
+            }
+        
+        # Get direct dependents (1-hop)
+        direct = self.trace_calls(entity_id, direction="callers", depth=1, max_results=100)
+        
+        # Get transitive dependents (multi-hop)
+        transitive = self.trace_calls(entity_id, direction="callers", depth=max_depth, max_results=100)
+        # Remove direct from transitive
+        direct_ids = {d["entity_id"] for d in direct}
+        transitive_only = [t for t in transitive if t["entity_id"] not in direct_ids]
+        
+        # Calculate risk score (0.0-1.0)
+        # Based on: number of dependents, depth of impact, entity types affected
+        direct_count = len(direct)
+        transitive_count = len(transitive_only)
+        
+        # Higher risk if many dependents
+        breadth_score = min(1.0, (direct_count + transitive_count * 0.5) / 20)
+        
+        # Higher risk if affects multiple files
+        affected_files = {d.get("file") for d in direct + transitive_only}
+        file_score = min(1.0, len(affected_files) / 5)
+        
+        # Higher risk if entity is a class or module (wider impact)
+        type_score = 0.3
+        if entity.kind == EntityKind.CLASS:
+            type_score = 0.6
+        elif entity.kind == EntityKind.MODULE:
+            type_score = 0.8
+            
+        risk_score = round((breadth_score + file_score + type_score) / 3, 2)
+        
+        return {
+            "entity_id": entity_id,
+            "entity_name": entity.qualified_name,
+            "direct_dependents": direct,
+            "transitive_dependents": transitive_only,
+            "total_affected": direct_count + transitive_count,
+            "affected_files": list(affected_files),
+            "risk_score": min(1.0, risk_score),
+        }
+

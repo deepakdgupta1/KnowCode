@@ -1,0 +1,235 @@
+natural_language_models:
+  - name: mistralai/devstral-2512
+    provider: mistralai
+    api_key_env: OPENROUTER_API_KEY
+    rpm_free_tier_limit: 99999
+    rpd_free_tier_limit: 99999
+  - name: gemini-3-flash-preview
+    provider: google
+    api_key_env: GOOGLE_API_KEY_1
+    rpm_free_tier_limit: 5
+    rpd_free_tier_limit: 20
+  - name: gemini-3-flash-preview
+    provider: google
+    api_key_env: GOOGLE_API_KEY_2
+    rpm_free_tier_limit: 5
+    rpd_free_tier_limit: 20
+  - name: gemini-3-flash-preview
+    provider: google
+    api_key_env: GOOGLE_API_KEY_3
+    rpm_free_tier_limit: 5
+    rpd_free_tier_limit: 20
+  - name: gemini-3-flash-preview
+    provider: google
+    api_key_env: GOOGLE_API_KEY_4
+    rpm_free_tier_limit: 5
+    rpd_free_tier_limit: 20
+  - name: gemini-3-flash-preview
+    provider: google
+    api_key_env: GOOGLE_API_KEY_5
+    rpm_free_tier_limit: 5
+    rpd_free_tier_limit: 20
+  - name: gemini-3-flash-preview
+    provider: google
+    api_key_env: GOOGLE_API_KEY_6
+    rpm_free_tier_limit: 5
+    rpd_free_tier_limit: 20
+  - name: gemini-3-flash-preview
+    provider: google
+    api_key_env: GOOGLE_API_KEY_7
+    rpm_free_tier_limit: 5
+    rpd_free_tier_limit: 20
+  - name: gemini-3-flash-preview
+    provider: google
+    api_key_env: GOOGLE_API_KEY_8
+    rpm_free_tier_limit: 5
+    rpd_free_tier_limit: 20
+  - name: gemini-3-flash-preview
+    provider: google
+    api_key_env: GOOGLE_API_KEY_9
+    rpm_free_tier_limit: 5
+    rpd_free_tier_limit: 20
+  - name: gemini-3-flash-preview
+    provider: google
+    api_key_env: GOOGLE_API_KEY_10
+    rpm_free_tier_limit: 5
+    rpd_free_tier_limit: 20
+  - name: gemini-2.5-flash
+    provider: google
+    api_key_env: GOOGLE_API_KEY_1
+    rpm_free_tier_limit: 5
+    rpd_free_tier_limit: 20
+  - name: gemini-2.5-flash
+    provider: google
+    api_key_env: GOOGLE_API_KEY_2
+    rpm_free_tier_limit: 5
+    rpd_free_tier_limit: 20
+  - name: gemini-2.5-flash
+    provider: google
+    api_key_env: GOOGLE_API_KEY_3
+    rpm_free_tier_limit: 5
+    rpd_free_tier_limit: 20
+  - name: gemini-2.5-flash
+    provider: google
+    api_key_env: GOOGLE_API_KEY_4
+    rpm_free_tier_limit: 5
+    rpd_free_tier_limit: 20
+  - name: gemini-2.5-flash
+    provider: google
+    api_key_env: GOOGLE_API_KEY_5
+    rpm_free_tier_limit: 5
+    rpd_free_tier_limit: 20
+  - name: gemini-2.5-flash
+    provider: google
+    api_key_env: GOOGLE_API_KEY_6
+    rpm_free_tier_limit: 5
+    rpd_free_tier_limit: 20
+  - name: gemini-2.5-flash
+    provider: google
+    api_key_env: GOOGLE_API_KEY_7
+    rpm_free_tier_limit: 5
+    rpd_free_tier_limit: 20
+  - name: gemini-2.5-flash
+    provider: google
+    api_key_env: GOOGLE_API_KEY_8
+    rpm_free_tier_limit: 5
+    rpd_free_tier_limit: 20
+  - name: gemini-2.5-flash
+    provider: google
+    api_key_env: GOOGLE_API_KEY_9
+    rpm_free_tier_limit: 5
+    rpd_free_tier_limit: 20
+  - name: gemini-2.5-flash
+    provider: google
+    api_key_env: GOOGLE_API_KEY_10
+    rpm_free_tier_limit: 5
+    rpd_free_tier_limit: 20
+
+embedding_models:
+  - name: voyage-code-3
+    provider: voyageai
+    api_key_env: VOYAGE_API_KEY_1
+    tokens_free_tier_limit: 200000000
+  - name: voyage-code-3
+    provider: voyageai
+    api_key_env: VOYAGE_API_KEY_2
+    tokens_free_tier_limit: 200000000
+  - name: voyage-code-3
+    provider: voyageai
+    api_key_env: VOYAGE_API_KEY_3
+    tokens_free_tier_limit: 200000000
+  - name: voyage-code-3
+    provider: voyageai
+    api_key_env: VOYAGE_API_KEY_4
+    tokens_free_tier_limit: 200000000
+  - name: voyage-code-3
+    provider: voyageai
+    api_key_env: VOYAGE_API_KEY_5
+    tokens_free_tier_limit: 200000000
+  - name: voyage-code-3
+    provider: voyageai
+    api_key_env: VOYAGE_API_KEY_6
+    tokens_free_tier_limit: 200000000
+  - name: voyage-code-3
+    provider: voyageai
+    api_key_env: VOYAGE_API_KEY_7
+    tokens_free_tier_limit: 200000000
+  - name: voyage-code-3
+    provider: voyageai
+    api_key_env: VOYAGE_API_KEY_8
+    tokens_free_tier_limit: 200000000
+  - name: voyage-code-3
+    provider: voyageai
+    api_key_env: VOYAGE_API_KEY_9
+    tokens_free_tier_limit: 200000000
+  - name: voyage-code-3
+    provider: voyageai
+    api_key_env: VOYAGE_API_KEY_10
+    tokens_free_tier_limit: 200000000
+
+reranking_models:
+  - name: rerank-2.5
+    provider: voyageai
+    api_key_env: VOYAGE_API_KEY_1
+    tokens_free_tier_limit: 200000000
+  - name: rerank-2.5
+    provider: voyageai
+    api_key_env: VOYAGE_API_KEY_2
+    tokens_free_tier_limit: 200000000
+  - name: rerank-2.5
+    provider: voyageai
+    api_key_env: VOYAGE_API_KEY_3
+    tokens_free_tier_limit: 200000000
+  - name: rerank-2.5
+    provider: voyageai
+    api_key_env: VOYAGE_API_KEY_4
+    tokens_free_tier_limit: 200000000
+  - name: rerank-2.5
+    provider: voyageai
+    api_key_env: VOYAGE_API_KEY_5
+    tokens_free_tier_limit: 200000000
+  - name: rerank-2.5
+    provider: voyageai
+    api_key_env: VOYAGE_API_KEY_6
+    tokens_free_tier_limit: 200000000
+  - name: rerank-2.5
+    provider: voyageai
+    api_key_env: VOYAGE_API_KEY_7
+    tokens_free_tier_limit: 200000000
+  - name: rerank-2.5
+    provider: voyageai
+    api_key_env: VOYAGE_API_KEY_8
+    tokens_free_tier_limit: 200000000
+  - name: rerank-2.5
+    provider: voyageai
+    api_key_env: VOYAGE_API_KEY_9
+    tokens_free_tier_limit: 200000000
+  - name: rerank-2.5
+    provider: voyageai
+    api_key_env: VOYAGE_API_KEY_10
+    tokens_free_tier_limit: 200000000
+  - name: rerank-2.5-lite
+    provider: voyageai
+    api_key_env: VOYAGE_API_KEY_1
+    tokens_free_tier_limit: 200000000
+  - name: rerank-2.5-lite
+    provider: voyageai
+    api_key_env: VOYAGE_API_KEY_2
+    tokens_free_tier_limit: 200000000
+  - name: rerank-2.5-lite
+    provider: voyageai
+    api_key_env: VOYAGE_API_KEY_3
+    tokens_free_tier_limit: 200000000
+  - name: rerank-2.5-lite
+    provider: voyageai
+    api_key_env: VOYAGE_API_KEY_4
+    tokens_free_tier_limit: 200000000
+  - name: rerank-2.5-lite
+    provider: voyageai
+    api_key_env: VOYAGE_API_KEY_5
+    tokens_free_tier_limit: 200000000
+  - name: rerank-2.5-lite
+    provider: voyageai
+    api_key_env: VOYAGE_API_KEY_6
+    tokens_free_tier_limit: 200000000
+  - name: rerank-2.5-lite
+    provider: voyageai
+    api_key_env: VOYAGE_API_KEY_7
+    tokens_free_tier_limit: 200000000
+  - name: rerank-2.5-lite
+    provider: voyageai
+    api_key_env: VOYAGE_API_KEY_8
+    tokens_free_tier_limit: 200000000
+  - name: rerank-2.5-lite
+    provider: voyageai
+    api_key_env: VOYAGE_API_KEY_9
+    tokens_free_tier_limit: 200000000
+  - name: rerank-2.5-lite
+    provider: voyageai
+    api_key_env: VOYAGE_API_KEY_10
+    tokens_free_tier_limit: 200000000
+
+# Configuration
+config:
+  sufficiency_threshold: 0.8  # Configurable threshold for local-first answering
+

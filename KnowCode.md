@@ -178,7 +178,8 @@ Enable **retrieval-augmented generation (RAG)** by indexing code semantics in a 
 * **Embedding**: Generate dense vector representations (e.g., OpenAI text-embedding-3-small)
 * **Vector Storage**: Persist vectors for fast nearest-neighbor search
 * **Hybrid Retrieval**: Combine dense (vector) and sparse (BM25) search results
-* **Reranking**: Optimize results based on metadata, recency, and completeness
+* **Reranking**: Upgrade to **Cross-Encoder** (e.g., ms-marco-MiniLM) for high-precision relevance scoring vs. simple cosine similarity.
+* **Graph-Enhanced Query Expansion**: usage of the Semantic Graph to expand search terms (e.g. synonyms, child classes, interfaces)
 * **[HARDENED]** Sliding window chunking with overlap
 * **[HARDENED]** Real-time incremental indexing (Watch Mode)
 * **[HARDENED]** Dependency-aware result expansion (Completeness)
@@ -548,7 +549,112 @@ Use frontier LLMs **only where they add leverage**, not as a crutch.
 
 ---
 
-## **11\. Feedback, Validation & Evolution Layer**
+---
+ 
+ ## **10a. [NEW] Agent & Configuration Layer**
+ 
+ ### **Purpose**
+ 
+ Provide a robust, configurable interface to external LLMs with failover, rate limiting, and multi-provider support.
+ 
+ ### **Responsibilities**
+ 
+ * **Configuration**: Load model priorities and settings from `aimodels.yaml` or `knowcode.yaml`.
+ * **Model Selection**: Iterate through prioritized models.
+ * **Failover**: Automatically retry with the next model on `429 ResourceExhausted` errors.
+ * **Rate Limiting (New)**: Persistently track RPM (Requests Per Minute) and RPD (Requests Per Day) limit usage locally in `~/.knowcode/usage_stats.json` to avoid API bans.
+ * **Multi-Provider Support**: 
+   * **Google Gemini**: Native `google.genai` client.
+   * **OpenAI/OpenRouter**: Generic `openai` client support (e.g. Mistral via OpenRouter).
+ * **Reasoning Loop (ReAct)**: Dynamic capability to call tools (`list_files`, `find_references`, `search_history`) to disambiguate queries or explore before answering.
+ * **Temporal Integration**: Query `TemporalAnalyzer` to answer "why" and "when" questions based on git history.
+ * **Structured Output**: Support JSON/YAML schemas for automation tasks.
+ * **Task-Aware Context**: Dynamically adjust context prioritization (debug vs. explain) based on user intent.
+ 
+ ### **Inputs**
+ 
+ * `aimodels.yaml` configuration
+ * User query
+ * Retrieved context bundle
+ 
+ ### **Outputs**
+ 
+ * LLM Answer
+ * Updated usage statistics
+ 
+ ### **Downstream Consumers**
+ 
+ * `knowcode ask` command
+ * External IDE agents via MCP (Layer 10b)
+ 
+ ---
+
+ ## **10b. [NEW] Tool Exposure Layer (MCP)**
+ 
+ ### **Purpose**
+ 
+ Expose KnowCode's intelligence capabilities as **callable tools** for external AI agents (e.g., IDE-integrated agents like Google's Antigravity) via the Model Context Protocol (MCP).
+ 
+ ### **Responsibilities**
+ 
+ * **MCP Server**: Run a compliant MCP server discoverable by IDE agents.
+ * **Tool Registration**: Expose structured tools aligned with Layer 8 query types.
+ * **Sufficiency Scoring**: Return confidence metrics so agents can decide whether to use external LLMs.
+ * **Structured Responses**: JSON schemas for programmatic consumption.
+ * **[HARDENED]** Tool versioning for backward compatibility.
+ * **[HARDENED]** Rate limiting per-tool for resource protection.
+ * **[HARDENED]** Telemetry for tool usage analytics.
+ 
+ ### **Exposed Tools**
+ 
+ ```yaml
+ Tools:
+   - name: search_codebase
+     description: "Semantic + lexical search for code entities"
+     parameters: { query: string, limit: int }
+     returns: List of {entity_id, name, kind, file, snippet, score}
+     
+   - name: get_entity_context
+     description: "Token-budgeted context bundle with sufficiency score"
+     parameters: { entity_id: string, max_tokens: int, task_type: debug|refactor|extend|review }
+     returns: {context_text, included_entities, sufficiency_score, token_count}
+     
+   - name: trace_calls
+     description: "Multi-hop call graph traversal"
+     parameters: { entity_id: string, direction: callers|callees, depth: int }
+     returns: List of {entity, call_depth, file, line}
+     
+   - name: get_impact
+     description: "Deletion impact analysis"
+     parameters: { entity_id: string }
+     returns: {direct_dependents, transitive_dependents, risk_score}
+     
+   - name: explain_flow
+     description: "Step-by-step execution trace"
+     parameters: { entry_point: string, max_depth: int }
+     returns: {steps: [{entity, description, code_snippet}]}
+ ```
+ 
+ ### **Inputs**
+ 
+ * MCP tool invocation from external agent
+ * Tool parameters
+ 
+ ### **Outputs**
+ 
+ * Structured JSON responses
+ * Sufficiency scores for context adequacy
+ * Token estimates for budget planning
+ 
+ ### **Downstream Consumers**
+ 
+ * External IDE agents (Antigravity, Cursor, etc.)
+ * CI/CD pipelines
+ * Automation scripts
+ 
+ ---
+
+ ## **11. Feedback, Validation & Evolution Layer**
 
 ### **Purpose**
 
@@ -746,7 +852,60 @@ You've essentially defined a **code intelligence system**, not a chatbot with em
 19. **[ ] Scalability**: Large monorepo support and distributed processing.
 20. **[ ] Team Sharing**: Remote knowledge store sync and collaboration.
 
+### **Phase 7: Agentic Capabilities (IN PROGRESS)**
+21. **[x] Agent Architecture**: `Agent` class with configuration-driven model selection.
+22. **[x] Multi-Provider Support**: Google Gemini and OpenRouter/OpenAI integration.
+23. **[x] Rate Limiting**: Persistent RPM/RPD tracking and enforcement.
+24. **[ ] Tool Use (ReAct)**: file listing, reference searching, history querying.
+25. **[ ] Advanced Retrieval**: Cross-Encoder reranking and graph inquiry.
+
+### **Phase 8: IDE Integration (PLANNED)**
+26. **[ ] MCP Server (Layer 10b)**: Tool exposure for external IDE agents.
+27. **[ ] Sufficiency Scoring**: Context confidence metrics for local-first answering.
+28. **[ ] Task-Specific Templates**: Implement debug/refactor/extend/review context prioritization.
+29. **[ ] Multi-hop Queries**: Reachability and impact analysis with configurable depth.
+30. **[ ] Structured Responses**: JSON schema support across all endpoints.
+
 ### **Supporting Tooling & QA (COMPLETED)**
 - **[x] Tests**: Unit/integration/e2e coverage for parsing, indexing, retrieval, API, CLI, storage, and analysis.
 - **[x] CI/CD**: Ruff linting, pytest + coverage, MkDocs build, and automated changelog generation.
 - **[x] Evaluation Utilities**: Retrieval-quality evaluation script (`scripts/evaluate.py`).
+
+---
+
+## **Primary Use-Cases**
+
+### **Use-Case 1: Developer Q&A with Detailed Answers**
+
+> As a developer, I want to ask questions about my codebase in plain English and get detailed, step-by-step answers with code snippets.
+
+**Workflow**:
+1. Developer asks: "Explain what happens when 'knowcode ask' runs"
+2. System identifies question type (explanation)
+3. Agent retrieves relevant entities via semantic search
+4. Context synthesizer builds token-budgeted bundle
+5. LLM generates step-by-step explanation with code snippets
+
+**Key Capabilities Required**:
+- Query-type detection (Layer 10a)
+- Task-specific templates (Layer 9)
+- Multi-hop call graph traversal (Layer 8)
+- ReAct tool-use for complex queries (Layer 10a)
+
+### **Use-Case 2: IDE Agent Integration for Token Efficiency**
+
+> When prompting an IDE agent (e.g., Antigravity), it invokes KnowCode tools to retrieve context locally, minimizing expensive external LLM token usage.
+
+**Workflow**:
+1. User prompts IDE agent
+2. IDE agent invokes KnowCode tools via MCP
+3. KnowCode returns context with sufficiency score
+4. If score >= 0.8: Agent answers locally (zero external tokens)
+5. If score < 0.8: Agent uses returned context with external LLM (controlled tokens)
+
+**Key Capabilities Required**:
+- MCP Server (Layer 10b)
+- Sufficiency scoring (Layer 9)
+- Structured tool responses (Layer 10b)
+- Token budget reporting (Layer 9)
+

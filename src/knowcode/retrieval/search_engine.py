@@ -9,6 +9,7 @@ from knowcode.retrieval.hybrid_index import HybridIndex
 from knowcode.storage.knowledge_store import KnowledgeStore
 from knowcode.data_models import CodeChunk
 from knowcode.retrieval.reranker import Reranker
+from knowcode.config import AppConfig
 
 
 class SearchEngine:
@@ -20,6 +21,8 @@ class SearchEngine:
         embedding_provider: EmbeddingProvider,
         hybrid_index: HybridIndex,
         knowledge_store: KnowledgeStore,
+        config: Optional[AppConfig] = None,
+        use_voyageai_reranking: bool = True,
     ) -> None:
         """Initialize the search engine pipeline.
 
@@ -28,12 +31,17 @@ class SearchEngine:
             embedding_provider: Provider for generating query embeddings.
             hybrid_index: Combined sparse+dense index used for retrieval.
             knowledge_store: Graph store used to expand dependency context.
+            config: AppConfig with reranking model settings.
+            use_voyageai_reranking: Whether to try VoyageAI for reranking.
         """
         self.chunk_repo = chunk_repo
         self.embedding_provider = embedding_provider
         self.hybrid_index = hybrid_index
         self.knowledge_store = knowledge_store
-        self.reranker = Reranker()
+        self.reranker = Reranker(
+            use_voyageai=use_voyageai_reranking,
+            config=config,
+        )
 
     def search(
         self,

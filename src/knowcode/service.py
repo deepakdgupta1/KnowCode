@@ -137,12 +137,18 @@ class KnowCodeService:
             for e in entities
         ]
 
-    def get_context(self, target: str, max_tokens: int = 2000) -> dict[str, Any]:
+    def get_context(
+        self,
+        target: str,
+        max_tokens: int = 2000,
+        task_type: Optional["TaskType"] = None,
+    ) -> dict[str, Any]:
         """Get a context bundle for an entity.
 
         Args:
             target: Entity ID or search pattern.
             max_tokens: Maximum token budget for the context bundle.
+            task_type: Optional task type for context prioritization.
 
         Returns:
             Dictionary containing context text and metadata.
@@ -150,6 +156,8 @@ class KnowCodeService:
         Raises:
             ValueError: If no matching entity is found or context synthesis fails.
         """
+        from knowcode.data_models import TaskType as DataTaskType
+        
         # Try exact match first
         entity = self.store.get_entity(target)
         if not entity:
@@ -162,18 +170,33 @@ class KnowCodeService:
             raise ValueError(f"Entity not found: {target}")
 
         synthesizer = ContextSynthesizer(self.store, max_tokens=max_tokens)
-        bundle = synthesizer.synthesize(entity.id)
+        
+        # Use task-specific synthesis if task_type provided
+        if task_type is not None:
+            bundle = synthesizer.synthesize_with_task(entity.id, task_type)
+        else:
+            bundle = synthesizer.synthesize(entity.id)
         
         if not bundle:
              raise ValueError(f"Failed to synthesize context for {entity.id}")
 
-        return {
+        result = {
             "entity_id": bundle.target_entity.id,
             "context_text": bundle.context_text,
             "total_tokens": bundle.total_tokens,
             "truncated": bundle.truncated,
             "included_entities": bundle.included_entities,
         }
+        
+        # Add task-specific fields if using task synthesis
+        if hasattr(bundle, 'task_type') and hasattr(bundle, 'sufficiency_score'):
+            result["task_type"] = bundle.task_type.value if bundle.task_type else "general"
+            result["sufficiency_score"] = bundle.sufficiency_score
+        else:
+            result["task_type"] = "general"
+            result["sufficiency_score"] = 0.0
+            
+        return result
 
     def get_stats(self) -> dict[str, Any]:
         """Get statistics from the current store.

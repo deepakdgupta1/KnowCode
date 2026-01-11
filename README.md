@@ -24,8 +24,8 @@ source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 # Install KnowCode (with dev dependencies)
 uv sync --dev
 
-# Set OpenAI API Key (required for semantic search and 'ask' command)
-export GOOGLE_API_KEY="sk-..."
+# Set Google API Key (required for semantic search and 'ask' command)
+export GOOGLE_API_KEY="AIza..."
 ```
 
 ## Quick Start
@@ -141,7 +141,6 @@ knowcode semantic-search <query> [--index <path>] [--limit <n>]
 ```bash
 knowcode semantic-search "Where is the graph built?"
 ```
-```
 
 ### `server`
 Start the FastAPI intelligence server. This is the preferred way for locally hosted AI agents (IDEs) to interact with KnowCode.
@@ -181,7 +180,26 @@ knowcode history "KnowledgeStore"
 Ask questions about the codebase using an LLM agent. Requires `GOOGLE_API_KEY` environment variable.
 
 ```bash
-knowcode ask <question> [--model <model>]
+knowcode ask <question> [--config <path>]
+```
+
+**Configuration:**
+KnowCode looks for a configuration file in the following order:
+1. `--config` argument
+2. `aimodels.yaml` in current directory
+3. `~/.aimodels.yaml`
+
+**Example `aimodels.yaml`:**
+```yaml
+models:
+  - name: gemini-2.0-flash-lite
+    provider: google
+    api_key_env: GOOGLE_API_KEY
+    rpm_free_tier_limit: 10
+    rpd_free_tier_limit: 1000
+  - name: gemini-1.5-flash
+    provider: google
+    api_key_env: GOOGLE_API_KEY
 ```
 
 **Example:**

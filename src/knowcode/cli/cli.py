@@ -488,16 +488,17 @@ def history(target: Optional[str], store: str, limit: int) -> None:
     help="Path to knowledge store file or directory",
 )
 @click.option(
-    "--model", "-m",
-    default="gpt-4o",
-    help="OpenAI model to use (default: gpt-4o)",
+    "--config", "-c",
+    type=click.Path(exists=True, dir_okay=False),
+    help="Path to configuration file for model priorities",
 )
-def ask(query_text: tuple[str], store: str, model: str) -> None:
+def ask(query_text: tuple[str], store: str, config: Optional[str]) -> None:
     """Ask a question about the codebase using AI.
     
     QUERY_TEXT: The question to ask.
     """
     from knowcode.llm.agent import Agent
+    from knowcode.config import AppConfig
     
     question = " ".join(query_text)
     
@@ -508,7 +509,9 @@ def ask(query_text: tuple[str], store: str, model: str) -> None:
         sys.exit(1)
         
     try:
-        agent = Agent(service, model=model)
+        app_config = AppConfig.load(config)
+        agent = Agent(service, config=app_config)
+        
         click.echo(f"🤔 Asking KnowCode: '{question}'...")
         answer = agent.answer(question)
         click.echo("\n" + answer)
@@ -520,5 +523,68 @@ def ask(query_text: tuple[str], store: str, model: str) -> None:
         sys.exit(1)
 
 
+@cli.command("mcp-server")
+@click.option(
+    "--store", "-s",
+    type=click.Path(exists=True),
+    default=".",
+    help="Path to knowledge store file or directory",
+)
+def mcp_server(store: str) -> None:
+    """Start MCP server for IDE integration.
+    
+    Exposes KnowCode tools via the Model Context Protocol (MCP) using
+    STDIO transport. Three tools are available:
+    
+    \b
+    - search_codebase: Search for code entities by name
+    - get_entity_context: Get detailed context for an entity  
+    - trace_calls: Trace call graph (callers/callees) with depth
+    
+    Example usage with Claude Desktop or other MCP clients:
+    
+    \b
+        # In your MCP client config, add:
+        {
+            "knowcode": {
+                "command": "knowcode",
+                "args": ["mcp-server", "--store", "/path/to/project"]
+            }
+        }
+    """
+    store_path = Path(store)
+    if store_path.is_dir():
+        store_path = store_path / KnowledgeStore.DEFAULT_FILENAME
+        
+    if not store_path.exists():
+        click.echo(
+            "Error: Knowledge store not found. Run 'knowcode analyze' first.",
+            err=True
+        )
+        sys.exit(1)
+    
+    try:
+        from knowcode.mcp.server import run_server
+        
+        click.echo(f"🔌 Starting MCP server...", err=True)
+        click.echo(f"   Store: {store_path}", err=True)
+        click.echo(f"   Transport: STDIO", err=True)
+        click.echo(f"   Tools: search_codebase, get_entity_context, trace_calls", err=True)
+        
+        # Run the server (blocking)
+        run_server(store_path)
+        
+    except ImportError as e:
+        click.echo(
+            f"Error: MCP package not installed. Install with: pip install mcp\n{e}",
+            err=True
+        )
+        sys.exit(1)
+    except Exception as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
+
 if __name__ == "__main__":
     cli()
+
