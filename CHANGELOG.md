@@ -444,3 +444,34 @@
 #### 📦 Other Changes
 * Built a mature search and retrieval soln. Enabled tool-based usage via MCP server. Introduced AI models - Devstral 2 and Gemini for natural language interactions, VoyageAI for embedding and reranking. (`7cf4de5`)
 * Replaced OpenAI LLM API Key with Gemini API Key for the ability to ask questions in plain English. Updated documentation and project version to cover missing items. (`6e6d1e6`)
+
+
+---
+
+## [Unreleased] - 2026-01-11
+
+**Origin:** Generated
+**Range:** `HEAD~5..HEAD`
+**Commit Count:** 5
+**Confidence:** medium
+
+**Focus:** Feature Development
+
+### 🧠 Temporal Context & Intent
+> *Auto-generated: Add context about why these changes were made.*
+
+### 🏗️ Architectural Impact
+> *Auto-generated: Describe high-level architectural shifts.*
+
+### 📝 Delta Changes
+
+#### 🚀 Features
+* complete agentic capabilities and IDE integration; update README with MCP server details and configuration (`ab3a3c9`)
+
+#### 📚 Documentation
+* update changelog [skip ci] (`75b9b8e`)
+* update changelog [skip ci] (`374cfb5`)
+
+#### 📦 Other Changes
+* Built a mature search and retrieval soln. Enabled tool-based usage via MCP server. Introduced AI models - Devstral 2 and Gemini for natural language interactions, VoyageAI for embedding and reranking. (`7cf4de5`)
+* Replaced OpenAI LLM API Key with Gemini API Key for the ability to ask questions in plain English. Updated documentation and project version to cover missing items. (`6e6d1e6`)
