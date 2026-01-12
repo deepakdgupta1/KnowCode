@@ -156,14 +156,14 @@ class KnowCodeMCPServer:
         self.config_path = config_path
         self._service: Optional[KnowCodeService] = None
         
-    def _ensure_service(self) -> KnowCodeService:
+    def _ensure_service(self, allow_missing_store: bool = False) -> KnowCodeService:
         """Create the shared service (loads store/index lazily)."""
         if self._service is None:
             store_file = self.store_path
             if store_file.is_dir():
                 store_file = store_file / KnowledgeStore.DEFAULT_FILENAME
 
-            if not store_file.exists():
+            if not allow_missing_store and not store_file.exists():
                 raise FileNotFoundError(
                     f"Knowledge store not found: {store_file}\n"
                     "Run 'knowcode analyze' first to build the knowledge graph."
@@ -174,6 +174,14 @@ class KnowCodeMCPServer:
                 config_path=self.config_path,
             )
         return self._service
+
+    def _ensure_store_ready(self, service: KnowCodeService) -> None:
+        """Ensure the knowledge store exists by running analyze if needed."""
+        store_root = service.store_path if service.store_path.is_dir() else service.store_path.parent
+        store_file = store_root / KnowledgeStore.DEFAULT_FILENAME
+        if store_file.exists():
+            return
+        service.analyze(directory=store_root, output=store_root)
     
     def search_codebase(self, query: str, limit: int = 10) -> list[dict[str, Any]]:
         """Search for entities by name pattern.
@@ -185,7 +193,8 @@ class KnowCodeMCPServer:
         Returns:
             List of matching entity summaries.
         """
-        service = self._ensure_service()
+        service = self._ensure_service(allow_missing_store=True)
+        self._ensure_store_ready(service)
         entities = service.store.search(query)[:limit]
         
         return [
@@ -216,7 +225,8 @@ class KnowCodeMCPServer:
         Returns:
             Context bundle with sufficiency score.
         """
-        service = self._ensure_service()
+        service = self._ensure_service(allow_missing_store=True)
+        self._ensure_store_ready(service)
         try:
             task = TaskType(task_type)
         except ValueError:
@@ -260,7 +270,8 @@ class KnowCodeMCPServer:
         Returns:
             List of entities with call_depth.
         """
-        service = self._ensure_service()
+        service = self._ensure_service(allow_missing_store=True)
+        self._ensure_store_ready(service)
         return service.store.trace_calls(
             entity_id,
             direction=direction,
@@ -277,7 +288,7 @@ class KnowCodeMCPServer:
         expand_deps: bool = True,
     ) -> dict[str, Any]:
         """Retrieve a task-aware context bundle for a query."""
-        service = self._ensure_service()
+        service = self._ensure_service(allow_missing_store=True)
         task_override: Optional[TaskType] = None
         if task_type != "auto":
             try:

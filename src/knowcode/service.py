@@ -125,6 +125,34 @@ class KnowCodeService:
         from knowcode.llm.query_classifier import classify_query
 
         errors: list[str] = []
+        store_root = self.store_path if self.store_path.is_dir() else self.store_path.parent
+        store_file = store_root / KnowledgeStore.DEFAULT_FILENAME
+        index_path = store_root / "knowcode_index"
+
+        if not store_file.exists():
+            try:
+                self.analyze(directory=store_root, output=store_root)
+            except Exception as e:
+                return {
+                    "query": query,
+                    "task_type": task_type.value if task_type else "general",
+                    "task_confidence": 0.0,
+                    "retrieval_mode": "none",
+                    "context_text": "",
+                    "total_tokens": 0,
+                    "max_tokens": max_tokens,
+                    "truncated": False,
+                    "sufficiency_score": 0.0,
+                    "selected_entities": [],
+                    "evidence": [],
+                    "errors": [f"Auto-analyze failed: {e}"],
+                }
+
+        if not index_path.exists():
+            try:
+                self._build_index(store_root, index_path)
+            except Exception as e:
+                errors.append(f"Auto-index failed; falling back to lexical: {e}")
 
         detected_task_type, confidence = classify_query(query)
         resolved_task_type = task_type or detected_task_type
@@ -148,9 +176,6 @@ class KnowCodeService:
 
         if per_entity_max_tokens is None:
             per_entity_max_tokens = max(200, min(2000, max_tokens // limit_entities))
-
-        store_root = self.store_path if self.store_path.is_dir() else self.store_path.parent
-        index_path = store_root / "knowcode_index"
 
         selected_entity_ids: list[str] = []
         evidence: list[dict[str, Any]] = []
@@ -272,6 +297,18 @@ class KnowCodeService:
             "errors": errors,
         }
 
+    def _build_index(self, directory: str | Path, index_path: str | Path) -> int:
+        """Build a semantic index for a directory and persist it."""
+        from knowcode.llm.embedding import create_embedding_provider
+        from knowcode.indexing.indexer import Indexer
+
+        provider = create_embedding_provider(app_config=self.app_config)
+        indexer = Indexer(provider)
+        count = indexer.index_directory(directory)
+        indexer.save(index_path)
+        self._indexer = indexer
+        return count
+
     def _extract_query_keywords(self, query: str) -> list[str]:
         """Extract identifier-like keywords from a natural-language query."""
         stopwords = {
@@ -381,8 +418,15 @@ class KnowCodeService:
         output_path = Path(output)
         store.save(output_path)
         self._store = store
-        
-        return builder.stats()
+
+        store_root = output_path if output_path.is_dir() else output_path.parent
+        index_path = store_root / "knowcode_index"
+        index_count = self._build_index(Path(directory), index_path)
+
+        stats = builder.stats()
+        stats["indexed_chunks"] = index_count
+        stats["index_path"] = str(index_path)
+        return stats
 
     def search(self, pattern: str) -> list[dict[str, Any]]:
         """Search entities by pattern.

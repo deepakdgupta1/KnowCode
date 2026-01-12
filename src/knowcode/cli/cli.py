@@ -67,10 +67,14 @@ def analyze(directory: str, output: str, ignore: tuple[str, ...], temporal: bool
     click.echo(f"  Relationships: {stats['total_relationships']}")
     if stats.get('total_errors', 0) > 0:
         click.echo(f"  Errors: {stats['total_errors']}")
+    if stats.get("indexed_chunks") is not None:
+        click.echo(f"  Indexed chunks: {stats['indexed_chunks']}")
 
     output_path = Path(output)
     save_path = output_path / KnowledgeStore.DEFAULT_FILENAME if output_path.is_dir() else output_path
     click.echo(f"\n  Saved to: {save_path}")
+    if stats.get("index_path"):
+        click.echo(f"  Index saved to: {stats['index_path']}")
 
 
 @cli.command()
@@ -557,15 +561,12 @@ def mcp_server(store: str, config: Optional[str]) -> None:
         }
     """
     store_path = Path(store)
-    if store_path.is_dir():
-        store_path = store_path / KnowledgeStore.DEFAULT_FILENAME
-        
-    if not store_path.exists():
+    store_file = store_path / KnowledgeStore.DEFAULT_FILENAME if store_path.is_dir() else store_path
+    if not store_file.exists():
         click.echo(
-            "Error: Knowledge store not found. Run 'knowcode analyze' first.",
-            err=True
+            "⚠️ Knowledge store not found. It will be built on first query.",
+            err=True,
         )
-        sys.exit(1)
     
     try:
         from knowcode.mcp.server import run_server
