@@ -87,7 +87,7 @@ flowchart TB
 
 ### **Phase 2: Intelligence Server & RAG (COMPLETED)**
 6. **[x] FastAPI Server (Layer 10)**: Health, stats, search, context, semantic query, reload, entity details, callers/callees.
-7. **[x] Semantic Search & Indexing (Layer 4a)**: Chunker (module header/imports/entities), OpenAI embeddings, FAISS vector store, hybrid BM25+vector retrieval (RRF), reranking, dependency expansion.
+7. **[x] Semantic Search & Indexing (Layer 4a)**: Chunker (module header/imports/entities), config-driven embeddings (OpenAI or VoyageAI), FAISS vector store, hybrid BM25+vector retrieval (RRF), reranking, dependency expansion.
 8. **[x] Indexer Persistence + CLI**: `index`/`semantic-search` commands with save/load.
 9. **[x] Watch Mode**: Background indexer + filesystem monitor for incremental re-indexing.
 10. **[x] CLI Workflows**: `analyze`, `query`, `context`, `export`, `stats`, `server`, `history`, `ask`.
@@ -109,3 +109,19 @@ flowchart TB
 18. **[ ] Security & RBAC**: Permissioned access and audit trails.
 19. **[ ] Scalability**: Large monorepo support and distributed processing.
 20. **[ ] Team Sharing**: Remote knowledge store sync and collaboration.
+
+### **Phase 7: Agentic Capabilities (COMPLETED v2.2)**
+21. **[x] Agent Architecture**: `Agent` class with configuration-driven model selection.
+22. **[x] Multi-Provider Support**: Google Gemini and OpenRouter/OpenAI integration.
+23. **[x] Rate Limiting**: Persistent RPM/RPD tracking and enforcement.
+24. **[x] Query Classification**: 6 task types (explain, debug, extend, review, locate, general).
+25. **[x] Smart Answer**: Local-first answering with configurable sufficiency threshold.
+26. **[x] VoyageAI Reranking**: Cross-encoder reranking with signal-based fallback.
+
+### **Phase 8: IDE Integration (COMPLETED v2.2)**
+27. **[x] MCP Server (Layer 10b)**: Tool exposure via STDIO for IDE agents.
+28. **[x] Core Tools**: `search_codebase`, `get_entity_context`, `trace_calls`.
+29. **[x] Sufficiency Scoring**: Context confidence metrics for local-first answering.
+30. **[x] Task-Specific Templates**: Debug/extend/review/explain/locate prioritization.
+31. **[x] Multi-hop Queries**: `trace_calls(depth=N)` and `get_impact()` analysis.
+32. **[x] Structured Responses**: JSON with `task_type` and `sufficiency_score`.

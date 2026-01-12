@@ -1,6 +1,7 @@
 """Evaluation script for retrieval quality."""
 
 import json
+import os
 import sys
 from pathlib import Path
 from knowcode.storage.chunk_repository import InMemoryChunkRepository
@@ -35,11 +36,11 @@ def evaluate(ground_truth_path: Path, index_path: Path) -> dict:
     # Note: We need a real provider for queries, or mock if vectors are precomputed?
     # For evaluation we assume we have an API key or use the same provider used for indexing.
     # Here we assume OpenAI.
-    try:
-        provider = OpenAIEmbeddingProvider(EmbeddingConfig())
-    except:
-        print("Skipping evaluation: No OpenAI API Key found")
+    if not os.environ.get("OPENAI_API_KEY"):
+        print("Skipping evaluation: OPENAI_API_KEY not set")
         return {}
+
+    provider = OpenAIEmbeddingProvider(EmbeddingConfig())
 
     hybrid = HybridIndex(repo, vs)
     

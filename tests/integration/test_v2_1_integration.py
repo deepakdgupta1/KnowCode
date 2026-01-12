@@ -1,8 +1,6 @@
 """Integration tests for v2.1 search pipeline."""
 
-import pytest
 from unittest.mock import MagicMock
-from pathlib import Path
 from knowcode.data_models import EmbeddingConfig
 from knowcode.llm.embedding import EmbeddingProvider
 from knowcode.indexing.indexer import Indexer

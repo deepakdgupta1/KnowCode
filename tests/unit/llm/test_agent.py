@@ -1,90 +1,120 @@
 """Tests for the KnowCode Agent."""
 
-import os
-from unittest.mock import MagicMock, patch
+from __future__ import annotations
 
-import pytest
+from pathlib import Path
+from unittest.mock import MagicMock
+
+from knowcode.config import AppConfig, ModelConfig
+from knowcode.data_models import TaskType
 from knowcode.llm.agent import Agent
-from knowcode.data_models import Entity, EntityKind, Location
 
 
-@pytest.fixture
-def mock_service():
-    service = MagicMock()
-    return service
+class DummyService:
+    def __init__(self, store_path: Path) -> None:
+        self.store_path = store_path
+        self.retrieve_calls: list[str] = []
+        self.retrieval_result: dict | None = None
+
+    def retrieve_context_for_query(self, query: str, **_kwargs):
+        self.retrieve_calls.append(query)
+        if self.retrieval_result is not None:
+            return self.retrieval_result
+        return {
+            "query": query,
+            "task_type": TaskType.GENERAL.value,
+            "task_confidence": 0.0,
+            "retrieval_mode": "none",
+            "context_text": "CTX",
+            "total_tokens": 1,
+            "max_tokens": 6000,
+            "truncated": False,
+            "sufficiency_score": 0.0,
+            "selected_entities": [],
+            "evidence": [],
+            "errors": [],
+        }
 
 
-@pytest.fixture
-def mock_openai():
-    with patch("knowcode.llm.agent.OpenAI") as mock:
-        yield mock
-
-
-def test_agent_initialization(mock_service):
-    """Test that agent initializes correctly."""
-    # With API key
-    with patch.dict(os.environ, {"GOOGLE_API_KEY": "sk-test"}):
-        agent = Agent(mock_service)
-        assert agent.client is not None
-        
-    # Without API key
-    with patch.dict(os.environ, {}, clear=True):
-        agent = Agent(mock_service)
-        assert agent.client is None
-
-
-def test_agent_answer_no_key(mock_service):
-    """Test error when answering without API key."""
-    with patch.dict(os.environ, {}, clear=True):
-        agent = Agent(mock_service)
-        with pytest.raises(ValueError, match="GOOGLE_API_KEY"):
-            agent.answer("test query")
-
-
-def test_agent_answer_success(mock_service, mock_openai):
-    """Test successful answer generation."""
-    # Setup mocks
-    mock_entity = Entity(
-        id="file.py::MyClass",
-        kind=EntityKind.CLASS,
-        name="MyClass",
-        qualified_name="pkg.MyClass",
-        location=Location("file.py", 1, 10),
+def _make_agent(service: DummyService) -> Agent:
+    cfg = AppConfig(
+        models=[ModelConfig(name="test-model", provider="google", api_key_env="TEST_KEY")]
     )
-    mock_service.search.return_value = [mock_entity]
-    mock_service.get_context.return_value = {
-        "context_text": "# MyClass Context",
-        "total_tokens": 100,
+    agent = Agent(service, cfg)
+    agent.rate_limiter = MagicMock()
+    agent.rate_limiter.check_availability.return_value = True
+
+    stub_client = MagicMock()
+    stub_client.models.generate_content.return_value = MagicMock(text="ANSWER")
+    agent._get_client = MagicMock(return_value=stub_client)
+    return agent
+
+
+def test_agent_answer_uses_unified_retrieval_kernel(tmp_path: Path) -> None:
+    service = DummyService(store_path=tmp_path)
+    service.retrieval_result = {
+        "query": "Explain e1",
+        "task_type": TaskType.EXPLAIN.value,
+        "task_confidence": 1.0,
+        "retrieval_mode": "semantic",
+        "context_text": "CTX:e1",
+        "total_tokens": 10,
+        "max_tokens": 6000,
+        "truncated": False,
+        "sufficiency_score": 0.9,
+        "selected_entities": [{"entity_id": "e1"}],
+        "evidence": [],
+        "errors": [],
     }
-    
-    mock_completion = MagicMock()
-    mock_completion.choices[0].message.content = "This is the answer."
-    mock_openai.return_value.chat.completions.create.return_value = mock_completion
-    
-    # Run test
-    with patch.dict(os.environ, {"GOOGLE_API_KEY": "sk-test"}):
-        agent = Agent(mock_service)
-        answer = agent.answer("How does MyClass work?")
-        
-        assert answer == "This is the answer."
-        assert mock_service.search.called
-        assert mock_service.get_context.called
+    agent = _make_agent(service)
+
+    answer = agent.answer("Explain e1")
+    assert answer == "ANSWER"
+    assert service.retrieve_calls == ["Explain e1"]
 
 
-def test_agent_answer_no_entities(mock_service, mock_openai):
-    """Test answering when no relevant entities are found."""
-    mock_service.search.return_value = []
-    
-    mock_completion = MagicMock()
-    mock_completion.choices[0].message.content = "I don't know."
-    mock_openai.return_value.chat.completions.create.return_value = mock_completion
-    
-    with patch.dict(os.environ, {"GOOGLE_API_KEY": "sk-test"}):
-        agent = Agent(mock_service)
-        agent.answer("Unknown thing")
-        
-        # Verify prompt mentions no entities found
-        call_args = mock_openai.return_value.chat.completions.create.call_args
-        messages = call_args.kwargs["messages"]
-        user_msg = messages[1]["content"]
-        assert "No specific entities found" in user_msg
+def test_smart_answer_uses_local_when_sufficient(tmp_path: Path) -> None:
+    service = DummyService(store_path=tmp_path)
+    service.retrieval_result = {
+        "query": "Where is Foo defined?",
+        "task_type": TaskType.LOCATE.value,
+        "task_confidence": 1.0,
+        "retrieval_mode": "lexical",
+        "context_text": "CTX:Foo",
+        "total_tokens": 10,
+        "max_tokens": 6000,
+        "truncated": False,
+        "sufficiency_score": 1.0,
+        "selected_entities": [{"entity_id": "e1"}],
+        "evidence": [],
+        "errors": [],
+    }
+    agent = _make_agent(service)
+
+    result = agent.smart_answer("Where is Foo defined?")
+    assert result["source"] == "local"
+    assert result["task_type"] == TaskType.LOCATE.value
+
+
+def test_smart_answer_calls_llm_when_insufficient(tmp_path: Path) -> None:
+    service = DummyService(store_path=tmp_path)
+    service.retrieval_result = {
+        "query": "Explain Foo",
+        "task_type": TaskType.EXPLAIN.value,
+        "task_confidence": 1.0,
+        "retrieval_mode": "none",
+        "context_text": "",
+        "total_tokens": 0,
+        "max_tokens": 6000,
+        "truncated": False,
+        "sufficiency_score": 0.0,
+        "selected_entities": [],
+        "evidence": [],
+        "errors": [],
+    }
+    agent = _make_agent(service)
+    agent.answer = MagicMock(return_value="LLM")  # type: ignore[method-assign]
+
+    result = agent.smart_answer("Explain Foo")
+    assert result["source"] == "llm"
+    assert result["answer"] == "LLM"

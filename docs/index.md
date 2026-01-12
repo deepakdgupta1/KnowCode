@@ -24,8 +24,10 @@ source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 # Install KnowCode (with dev dependencies)
 uv sync --dev
 
-# Set Google API Key (required for semantic search and 'ask' command)
-export GOOGLE_API_KEY="sk-..."
+# Set API keys (only needed for the features you use; see aimodels.yaml)
+export VOYAGE_API_KEY_1="..."   # embeddings + reranking (semantic search)
+export OPENAI_API_KEY="..."     # embeddings (alternative to VoyageAI)
+export GOOGLE_API_KEY_1="..."   # LLM (Gemini) for `knowcode ask`
 ```
 
 ## Quick Start
@@ -127,20 +129,19 @@ knowcode stats [--store <path>]
 Build a semantic search index for your codebase.
 
 ```bash
-knowcode index <directory> [--output <path>]
+knowcode index <directory> [--output <path>] [--config <path>]
 ```
 
 ### `semantic-search`
 Perform a natural language search against the semantic index.
 
 ```bash
-knowcode semantic-search <query> [--index <path>] [--limit <n>]
+knowcode semantic-search <query> [--index <path>] [--store <path>] [--config <path>] [--limit <n>]
 ```
 
 **Example:**
 ```bash
 knowcode semantic-search "Where is the graph built?"
-```
 ```
 
 ### `server`
@@ -156,9 +157,11 @@ knowcode server --port 8080
 ```
 
 Once running, you can access endpoints like:
-- `GET /api/v1/context?target=MyClass`
+- `GET /api/v1/context?target=MyClass&task_type=debug`
 - `GET /api/v1/search?q=parser` `(lexical search)`
 - `POST /api/v1/context/query` `(semantic search)`
+- `GET /api/v1/trace_calls/{entity_id}?direction=callers&depth=3` `(multi-hop call graph)`
+- `GET /api/v1/impact/{entity_id}` `(deletion impact analysis)`
 - `POST /api/v1/reload` (to refresh data after a new `analyze` run)
 
 ### `history`
@@ -178,7 +181,7 @@ knowcode history "KnowledgeStore"
 ```
 
 ### `ask`
-Ask questions about the codebase using an LLM agent. Requires `GOOGLE_API_KEY` environment variable.
+Ask questions about the codebase using an LLM agent. Requires an API key for at least one configured model in `aimodels.yaml`.
 
 ```bash
 knowcode ask <question> [--config <path>]
@@ -192,21 +195,28 @@ KnowCode looks for a configuration file in the following order:
 
 **Example `aimodels.yaml`:**
 ```yaml
-models:
-  - name: gemini-2.0-flash-lite
+natural_language_models:
+  - name: gemini-2.5-flash
     provider: google
-    api_key_env: GOOGLE_API_KEY
-    rpm_free_tier_limit: 10
-    rpd_free_tier_limit: 1000
-  - name: gemini-1.5-flash
-    provider: google
-    api_key_env: GOOGLE_API_KEY
+    api_key_env: GOOGLE_API_KEY_1
 ```
 
 **Example:**
 ```bash
 knowcode ask "How does the graph builder work?"
 ```
+
+### `mcp-server`
+Start an MCP (Model Context Protocol) server for IDE agent integration.
+
+```bash
+knowcode mcp-server [--store <path>]
+```
+
+**Tools Exposed:**
+- `search_codebase` - Search for code entities by name
+- `get_entity_context` - Get detailed context for an entity
+- `trace_calls` - Trace call graph (callers/callees) with depth
 
 ## Supported Languages (MVP)
 
@@ -304,6 +314,12 @@ See [evolution.md](evolution.md) for the full vision. The MVP focuses on:
 - ✅ v1.4: Runtime signal integration
 - ✅ v2.0: Intelligence Server mode (local API for local IDE agents)
 - ✅ v2.1: Semantic search with embeddings, hybrid retrieval, and watch mode
+- ✅ v2.2: Developer Q&A & IDE Agent Integration:
+  - Query classification and task-specific templates
+  - Multi-hop `trace_calls()` and impact analysis
+  - Local-first `smart_answer()` with sufficiency scoring
+  - MCP server for IDE integration
+  - VoyageAI cross-encoder reranking
 
 **Future releases:**
 - v3.0: Team sharing & Enterprise features (RBAC, SSO, etc.)

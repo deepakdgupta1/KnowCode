@@ -5,7 +5,6 @@ Supports two reranking strategies:
 2. Signal-based scoring - local, no API required
 """
 
-import os
 import time
 from typing import Optional
 
@@ -176,4 +175,3 @@ class Reranker:
             reranked = reranked[:top_k]
             
         return reranked
-

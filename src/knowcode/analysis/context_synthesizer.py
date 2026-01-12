@@ -1,6 +1,6 @@
 """Context synthesizer for generating AI-ready context bundles."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 from knowcode.storage.knowledge_store import KnowledgeStore
@@ -485,4 +485,3 @@ class ContextSynthesizer:
             score *= 0.5
             
         return min(1.0, round(score / max_score, 2)) if max_score > 0 else 0.0
-

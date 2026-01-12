@@ -1,6 +1,6 @@
-import pytest
 from unittest.mock import MagicMock, patch
 from google.api_core.exceptions import ResourceExhausted
+from pathlib import Path
 
 from knowcode.config import AppConfig, ModelConfig
 from knowcode.llm.agent import Agent
@@ -8,7 +8,21 @@ from knowcode.llm.agent import Agent
 def test_agent_failover_logic():
     # Setup mock service and config
     mock_service = MagicMock()
-    mock_service.search.return_value = [] # No context needed for this test
+    mock_service.store_path = Path(".")
+    mock_service.retrieve_context_for_query.return_value = {
+        "query": "test query",
+        "task_type": "general",
+        "task_confidence": 0.0,
+        "retrieval_mode": "none",
+        "context_text": "",
+        "total_tokens": 0,
+        "max_tokens": 6000,
+        "truncated": False,
+        "sufficiency_score": 0.0,
+        "selected_entities": [],
+        "evidence": [],
+        "errors": [],
+    }
     
     config = AppConfig(models=[
         ModelConfig(name="primary-model", api_key_env="TEST_KEY"),

@@ -82,20 +82,25 @@ def analyze(directory: str, output: str, ignore: tuple[str, ...], temporal: bool
     default="knowcode_index",
     help="Output directory for index (default: knowcode_index)",
 )
-def index(directory: str, output: str) -> None:
+@click.option(
+    "--config", "-c",
+    type=click.Path(exists=True, dir_okay=False),
+    help="Path to configuration file (aimodels.yaml) for embedding models.",
+)
+def index(directory: str, output: str, config: Optional[str]) -> None:
     """Build semantic search index for a codebase.
 
     DIRECTORY: Path to the codebase to index.
     """
-    from knowcode.llm.embedding import OpenAIEmbeddingProvider
+    from knowcode.config import AppConfig
+    from knowcode.llm.embedding import create_embedding_provider
     from knowcode.indexing.indexer import Indexer
-    from knowcode.models import EmbeddingConfig
 
     click.echo(f"Indexing: {directory}")
 
     try:
-        config = EmbeddingConfig()
-        provider = OpenAIEmbeddingProvider(config)
+        app_config = AppConfig.load(config)
+        provider = create_embedding_provider(app_config=app_config)
         indexer = Indexer(provider)
 
         count = indexer.index_directory(directory)
@@ -192,34 +197,33 @@ def query(query_type: str, target: str, store: str, as_json: bool) -> None:
     help="Path to knowledge store (directory or file)",
 )
 @click.option(
+    "--config", "-c",
+    type=click.Path(exists=True, dir_okay=False),
+    help="Path to configuration file (aimodels.yaml) for embedding/reranking models.",
+)
+@click.option(
     "--limit", "-l", type=int, default=5, help="Number of results (default: 5)"
 )
-def semantic_search(query_text: tuple[str], index: str, store: str, limit: int) -> None:
+def semantic_search(
+    query_text: tuple[str],
+    index: str,
+    store: str,
+    config: Optional[str],
+    limit: int,
+) -> None:
     """Search codebase using semantic similarity.
 
     QUERY_TEXT: The search query.
     """
-    from knowcode.llm.embedding import OpenAIEmbeddingProvider
-    from knowcode.retrieval.hybrid_index import HybridIndex
-    from knowcode.indexing.indexer import Indexer
-    from knowcode.models import EmbeddingConfig
-    from knowcode.retrieval.search_engine import SearchEngine
+    from knowcode.config import AppConfig
 
     question = " ".join(query_text)
     click.echo(f"Searching for: '{question}'...")
 
     try:
-        service = KnowCodeService(store_path=store)
-        
-        config = EmbeddingConfig()
-        provider = OpenAIEmbeddingProvider(config)
-        indexer = Indexer(provider)
-        indexer.load(index)
-        
-        hybrid_index = HybridIndex(indexer.chunk_repo, indexer.vector_store)
-        engine = SearchEngine(
-            indexer.chunk_repo, provider, hybrid_index, service.store
-        )
+        app_config = AppConfig.load(config)
+        service = KnowCodeService(store_path=store, app_config=app_config)
+        engine = service.get_search_engine(index_path=index)
 
         results = engine.search(question, limit=limit)
 
@@ -503,13 +507,8 @@ def ask(query_text: tuple[str], store: str, config: Optional[str]) -> None:
     question = " ".join(query_text)
     
     try:
-        service = KnowCodeService(store_path=store)
-    except FileNotFoundError:
-        click.echo("Error: Knowledge store not found. Run 'knowcode analyze' first.", err=True)
-        sys.exit(1)
-        
-    try:
         app_config = AppConfig.load(config)
+        service = KnowCodeService(store_path=store, app_config=app_config)
         agent = Agent(service, config=app_config)
         
         click.echo(f"🤔 Asking KnowCode: '{question}'...")
@@ -530,7 +529,12 @@ def ask(query_text: tuple[str], store: str, config: Optional[str]) -> None:
     default=".",
     help="Path to knowledge store file or directory",
 )
-def mcp_server(store: str) -> None:
+@click.option(
+    "--config", "-c",
+    type=click.Path(exists=True, dir_okay=False),
+    help="Path to configuration file for model priorities",
+)
+def mcp_server(store: str, config: Optional[str]) -> None:
     """Start MCP server for IDE integration.
     
     Exposes KnowCode tools via the Model Context Protocol (MCP) using
@@ -566,13 +570,16 @@ def mcp_server(store: str) -> None:
     try:
         from knowcode.mcp.server import run_server
         
-        click.echo(f"🔌 Starting MCP server...", err=True)
+        click.echo("🔌 Starting MCP server...", err=True)
         click.echo(f"   Store: {store_path}", err=True)
-        click.echo(f"   Transport: STDIO", err=True)
-        click.echo(f"   Tools: search_codebase, get_entity_context, trace_calls", err=True)
+        click.echo("   Transport: STDIO", err=True)
+        click.echo(
+            "   Tools: search_codebase, get_entity_context, trace_calls, retrieve_context_for_query",
+            err=True,
+        )
         
         # Run the server (blocking)
-        run_server(store_path)
+        run_server(store_path, config_path=config)
         
     except ImportError as e:
         click.echo(
@@ -587,4 +594,3 @@ def mcp_server(store: str) -> None:
 
 if __name__ == "__main__":
     cli()
-

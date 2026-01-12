@@ -1,6 +1,5 @@
 """Configuration management for KnowCode."""
 
-import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -123,4 +122,3 @@ class AppConfig:
         except Exception as e:
             print(f"Warning: Failed to load config from {path}: {e}")
             return cls.default()
-

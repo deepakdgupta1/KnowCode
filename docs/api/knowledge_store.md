@@ -55,6 +55,23 @@ Get all entities that depend on the target entity via calls or imports.
 #### `get_entities_by_kind(kind: EntityKind | str) -> list[Entity]`
 List all entities of a specific kind (e.g., `EntityKind.CLASS`, "function").
 
+#### `trace_calls(entity_id: str, direction: str = "callees", depth: int = 1, max_results: int = 50) -> list[dict[str, Any]]`
+Multi-hop call graph traversal starting from an entity.
+
+- `direction="callees"`: what the entity calls
+- `direction="callers"`: what calls the entity
+
+Each result includes `call_depth` (hops from the starting entity) plus basic location metadata.
+
+#### `get_impact(entity_id: str, max_depth: int = 3) -> dict[str, Any]`
+Impact analysis for modifying/deleting an entity.
+
+Returns:
+- `direct_dependents`: 1-hop callers/importers
+- `transitive_dependents`: multi-hop dependents up to `max_depth`
+- `affected_files`: files likely requiring review
+- `risk_score`: 0.0–1.0 risk estimate
+
 ### Data Models
 
 #### `Entity`

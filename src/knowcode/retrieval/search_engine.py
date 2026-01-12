@@ -1,5 +1,8 @@
 """Search engine orchestrating the retrieval pipeline."""
 
+from __future__ import annotations
+
+from dataclasses import dataclass
 from typing import Optional
 
 from knowcode.storage.chunk_repository import ChunkRepository
@@ -10,6 +13,15 @@ from knowcode.storage.knowledge_store import KnowledgeStore
 from knowcode.data_models import CodeChunk
 from knowcode.retrieval.reranker import Reranker
 from knowcode.config import AppConfig
+
+
+@dataclass(frozen=True)
+class ScoredChunk:
+    """A retrieved chunk with an attached score and provenance."""
+
+    chunk: CodeChunk
+    score: float
+    source: str  # "retrieved" | "dependency"
 
 
 class SearchEngine:
@@ -43,6 +55,57 @@ class SearchEngine:
             config=config,
         )
 
+    def search_scored(
+        self,
+        query: str,
+        limit: int = 10,
+        expand_deps: bool = True,
+    ) -> list[ScoredChunk]:
+        """Execute the full search pipeline and return scored chunks.
+
+        This is similar to search(), but retains relevance scores and labels
+        dependency-expanded chunks so callers can build evidence-aware outputs.
+
+        Args:
+            query: Natural language query string.
+            limit: Maximum number of primary chunks to return (before expansion).
+            expand_deps: Whether to include dependency context from the graph.
+
+        Returns:
+            Ranked list of ScoredChunk objects.
+        """
+        query_embedding = self.embedding_provider.embed_single(query)
+        results = self.hybrid_index.search(query, query_embedding, limit=limit * 2)
+        reranked = self.reranker.rerank(query, results, top_k=limit)
+        primary = [ScoredChunk(chunk=c, score=s, source="retrieved") for c, s in reranked]
+
+        if not expand_deps:
+            return primary
+
+        expanded: list[ScoredChunk] = []
+        seen_ids: set[str] = set()
+
+        for scored in primary:
+            deps = expand_dependencies(
+                scored.chunk,
+                self.chunk_repo,
+                self.knowledge_store,
+                max_depth=1,
+            )
+            for dep in deps:
+                if dep.id in seen_ids:
+                    continue
+                seen_ids.add(dep.id)
+                expanded.append(
+                    ScoredChunk(
+                        chunk=dep,
+                        score=scored.score if dep.id == scored.chunk.id else 0.0,
+                        source="retrieved" if dep.id == scored.chunk.id else "dependency",
+                    )
+                )
+
+        return expanded
+
     def search(
         self,
         query: str,
@@ -59,25 +122,8 @@ class SearchEngine:
         Returns:
             Ranked list of CodeChunk objects.
         """
-        # 1. Embed query
-        query_embedding = self.embedding_provider.embed_single(query)
-        
-        # 2. Hybrid search
-        results = self.hybrid_index.search(query, query_embedding, limit=limit * 2)
-        
-        # 3. Rerank
-        reranked = self.reranker.rerank(query, results)
-        
-        # 4. Extract top chunks
-        top_chunks = [chunk for chunk, _ in reranked[:limit]]
-        
-        # 5. Expand dependencies if requested
-        if expand_deps:
-            final_chunks = self._expand_dependencies(top_chunks)
-            # Re-limit after expansion if needed, or just return all
-            return final_chunks
-        
-        return top_chunks
+        scored = self.search_scored(query, limit=limit, expand_deps=expand_deps)
+        return [s.chunk for s in scored]
 
     def _expand_dependencies(self, chunks: list[CodeChunk]) -> list[CodeChunk]:
         """Add dependency context to the results using the knowledge graph."""

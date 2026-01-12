@@ -1,7 +1,9 @@
 """Indexing pipeline for code chunks."""
 
+from __future__ import annotations
+
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 
 from knowcode.storage.chunk_repository import InMemoryChunkRepository
 from knowcode.indexing.chunker import Chunker
@@ -34,6 +36,7 @@ class Indexer:
         self.chunk_repo = chunk_repo or InMemoryChunkRepository()
         self.vector_store = vector_store or VectorStore(dimension=embedding_provider.config.dimension)
         self.chunker = Chunker()
+        self.manifest: dict[str, Any] = {}
 
     def index_directory(self, root_dir: str | Path) -> int:
         """Index all supported files under a directory.
@@ -109,6 +112,19 @@ class Indexer:
         with open(path / "chunks.json", "w") as f:
             json.dump(metadata, f)
 
+        # Save index manifest for compatibility checks at query time.
+        from dataclasses import asdict
+        import time
+
+        self.manifest = {
+            "version": 1,
+            "created_at": int(time.time()),
+            "embedding": asdict(self.embedding_provider.config),
+            "chunking": asdict(self.chunker.config),
+        }
+        with open(path / "index_manifest.json", "w", encoding="utf-8") as f:
+            json.dump(self.manifest, f, indent=2)
+
     def load(self, path: str | Path) -> None:
         """Load the entire vector index and chunk metadata from disk.
 
@@ -120,8 +136,14 @@ class Indexer:
         # Load vector store
         self.vector_store.load(path / "vectors")
         
-        # Load chunks
+        # Load manifest (optional, for compatibility checks).
         import json
+        manifest_file = path / "index_manifest.json"
+        if manifest_file.exists():
+            with open(manifest_file, "r", encoding="utf-8") as f:
+                self.manifest = json.load(f)
+
+        # Load chunks
         from knowcode.models import CodeChunk
         
         chunks_file = path / "chunks.json"

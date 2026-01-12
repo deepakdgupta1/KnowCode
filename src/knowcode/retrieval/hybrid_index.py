@@ -1,7 +1,5 @@
 """Hybrid BM25 + Vector search index."""
 
-from typing import Optional
-
 from knowcode.storage.chunk_repository import ChunkRepository
 from knowcode.data_models import CodeChunk
 from knowcode.utils.tokenizer import tokenize_code

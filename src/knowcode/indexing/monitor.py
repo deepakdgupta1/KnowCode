@@ -1,8 +1,9 @@
 """File system monitor for live re-indexing."""
 
-import time
+from __future__ import annotations
+
 from pathlib import Path
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 try:
     from watchdog.observers import Observer
@@ -10,6 +11,9 @@ try:
 except ImportError:
     Observer = None
     FileSystemEventHandler = object
+
+if TYPE_CHECKING:
+    from knowcode.indexing.background_indexer import BackgroundIndexer
 
 
 class FileMonitor:

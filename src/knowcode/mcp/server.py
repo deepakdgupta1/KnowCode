@@ -4,6 +4,8 @@ Provides an MCP server that exposes KnowCode's codebase intelligence
 to LLM applications via the Model Context Protocol.
 """
 
+from __future__ import annotations
+
 import asyncio
 import json
 from pathlib import Path
@@ -22,8 +24,8 @@ try:
 except ImportError:
     MCP_AVAILABLE = False
 
+from knowcode.service import KnowCodeService
 from knowcode.storage.knowledge_store import KnowledgeStore
-from knowcode.analysis.context_synthesizer import ContextSynthesizer
 from knowcode.data_models import TaskType
 
 
@@ -99,6 +101,43 @@ TOOL_DEFINITIONS = [
             },
             "required": ["entity_id"]
         }
+    },
+    {
+        "name": "retrieve_context_for_query",
+        "description": "Retrieve a token-budgeted, task-aware context bundle for a natural-language query. Uses the same retrieval pipeline as CLI Q&A, and returns a sufficiency_score for local-first decisions.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Natural-language query to retrieve context for"
+                },
+                "task_type": {
+                    "type": "string",
+                    "enum": ["auto", "explain", "debug", "extend", "review", "locate", "general"],
+                    "description": "Task type override; use 'auto' to let KnowCode classify the query",
+                    "default": "auto"
+                },
+                "max_tokens": {
+                    "type": "integer",
+                    "description": "Overall token budget for returned context",
+                    "default": 6000
+                },
+                "limit_entities": {
+                    "type": "integer",
+                    "description": "Maximum number of unique entities to include",
+                    "default": 3,
+                    "minimum": 1,
+                    "maximum": 10
+                },
+                "expand_deps": {
+                    "type": "boolean",
+                    "description": "Whether to expand dependency context (call graph) around retrieved entities",
+                    "default": True
+                }
+            },
+            "required": ["query"]
+        }
     }
 ]
 
@@ -106,25 +145,35 @@ TOOL_DEFINITIONS = [
 class KnowCodeMCPServer:
     """MCP Server wrapper for KnowCode."""
     
-    def __init__(self, store_path: str | Path) -> None:
+    def __init__(self, store_path: str | Path, config_path: Optional[str] = None) -> None:
         """Initialize MCP server with knowledge store.
         
         Args:
             store_path: Path to knowcode_knowledge.json
+            config_path: Optional path to aimodels.yaml for model priorities.
         """
         self.store_path = Path(store_path)
-        self.store: Optional[KnowledgeStore] = None
+        self.config_path = config_path
+        self._service: Optional[KnowCodeService] = None
         
-    def _ensure_store(self) -> KnowledgeStore:
-        """Load knowledge store if not already loaded."""
-        if self.store is None:
-            if not self.store_path.exists():
+    def _ensure_service(self) -> KnowCodeService:
+        """Create the shared service (loads store/index lazily)."""
+        if self._service is None:
+            store_file = self.store_path
+            if store_file.is_dir():
+                store_file = store_file / KnowledgeStore.DEFAULT_FILENAME
+
+            if not store_file.exists():
                 raise FileNotFoundError(
-                    f"Knowledge store not found: {self.store_path}\n"
+                    f"Knowledge store not found: {store_file}\n"
                     "Run 'knowcode analyze' first to build the knowledge graph."
                 )
-            self.store = KnowledgeStore.load(self.store_path)
-        return self.store
+
+            self._service = KnowCodeService(
+                store_path=self.store_path,
+                config_path=self.config_path,
+            )
+        return self._service
     
     def search_codebase(self, query: str, limit: int = 10) -> list[dict[str, Any]]:
         """Search for entities by name pattern.
@@ -136,8 +185,8 @@ class KnowCodeMCPServer:
         Returns:
             List of matching entity summaries.
         """
-        store = self._ensure_store()
-        entities = store.search(query)[:limit]
+        service = self._ensure_service()
+        entities = service.store.search(query)[:limit]
         
         return [
             {
@@ -167,46 +216,32 @@ class KnowCodeMCPServer:
         Returns:
             Context bundle with sufficiency score.
         """
-        store = self._ensure_store()
-        
-        # Find entity (exact match or search)
-        entity = store.get_entity(entity_id)
-        if not entity:
-            matches = store.search(entity_id)
-            if matches:
-                entity = matches[0]
-        
-        if not entity:
-            return {
-                "error": f"Entity not found: {entity_id}",
-                "context_text": "",
-                "sufficiency_score": 0.0,
-            }
-        
-        # Synthesize context
-        synthesizer = ContextSynthesizer(store, max_tokens=max_tokens)
-        
+        service = self._ensure_service()
         try:
             task = TaskType(task_type)
         except ValueError:
             task = TaskType.GENERAL
-            
-        bundle = synthesizer.synthesize_with_task(entity.id, task)
-        
-        if not bundle:
+
+        try:
+            bundle = service.get_context(entity_id, max_tokens=max_tokens, task_type=task)
+        except ValueError:
             return {
-                "error": "Failed to synthesize context",
+                "error": f"Entity not found: {entity_id}",
                 "context_text": "",
                 "sufficiency_score": 0.0,
+                "task_type": task.value,
             }
-        
+
+        entity = service.store.get_entity(bundle.get("entity_id", entity_id))
+        qualified_name = entity.qualified_name if entity else ""
+
         return {
-            "entity_id": bundle.target_entity.id,
-            "qualified_name": bundle.target_entity.qualified_name,
-            "context_text": bundle.context_text,
-            "total_tokens": bundle.total_tokens,
-            "sufficiency_score": bundle.sufficiency_score,
-            "task_type": task.value,
+            "entity_id": bundle.get("entity_id", entity_id),
+            "qualified_name": qualified_name,
+            "context_text": bundle.get("context_text", ""),
+            "total_tokens": bundle.get("total_tokens", 0),
+            "sufficiency_score": bundle.get("sufficiency_score", 0.0),
+            "task_type": bundle.get("task_type", task.value),
         }
     
     def trace_calls(
@@ -225,12 +260,37 @@ class KnowCodeMCPServer:
         Returns:
             List of entities with call_depth.
         """
-        store = self._ensure_store()
-        return store.trace_calls(
+        service = self._ensure_service()
+        return service.store.trace_calls(
             entity_id,
             direction=direction,
             depth=min(depth, 5),
             max_results=50,
+        )
+
+    def retrieve_context_for_query(
+        self,
+        query: str,
+        task_type: str = "auto",
+        max_tokens: int = 6000,
+        limit_entities: int = 3,
+        expand_deps: bool = True,
+    ) -> dict[str, Any]:
+        """Retrieve a task-aware context bundle for a query."""
+        service = self._ensure_service()
+        task_override: Optional[TaskType] = None
+        if task_type != "auto":
+            try:
+                task_override = TaskType(task_type)
+            except ValueError:
+                task_override = TaskType.GENERAL
+
+        return service.retrieve_context_for_query(
+            query=query,
+            max_tokens=max_tokens,
+            task_type=task_override,
+            limit_entities=limit_entities,
+            expand_deps=expand_deps,
         )
     
     def handle_tool_call(self, name: str, arguments: dict[str, Any]) -> str:
@@ -261,6 +321,14 @@ class KnowCodeMCPServer:
                     direction=arguments.get("direction", "callees"),
                     depth=arguments.get("depth", 1),
                 )
+            elif name == "retrieve_context_for_query":
+                result = self.retrieve_context_for_query(
+                    query=arguments["query"],
+                    task_type=arguments.get("task_type", "auto"),
+                    max_tokens=arguments.get("max_tokens", 6000),
+                    limit_entities=arguments.get("limit_entities", 3),
+                    expand_deps=arguments.get("expand_deps", True),
+                )
             else:
                 result = {"error": f"Unknown tool: {name}"}
                 
@@ -269,11 +337,12 @@ class KnowCodeMCPServer:
             return json.dumps({"error": str(e)})
 
 
-def create_server(store_path: str | Path) -> "Server":
+def create_server(store_path: str | Path, config_path: Optional[str] = None) -> "Server":
     """Create an MCP server instance.
     
     Args:
         store_path: Path to knowledge store.
+        config_path: Optional configuration file path for model priorities.
         
     Returns:
         Configured MCP Server.
@@ -284,7 +353,7 @@ def create_server(store_path: str | Path) -> "Server":
         )
     
     server = Server("knowcode")
-    knowcode = KnowCodeMCPServer(store_path)
+    knowcode = KnowCodeMCPServer(store_path, config_path=config_path)
     
     @server.list_tools()
     async def list_tools() -> list[Tool]:
@@ -309,18 +378,19 @@ def create_server(store_path: str | Path) -> "Server":
     return server
 
 
-async def run_server_async(store_path: str | Path) -> None:
+async def run_server_async(store_path: str | Path, config_path: Optional[str] = None) -> None:
     """Run the MCP server with STDIO transport.
     
     Args:
         store_path: Path to knowledge store.
+        config_path: Optional configuration file path for model priorities.
     """
     if not MCP_AVAILABLE:
         raise ImportError(
             "MCP package not installed. Install with: pip install mcp"
         )
     
-    server = create_server(store_path)
+    server = create_server(store_path, config_path=config_path)
     
     async with stdio_server() as (read_stream, write_stream):
         await server.run(
@@ -330,10 +400,11 @@ async def run_server_async(store_path: str | Path) -> None:
         )
 
 
-def run_server(store_path: str | Path) -> None:
+def run_server(store_path: str | Path, config_path: Optional[str] = None) -> None:
     """Run the MCP server (blocking).
     
     Args:
         store_path: Path to knowledge store.
+        config_path: Optional configuration file path for model priorities.
     """
-    asyncio.run(run_server_async(store_path))
+    asyncio.run(run_server_async(store_path, config_path=config_path))

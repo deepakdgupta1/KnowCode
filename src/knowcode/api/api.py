@@ -1,7 +1,7 @@
 """FastAPI endpoints for KnowCode."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from typing import Any, Optional, Literal
+from typing import Any, Optional
 from pydantic import BaseModel
 from enum import Enum
 
@@ -85,8 +85,6 @@ def query_context(
     service: KnowCodeService = Depends(get_service)
 ) -> QueryResponse:
     """Execute semantic search and return relevant code chunks with context."""
-    from knowcode.retrieval.search_engine import SearchEngine
-    
     engine = service.get_search_engine()
     chunks = engine.search(
         query=request.query,

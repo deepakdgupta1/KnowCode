@@ -175,7 +175,7 @@ Enable **retrieval-augmented generation (RAG)** by indexing code semantics in a 
 ### **Responsibilities**
 
 * **Chunking**: Break code into logical units (functions, classes, module headers)
-* **Embedding**: Generate dense vector representations (e.g., OpenAI text-embedding-3-small)
+* **Embedding**: Generate dense vector representations (config-driven: OpenAI or VoyageAI)
 * **Vector Storage**: Persist vectors for fast nearest-neighbor search
 * **Hybrid Retrieval**: Combine dense (vector) and sparse (BM25) search results
 * **Reranking**: Upgrade to **Cross-Encoder** (e.g., ms-marco-MiniLM) for high-precision relevance scoring vs. simple cosine similarity.
@@ -610,29 +610,28 @@ Use frontier LLMs **only where they add leverage**, not as a crutch.
  ```yaml
  Tools:
    - name: search_codebase
-     description: "Semantic + lexical search for code entities"
+     description: "Lexical search for code entities by name/pattern"
      parameters: { query: string, limit: int }
-     returns: List of {entity_id, name, kind, file, snippet, score}
+     returns: List of {id, name, qualified_name, kind, file, line}
      
    - name: get_entity_context
      description: "Token-budgeted context bundle with sufficiency score"
-     parameters: { entity_id: string, max_tokens: int, task_type: debug|refactor|extend|review }
-     returns: {context_text, included_entities, sufficiency_score, token_count}
+     parameters: { entity_id: string, max_tokens: int, task_type: explain|debug|extend|review|locate|general }
+     returns: {entity_id, qualified_name, context_text, total_tokens, sufficiency_score, task_type}
      
    - name: trace_calls
      description: "Multi-hop call graph traversal"
      parameters: { entity_id: string, direction: callers|callees, depth: int }
-     returns: List of {entity, call_depth, file, line}
-     
-   - name: get_impact
-     description: "Deletion impact analysis"
-     parameters: { entity_id: string }
-     returns: {direct_dependents, transitive_dependents, risk_score}
-     
-   - name: explain_flow
-     description: "Step-by-step execution trace"
-     parameters: { entry_point: string, max_depth: int }
-     returns: {steps: [{entity, description, code_snippet}]}
+     returns: List of {entity_id, qualified_name, kind, file, line, call_depth}
+
+   - name: retrieve_context_for_query
+     description: "Unified query→retrieval→context-bundle pipeline (same as `knowcode ask`) with evidence + sufficiency score"
+     parameters: { query: string, task_type: auto|explain|debug|extend|review|locate|general, max_tokens: int, limit_entities: int, expand_deps: bool }
+     returns: {context_text, total_tokens, sufficiency_score, retrieval_mode, evidence, selected_entities, task_type}
+ 
+ # Planned (not yet exposed via MCP):
+ # - get_impact: available via KnowledgeStore + REST API (/api/v1/impact/{entity_id})
+ # - explain_flow: step-by-step execution trace
  ```
  
  ### **Inputs**
@@ -829,7 +828,7 @@ You've essentially defined a **code intelligence system**, not a chatbot with em
 
 ### **Phase 2: Intelligence Server & RAG (COMPLETED)**
 6. **[x] FastAPI Server (Layer 10)**: Health, stats, search, context, semantic query, reload, entity details, callers/callees.
-7. **[x] Semantic Search & Indexing (Layer 4a)**: Chunker (module header/imports/entities), OpenAI embeddings, FAISS vector store, hybrid BM25+vector retrieval (RRF), reranking, dependency expansion.
+7. **[x] Semantic Search & Indexing (Layer 4a)**: Chunker (module header/imports/entities), config-driven embeddings (OpenAI or VoyageAI), FAISS vector store, hybrid BM25+vector retrieval (RRF), reranking, dependency expansion.
 8. **[x] Indexer Persistence + CLI**: `index`/`semantic-search` commands with save/load.
 9. **[x] Watch Mode**: Background indexer + filesystem monitor for incremental re-indexing.
 10. **[x] CLI Workflows**: `analyze`, `query`, `context`, `export`, `stats`, `server`, `history`, `ask`.
@@ -862,7 +861,7 @@ You've essentially defined a **code intelligence system**, not a chatbot with em
 
 ### **Phase 8: IDE Integration (COMPLETED v2.2)**
 27. **[x] MCP Server (Layer 10b)**: Tool exposure via STDIO for IDE agents.
-28. **[x] Core 3 Tools**: `search_codebase`, `get_entity_context`, `trace_calls`.
+28. **[x] Core 4 Tools**: `search_codebase`, `get_entity_context`, `trace_calls`, `retrieve_context_for_query`.
 29. **[x] Sufficiency Scoring**: Context confidence metrics for local-first answering.
 30. **[x] Task-Specific Templates**: Debug/extend/review/explain/locate prioritization.
 31. **[x] Multi-hop Queries**: `trace_calls(depth=N)` and `get_impact()` analysis.
@@ -870,7 +869,7 @@ You've essentially defined a **code intelligence system**, not a chatbot with em
 
 ### **Supporting Tooling & QA (COMPLETED)**
 - **[x] Tests**: Unit/integration/e2e coverage for parsing, indexing, retrieval, API, CLI, storage, and analysis.
-- **[x] CI/CD**: Ruff linting, pytest + coverage, MkDocs build, and automated changelog generation.
+- **[x] CI/CD**: Ruff linting, pytest + coverage, MkDocs build, and automated changelog generation (last-tag range + optional human summary input).
 - **[x] Evaluation Utilities**: Retrieval-quality evaluation script (`scripts/evaluate.py`).
 
 ---
@@ -884,8 +883,8 @@ You've essentially defined a **code intelligence system**, not a chatbot with em
 **Workflow**:
 1. Developer asks: "Explain what happens when 'knowcode ask' runs"
 2. System identifies question type (explanation)
-3. Agent retrieves relevant entities via semantic search
-4. Context synthesizer builds token-budgeted bundle
+3. Agent calls the unified retrieval kernel (`retrieve_context_for_query`) to retrieve ranked evidence + context bundles
+4. Context synthesizer builds token-budgeted bundles (task-aware templates + sufficiency scoring)
 5. LLM generates step-by-step explanation with code snippets
 
 **Key Capabilities Required**:
@@ -900,8 +899,8 @@ You've essentially defined a **code intelligence system**, not a chatbot with em
 
 **Workflow**:
 1. User prompts IDE agent
-2. IDE agent invokes KnowCode tools via MCP
-3. KnowCode returns context with sufficiency score
+2. IDE agent invokes `retrieve_context_for_query` via MCP (single high-level call)
+3. KnowCode returns the same context bundle + sufficiency score as CLI Q&A (consistent retrieval quality)
 4. If score >= 0.8: Agent answers locally (zero external tokens)
 5. If score < 0.8: Agent uses returned context with external LLM (controlled tokens)
 
@@ -910,4 +909,3 @@ You've essentially defined a **code intelligence system**, not a chatbot with em
 - Sufficiency scoring (Layer 9)
 - Structured tool responses (Layer 10b)
 - Token budget reporting (Layer 9)
-

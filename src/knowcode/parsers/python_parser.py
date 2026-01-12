@@ -103,7 +103,7 @@ class PythonParser:
                 entities.extend(class_entities)
                 relationships.extend(class_rels)
 
-            elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 func_entity, func_rels = self._parse_function(
                     node, file_path, module_id, source_lines
                 )
@@ -173,7 +173,7 @@ class PythonParser:
 
         # Parse methods
         for child in node.body:
-            if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 method_entity, method_rels = self._parse_method(
                     child, file_path, class_id, node.name, source_lines
                 )

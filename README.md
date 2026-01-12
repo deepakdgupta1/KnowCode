@@ -24,8 +24,10 @@ source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 # Install KnowCode (with dev dependencies)
 uv sync --dev
 
-# Set Google API Key (required for semantic search and 'ask' command)
-export GOOGLE_API_KEY="AIza..."
+# Set API keys (only needed for the features you use; see aimodels.yaml)
+export VOYAGE_API_KEY_1="..."   # embeddings + reranking (semantic search)
+export OPENAI_API_KEY="..."     # embeddings (alternative to VoyageAI)
+export GOOGLE_API_KEY_1="..."   # LLM (Gemini) for `knowcode ask`
 ```
 
 ## Quick Start
@@ -130,14 +132,14 @@ knowcode stats [--store <path>]
 Build a semantic search index for your codebase.
 
 ```bash
-knowcode index <directory> [--output <path>]
+knowcode index <directory> [--output <path>] [--config <path>]
 ```
 
 ### `semantic-search`
 Perform a natural language search against the semantic index.
 
 ```bash
-knowcode semantic-search <query> [--index <path>] [--limit <n>]
+knowcode semantic-search <query> [--index <path>] [--store <path>] [--config <path>] [--limit <n>]
 ```
 
 **Example:**
@@ -182,7 +184,7 @@ knowcode history "KnowledgeStore"
 ```
 
 ### `ask`
-Ask questions about the codebase using an LLM agent. Requires `GOOGLE_API_KEY` environment variable.
+Ask questions about the codebase using an LLM agent. Requires an API key for at least one configured model in `aimodels.yaml`.
 
 ```bash
 knowcode ask <question> [--config <path>]
@@ -196,15 +198,10 @@ KnowCode looks for a configuration file in the following order:
 
 **Example `aimodels.yaml`:**
 ```yaml
-models:
-  - name: gemini-2.0-flash-lite
+natural_language_models:
+  - name: gemini-2.5-flash
     provider: google
-    api_key_env: GOOGLE_API_KEY
-    rpm_free_tier_limit: 10
-    rpd_free_tier_limit: 1000
-  - name: gemini-1.5-flash
-    provider: google
-    api_key_env: GOOGLE_API_KEY
+    api_key_env: GOOGLE_API_KEY_1
 ```
 
 **Example:**
@@ -216,13 +213,14 @@ knowcode ask "How does the graph builder work?"
 Start an MCP (Model Context Protocol) server for IDE agent integration.
 
 ```bash
-knowcode mcp-server [--store <path>]
+knowcode mcp-server [--store <path>] [--config <path>]
 ```
 
 **Tools Exposed:**
 - `search_codebase` - Search for code entities by name
 - `get_entity_context` - Get detailed context for an entity
 - `trace_calls` - Trace call graph (callers/callees) with depth
+- `retrieve_context_for_query` - Unified query→retrieval→context bundle (same pipeline as `knowcode ask`)
 
 **MCP Client Configuration (Claude Desktop, VS Code, etc.):**
 ```json
@@ -270,7 +268,7 @@ See [KnowCode.md](KnowCode.md) for the complete reference architecture.
 natural_language_models:
   - name: gemini-2.0-flash-lite
     provider: google
-    api_key_env: GOOGLE_API_KEY
+    api_key_env: GOOGLE_API_KEY_1
 
 # Embedding models
 embedding_models:
@@ -292,7 +290,7 @@ config:
 **Optional dependencies:**
 ```bash
 pip install "knowcode[mcp]"      # MCP server support
-pip install "knowcode[voyageai]" # VoyageAI reranking
+pip install "knowcode[voyageai]" # VoyageAI embeddings + reranking
 ```
 
 ## Example Output

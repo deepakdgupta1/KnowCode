@@ -1,18 +1,16 @@
 """Agent module for KnowCode."""
 
 import os
-from typing import Optional, Union, Any
-import time
+from typing import Optional, Any
 
 from google import genai
-from google.genai import types
 from google.api_core.exceptions import ResourceExhausted
 import openai
 
 from knowcode.service import KnowCodeService
 from knowcode.config import AppConfig, ModelConfig
 from knowcode.llm.rate_limiter import RateLimiter
-from knowcode.llm.query_classifier import classify_query, get_prompt_template
+from knowcode.llm.query_classifier import get_prompt_template
 from knowcode.data_models import TaskType
 
 
@@ -70,93 +68,17 @@ class Agent:
             ValueError: If no API keys are set.
             Exception: If all models fail.
         """
-        # 0. Classify query to determine task type and optimal prompt
-        task_type, confidence = classify_query(query)
+        retrieval = self.service.retrieve_context_for_query(query)
+        task_type = TaskType(retrieval.get("task_type", TaskType.GENERAL.value))
+        confidence = float(retrieval.get("task_confidence", 0.0))
         print(f"  📋 Query type: {task_type.value} (confidence: {confidence:.0%})")
-        
-        # 1. Retrieve knowledge
-        context_str = ""
-        context_parts = []
-        
-        # Strategy A: Semantic Search (Preferred)
-        # Check if index exists by peeking at the service's indexer path logic relative to store
-        index_path = self.service.store_path.parent / "knowcode_index"
-        if index_path.exists():
-            try:
-                print("  🔍 Using Semantic Search...")
-                search_engine = self.service.get_search_engine()
-                # Use a reasonable limit (e.g., 5 results)
-                results = search_engine.search(query, limit=5)
-                
-                # Deduplicate based on content to save tokens
-                seen_content = set()
-                
-                for res in results:
-                    # SearchEngine returns SearchResult objects with score, entity, chunk
-                    # We want the full context bundle for the entity if it's a high match
-                    # or just the chunk text? 
-                    # Let's try to get the full entity context for the top match, 
-                    # and maybe just chunks for others to save space?
-                    # For simplicity, let's grab context bundles for unique top entities.
-                    
-                    # Note: Agent doesn't import SearchResult, so we rely on duck typing or service methods if available.
-                    # Service doesn't expose semantic search directly nicely for Agent yet without importing engine.
-                    # Actually, KnowCodeService doesn't expose 'semantic_search' method, only 'get_search_engine'.
-                    
-                    # We can use the chunk text directly from the result
-                    text = res.chunk.text
-                    if text not in seen_content:
-                        context_parts.append(f"Matching Code (Score: {res.score:.2f}):\n{text}")
-                        seen_content.add(text)
-                        
-            except Exception as e:
-                print(f"  ⚠️ Semantic search failed: {e}")
 
-        # Strategy B: Lexical Search (Fallback / Supplement)
-        # If semantic search yielded nothing (or index missing), try to find entities by name
-        if not context_parts:
-             print("  🔍 Using Lexical Search...")
-             
-             # 1. Try full query (unlikely to work but cheap)
-             entities = self.service.search(query)
-             
-             # 2. Keyphrase extraction (Simple heuristic: finding "Words" that look like identifiers)
-             if not entities:
-                 import re
-                 # Look for words like GraphBuilder, analyze, my_function (at least 3 chars)
-                 # We exclude common instructions like "How", "does", "work" via a naive stoplist implicitly 
-                 # by looking for specific code-like patterns or CapitalizedWords.
-                 
-                 # Pattern: 
-                 # - CamelCase (GraphBuilder)
-                 # - snake_case (build_from_directory, but avoid "does_it_work")
-                 # - dot.separated (knowcode.cli)
-                 potential_tokens = re.findall(r'\b[a-zA-Z_][a-zA-Z0-9_.]+\b', query)
-                 
-                 # Filter common stopwords (very basic)
-                 stopwords = {"how", "what", "where", "when", "why", "who", "does", "is", "are", "can", "will", "the", "a", "an", "in", "on", "at", "for", "to", "of", "and", "or"}
-                 keywords = [t for t in potential_tokens if t.lower() not in stopwords and len(t) > 3]
-                 
-                 for kw in keywords:
-                     found = self.service.search(kw)
-                     if found:
-                         entities.extend(found)
-
-             # Deduplicate entities by ID
-             unique_entities = {e['id']: e for e in entities}.values()
-             
-             # 3. Retrieve Context for found entities
-             for entity_meta in list(unique_entities)[:3]: # Limit to top 3
-                try:
-                    bundle = self.service.get_context(entity_meta['id'], max_tokens=2000)
-                    context_parts.append(bundle["context_text"])
-                except Exception:
-                    continue
-
-        if context_parts:
-            context_str = "\n\n".join(context_parts)
-        else:
-            context_str = "No specific entities found in the codebase matching the query terms. Answer based on general software engineering principles if possible."
+        context_str = retrieval.get("context_text", "")
+        if not context_str:
+            context_str = (
+                "No specific entities found in the codebase matching the query terms. "
+                "Answer based on general software engineering principles if possible."
+            )
 
         # 2. Construct Prompt with task-specific system instructions
         system_instructions = get_prompt_template(task_type)
@@ -246,57 +168,14 @@ class Agent:
                 - sufficiency_score: Context quality score
                 - context: The retrieved context
         """
-        # 1. Classify query
-        task_type, confidence = classify_query(query)
+        retrieval = self.service.retrieve_context_for_query(query)
+        task_type = TaskType(retrieval.get("task_type", TaskType.GENERAL.value))
+        confidence = float(retrieval.get("task_confidence", 0.0))
         print(f"  📋 Query type: {task_type.value} (confidence: {confidence:.0%})")
-        
-        # 2. Get context with task-specific prioritization
-        context_parts = []
-        sufficiency_scores = []
-        
-        # Try semantic search first
-        index_path = self.service.store_path.parent / "knowcode_index"
-        if index_path.exists():
-            try:
-                print("  🔍 Semantic search...")
-                search_engine = self.service.get_search_engine()
-                results = search_engine.search(query, limit=3)
-                
-                for res in results[:3]:
-                    # Get task-specific context
-                    bundle = self.service.get_context(
-                        res.entity_id, 
-                        max_tokens=2000,
-                        task_type=task_type
-                    )
-                    context_parts.append(bundle["context_text"])
-                    sufficiency_scores.append(bundle.get("sufficiency_score", 0.0))
-            except Exception as e:
-                print(f"  ⚠️ Semantic search failed: {e}")
-        
-        # Fallback to lexical search
-        if not context_parts:
-            import re
-            potential_tokens = re.findall(r'\b[a-zA-Z_][a-zA-Z0-9_.]+\b', query)
-            stopwords = {"how", "what", "where", "when", "why", "who", "does", "is", "are", "can", "will", "the", "a", "an", "in", "on", "at", "for", "to", "of", "and", "or"}
-            keywords = [t for t in potential_tokens if t.lower() not in stopwords and len(t) > 3]
-            
-            for kw in keywords[:3]:
-                entities = self.service.search(kw)
-                if entities:
-                    bundle = self.service.get_context(
-                        entities[0]['id'],
-                        max_tokens=2000,
-                        task_type=task_type
-                    )
-                    context_parts.append(bundle["context_text"])
-                    sufficiency_scores.append(bundle.get("sufficiency_score", 0.0))
-                    break
-        
-        # Calculate overall sufficiency
-        avg_sufficiency = sum(sufficiency_scores) / len(sufficiency_scores) if sufficiency_scores else 0.0
-        context_str = "\n\n---\n\n".join(context_parts) if context_parts else ""
-        
+
+        avg_sufficiency = float(retrieval.get("sufficiency_score", 0.0))
+        context_str = retrieval.get("context_text", "")
+
         threshold = self.config.sufficiency_threshold
         print(f"  📊 Sufficiency: {avg_sufficiency:.0%} (threshold: {threshold:.0%})")
         
@@ -317,7 +196,7 @@ class Agent:
             }
         else:
             # Need LLM
-            print(f"  🤖 Calling LLM (sufficiency below threshold or forced)")
+            print("  🤖 Calling LLM (sufficiency below threshold or forced)")
             
             llm_answer = self.answer(query)
             
@@ -351,4 +230,3 @@ class Agent:
         else:
             # General format
             return f"**Relevant context from codebase:**\n\n{context}\n\n*Local answer based on high-confidence context match. Use `force_llm=True` for LLM-enhanced responses.*"
-
