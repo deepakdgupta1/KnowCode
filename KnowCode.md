@@ -2,10 +2,9 @@
 
 ## **0\. Guiding Principle (sets the tone)**
 
-The system does not *retrieve text*.  
-It *constructs and maintains a continuously evolving semantic model* of the codebase and its intent, behavior, and constraints.
+Codebase are deterministic. So, information extraction from it should be 100% local and 100% deterministic. Making it consumable by a human (to help one understand what the code is/ does) or an AI agent (to save the pricey tokens consumption of the frontier LLMs you set it to work with) should therefore be a simple, local-to-your-machine solution at negligible cost.
 
-Everything else flows from that.
+This is what drives KnowCode!
 
 ---
 
