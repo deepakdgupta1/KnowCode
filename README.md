@@ -1,6 +1,6 @@
 # KnowCode
 
-Know your code using KnowCode.  Interact with you knowledgebase in natural language to learn more about it. Provide accurate, relevant context to your AI coding agent and make its token usage limits last 10x longer.
+Know a codebase using KnowCode.  Ask questions and get responses in natural language about a codebase to learn more about it. Provide accurate, relevant context to your AI coding agent and make its token usage limits last 10x longer.
 
 [![codecov](https://codecov.io/gh/deepakdgupta1/KnowCode/graph/badge.svg?token=placeholder)](https://codecov.io/gh/deepakdgupta1/KnowCode) [![CI/CD Pipeline](https://github.com/deepakdgupta1/KnowCode/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/deepakdgupta1/KnowCode/actions/workflows/ci-cd.yml)
 
