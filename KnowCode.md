@@ -2,7 +2,7 @@
 
 ## **0\. Guiding Principle (sets the tone)**
 
-Codebase are deterministic. So, information extraction from it should be 100% local and 100% deterministic. Making it consumable by a human (to help one understand what the code is/ does) or an AI agent (to save the pricey tokens consumption of the frontier LLMs you set it to work with) should therefore be a simple, local-to-your-machine solution at negligible cost.
+A codebase is deterministic. So, information extraction from it should be 100% local and 100% deterministic. Making it consumable by a human (to help one understand what the code is/ does) or an AI agent (to save the pricey tokens consumption of the frontier LLMs you set it to work with) should therefore be a simple, local-to-your-machine solution at negligible cost.
 
 This is what drives KnowCode!
 
