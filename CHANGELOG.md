@@ -683,3 +683,33 @@
 * Clean up duplicate model configurations (`d787409`)
 * Fix grammatical error in KnowCode.md (`95f1d25`)
 * Revise guiding principle in KnowCode documentation (`5677d0d`)
+
+
+---
+
+## [Unreleased] - 2026-01-12
+
+**Origin:** Generated
+**Range:** `HEAD~5..HEAD`
+**Commit Count:** 4
+**Confidence:** low
+
+**Focus:** Feature Development
+
+### 🧠 Temporal Context & Intent
+> *Auto-generated: Add context about why these changes were made.*
+
+### 🏗️ Architectural Impact
+> *Auto-generated: Describe high-level architectural shifts.*
+
+### 📝 Delta Changes
+
+#### 🚀 Features
+* enhance CLI output and improve knowledge store handling in MCP server (`cfc3e61`)
+
+#### 📚 Documentation
+* update changelog [skip ci] (`9487bf8`)
+
+#### 📦 Other Changes
+* Clean up duplicate model configurations (`d787409`)
+* Fix grammatical error in KnowCode.md (`95f1d25`)
