@@ -506,3 +506,33 @@
 #### 📦 Other Changes
 * Refactor Python parser type checks, remove unused imports, and enhance search engine functionality. Refactored the codebase so that User queries and IDE integration use the same central search and retrieval logic. (`203362b`)
 * Built a mature search and retrieval soln. Enabled tool-based usage via MCP server. Introduced AI models - Devstral 2 and Gemini for natural language interactions, VoyageAI for embedding and reranking. (`7cf4de5`)
+
+
+---
+
+## [Unreleased] - 2026-01-12
+
+**Origin:** Generated
+**Range:** `HEAD~5..HEAD`
+**Commit Count:** 4
+**Confidence:** low
+
+**Focus:** Feature Development
+
+### 🧠 Temporal Context & Intent
+> *Auto-generated: Add context about why these changes were made.*
+
+### 🏗️ Architectural Impact
+> *Auto-generated: Describe high-level architectural shifts.*
+
+### 📝 Delta Changes
+
+#### 🚀 Features
+* complete agentic capabilities and IDE integration; update README with MCP server details and configuration (`ab3a3c9`)
+
+#### 📚 Documentation
+* update changelog [skip ci] (`5729c32`)
+
+#### 📦 Other Changes
+* Revise README to enhance project description (`df49021`)
+* Refactor Python parser type checks, remove unused imports, and enhance search engine functionality. Refactored the codebase so that User queries and IDE integration use the same central search and retrieval logic. (`203362b`)
