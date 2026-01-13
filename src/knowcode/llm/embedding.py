@@ -233,4 +233,5 @@ def create_embedding_provider(
                     base_url=base_url,
                 )
 
-    return OpenAIEmbeddingProvider(EmbeddingConfig())
+    # Final fallback: use defaults from EmbeddingConfig (now VoyageAI)
+    return VoyageAIEmbeddingProvider(EmbeddingConfig())

@@ -208,6 +208,6 @@ __marimo__/
 knowcode_knowledge.json
 CHANGELOG.md
 docs_test/
-aimodels.yaml
+#aimodels.yaml
 .knowcode/
 

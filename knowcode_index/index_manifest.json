@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "created_at": 1768294219,
+  "embedding": {
+    "provider": "voyageai",
+    "model_name": "voyage-code-3",
+    "dimension": 1024,
+    "batch_size": 100,
+    "normalize": true
+  },
+  "chunking": {
+    "max_chunk_size": 1000,
+    "overlap": 100,
+    "include_signatures": true,
+    "include_docstrings": true
+  }
+}

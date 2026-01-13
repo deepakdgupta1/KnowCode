@@ -237,6 +237,34 @@ knowcode mcp-server [--store <path>] [--config <path>]
 pip install "knowcode[mcp]"
 ```
 
+## IDE Agent Integration
+
+KnowCode enables token-efficient IDE agent workflows. When your IDE agent needs context, it invokes KnowCode's MCP tools to retrieve relevant code context locally *before* calling expensive external LLMs.
+
+**How It Works:**
+1. IDE agent receives user query
+2. Agent invokes `retrieve_context_for_query` via MCP
+3. KnowCode returns context + `sufficiency_score` (0.0-1.0)
+4. **Score ≥ 0.8**: Answer locally (zero external tokens)
+5. **Score < 0.8**: Use returned context with external LLM
+
+**Antigravity Configuration (`.gemini/mcp_servers.json`):**
+```json
+{
+  "mcpServers": {
+    "knowcode": {
+      "command": "knowcode",
+      "args": ["mcp-server", "--store", "/path/to/your/project"]
+    }
+  }
+}
+```
+
+**Token Savings:**
+- Simple "locate" queries → **100% savings** (answered locally)
+- Code explanations → **60-80% savings** (precise context only)
+
+
 ## Supported Languages (MVP)
 
 - **Python** (.py) - Full AST parsing (Supports Python 3.9 - 3.12)

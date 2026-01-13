@@ -155,8 +155,8 @@ class CodeChunk:
 class EmbeddingConfig:
     """Configuration for embedding generation."""
 
-    provider: str = "openai"  # "openai", "sentence-transformers", "local"
-    model_name: str = "text-embedding-3-small"
-    dimension: int = 1536
+    provider: str = "voyageai"
+    model_name: str = "voyage-code-3"
+    dimension: int = 1024
     batch_size: int = 100
     normalize: bool = True  # Normalize vectors for cosine similarity

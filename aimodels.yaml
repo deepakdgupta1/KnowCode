@@ -19,7 +19,7 @@ embedding_models:
 eval_models:
   - name: voyage-code-3
     provider: voyageai
-    api_key_env: VOYAGE_API_KEY_1
+#   api_key_env: VOYAGE_API_KEY_1
     tokens_free_tier_limit: 200000000
 
 # Configuration

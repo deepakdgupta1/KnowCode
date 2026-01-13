@@ -60,6 +60,13 @@ class AppConfig:
                 ModelConfig(name="gemini-1.5-flash"),
                 ModelConfig(name="gemini-1.5-pro"),
             ],
+            embedding_models=[
+                ModelConfig(
+                    name="voyage-code-3",
+                    provider="voyageai",
+                    api_key_env="VOYAGE_API_KEY_1",
+                )
+            ],
             sufficiency_threshold=0.8,
         )
 

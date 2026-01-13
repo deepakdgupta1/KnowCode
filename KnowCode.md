@@ -134,7 +134,7 @@ Entity:
   id: UUID
   kind: function | class | module | config_key | feature_flag | api_endpoint
   source_location: Location
-  embeddings: vector (1536d)
+  embeddings: vector (Nd - e.g. 1024d for VoyageAI, 1536d for OpenAI)
   confidence: float (0.0-1.0)
   provenance: static_analysis | runtime_trace | llm_inference | human_annotation
   created_at: timestamp
