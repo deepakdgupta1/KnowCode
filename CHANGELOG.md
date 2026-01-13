@@ -713,3 +713,34 @@
 #### 📦 Other Changes
 * Clean up duplicate model configurations (`d787409`)
 * Fix grammatical error in KnowCode.md (`95f1d25`)
+
+
+---
+
+## [Unreleased] - 2026-01-13
+
+**Origin:** Generated
+**Range:** `HEAD~5..HEAD`
+**Commit Count:** 5
+**Confidence:** medium
+
+**Focus:** Feature Development
+
+### 🧠 Temporal Context & Intent
+> *Auto-generated: Add context about why these changes were made.*
+
+### 🏗️ Architectural Impact
+> *Auto-generated: Describe high-level architectural shifts.*
+
+### 📝 Delta Changes
+
+#### 🚀 Features
+* enhance CLI output and improve knowledge store handling in MCP server (`cfc3e61`)
+
+#### 📚 Documentation
+* update changelog [skip ci] (`ef89a8a`)
+* update changelog [skip ci] (`9487bf8`)
+
+#### 📦 Other Changes
+* Add comprehensive MCP workflow test plan and E2E integration tests (`eab9113`)
+* Clean up duplicate model configurations (`d787409`)
