@@ -36,6 +36,8 @@ class RelationshipKind(str, Enum):
     IMPORTS = "imports"        # Module import / dependency
     CONTAINS = "contains"      # Structural containment (Class -> Method)
     INHERITS = "inherits"      # Class inheritance / Interface implementation
+    IMPLEMENTS = "implements"  # Type implements Trait/Interface (Rust/Java)
+    USES_TYPE = "uses_type"    # Variable/Field uses a Type
     REFERENCES = "references"  # General reference (e.g., config usage)
     # Temporal relationships
     CHANGED_BY = "changed_by"  # Entity -> Commit

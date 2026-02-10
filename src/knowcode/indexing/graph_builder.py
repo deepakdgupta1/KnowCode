@@ -8,6 +8,8 @@ from knowcode.data_models import Entity, ParseResult, Relationship
 from knowcode.parsers import MarkdownParser, PythonParser, YamlParser
 from knowcode.parsers.javascript_parser import JavaScriptParser
 from knowcode.parsers.java_parser import JavaParser
+from knowcode.parsers.rust_parser import RustParser
+from knowcode.parsers.vue_parser import VueParser
 from knowcode.indexing.scanner import FileInfo, Scanner
 from knowcode.analysis.signals import CoverageProcessor
 from knowcode.analysis.temporal import TemporalAnalyzer
@@ -23,6 +25,8 @@ class GraphBuilder:
         self.yaml_parser = YamlParser()
         self.js_parser = JavaScriptParser()
         self.java_parser = JavaParser()
+        self.rust_parser = RustParser()
+        self.vue_parser = VueParser()
 
         self.entities: dict[str, Entity] = {}
         self.relationships: list[Relationship] = []
@@ -99,6 +103,10 @@ class GraphBuilder:
             return self.js_parser.parse_file(file_info.path)
         elif file_info.extension == ".java":
             return self.java_parser.parse_file(file_info.path)
+        elif file_info.extension == ".rs":
+            return self.rust_parser.parse_file(file_info.path)
+        elif file_info.extension == ".vue":
+            return self.vue_parser.parse_file(file_info.path)
         else:
             return ParseResult(
                 file_path=str(file_info.path),
