@@ -777,3 +777,34 @@
 
 #### 📦 Other Changes
 * Add comprehensive MCP workflow test plan and E2E integration tests (`eab9113`)
+
+
+---
+
+## [Unreleased] - 2026-02-10
+
+**Origin:** Generated
+**Range:** `HEAD~5..HEAD`
+**Commit Count:** 5
+**Confidence:** medium
+
+**Focus:** Routine Maintenance
+
+### 🧠 Temporal Context & Intent
+> *Auto-generated: Add context about why these changes were made.*
+
+### 🏗️ Architectural Impact
+> *Auto-generated: Describe high-level architectural shifts.*
+
+### 📝 Delta Changes
+
+#### 📚 Documentation
+* update changelog [skip ci] (`5ccc922`)
+* update changelog [skip ci] (`375ed52`)
+
+#### 🔨 Refactoring
+* improve context retrieval instructions and clarify tool usage (`d9e30ea`)
+
+#### 📦 Other Changes
+* rust and vue parser added (`2601b4d`)
+* Add comprehensive MCP workflow test plan and E2E integration tests (`eab9113`)
