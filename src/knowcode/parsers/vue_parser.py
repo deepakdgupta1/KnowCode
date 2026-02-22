@@ -1,7 +1,7 @@
 """Vue Single File Component parser using Tree-sitter."""
 
 from pathlib import Path
-from typing import Any, Union
+from typing import Any, Union, cast
 import re
 
 from knowcode.data_models import Entity, EntityKind, Relationship, RelationshipKind, Location, ParseResult
@@ -27,7 +27,7 @@ class VueParser(TreeSitterParser):
         # Don't call super().__init__ because vue language is not available
         self.language_name = "vue"
         self.js_parser = JavaScriptParser()
-        self.parser = None  # No tree-sitter parser for Vue
+        self.parser = cast(Any, None)  # No tree-sitter parser for Vue
         self.language = None
 
     def parse_file(self, file_path: Union[str, Path]) -> ParseResult:
@@ -145,7 +145,7 @@ class VueParser(TreeSitterParser):
 
             if child_type == "script_element":
                 # Parse <script> section
-                script_text = self._get_text(child, None)
+                script_text = self._get_text(child)
                 script_entities, script_rels = self._parse_script_content(
                     script_text, file_path, parent_id, source_lines
                 )

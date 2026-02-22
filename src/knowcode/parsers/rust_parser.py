@@ -47,14 +47,16 @@ class RustParser(TreeSitterParser):
                 enum_entity, enum_rels = self._parse_enum(
                     child, file_path, parent_id, source_code, source_lines
                 )
-                entities.append(enum_entity)
+                if enum_entity:
+                    entities.append(enum_entity)
                 relationships.extend(enum_rels)
 
             elif child_type == "trait_item":
                 trait_entity, trait_rels = self._parse_trait(
                     child, file_path, parent_id, source_code, source_lines
                 )
-                entities.append(trait_entity)
+                if trait_entity:
+                    entities.append(trait_entity)
                 relationships.extend(trait_rels)
 
             elif child_type == "impl_item":
@@ -68,36 +70,36 @@ class RustParser(TreeSitterParser):
                 func_entity, func_rels = self._parse_function(
                     child, file_path, parent_id, source_code, source_lines
                 )
-                entities.append(func_entity)
+                if func_entity:
+                    entities.append(func_entity)
                 relationships.extend(func_rels)
 
             elif child_type == "const_item":
                 const_entity = self._parse_const(
                     child, file_path, parent_id, source_code, source_lines
                 )
-                entities.append(const_entity)
+                if const_entity:
+                    entities.append(const_entity)
 
             elif child_type == "static_item":
                 static_entity = self._parse_static(
                     child, file_path, parent_id, source_code, source_lines
                 )
-                entities.append(static_entity)
+                if static_entity:
+                    entities.append(static_entity)
 
             elif child_type == "type_item":
                 type_entity = self._parse_type_alias(
                     child, file_path, parent_id, source_code, source_lines
                 )
-                entities.append(type_entity)
+                if type_entity:
+                    entities.append(type_entity)
 
             elif child_type == "mod_item":
-                mod_result, mod_rels = self._parse_module(
+                mod_entities, mod_rels = self._parse_module(
                     child, file_path, parent_id, source_code, source_lines
                 )
-                # mod_result can be a single entity or a list (for inline modules with nested content)
-                if isinstance(mod_result, list):
-                    entities.extend(mod_result)
-                else:
-                    entities.append(mod_result)
+                entities.extend(mod_entities)
                 relationships.extend(mod_rels)
 
             elif child_type == "use_declaration":
@@ -119,7 +121,7 @@ class RustParser(TreeSitterParser):
         if not name_node:
             return [], []
 
-        name = self._get_text(name_node, None)
+        name = self._get_text(name_node)
         qualified_name = f"{parent_id.split('::')[-1]}.{name}"
 
         # Extract doc comment, visibility, and attributes
@@ -161,7 +163,7 @@ class RustParser(TreeSitterParser):
                     field_type_node = field.child_by_field_name("type")
 
                     if field_name_node:
-                        field_name = self._get_text(field_name_node, None)
+                        field_name = self._get_text(field_name_node)
                         field_qualified = f"{qualified_name}.{field_name}"
 
                         field_entity = self._create_entity(
@@ -183,7 +185,7 @@ class RustParser(TreeSitterParser):
 
                         # Track type usage (strip generics for base type)
                         if field_type_node:
-                            type_name = self._get_text(field_type_node, None)
+                            type_name = self._get_text(field_type_node)
                             base_type = self._strip_generics(type_name)
                             relationships.append(
                                 Relationship(
@@ -202,13 +204,13 @@ class RustParser(TreeSitterParser):
         parent_id: str,
         source_code: str,
         source_lines: list[str],
-    ) -> tuple[Entity, list[Relationship]]:
+    ) -> tuple[Optional[Entity], list[Relationship]]:
         """Parse an enum declaration."""
         name_node = node.child_by_field_name("name")
         if not name_node:
             return None, []
 
-        name = self._get_text(name_node, None)
+        name = self._get_text(name_node)
         qualified_name = f"{parent_id.split('::')[-1]}.{name}"
         docstring = self._extract_doc_comment(node, source_lines)
         visibility = self._extract_visibility(node)
@@ -247,13 +249,13 @@ class RustParser(TreeSitterParser):
         parent_id: str,
         source_code: str,
         source_lines: list[str],
-    ) -> tuple[Entity, list[Relationship]]:
+    ) -> tuple[Optional[Entity], list[Relationship]]:
         """Parse a trait declaration."""
         name_node = node.child_by_field_name("name")
         if not name_node:
             return None, []
 
-        name = self._get_text(name_node, None)
+        name = self._get_text(name_node)
         qualified_name = f"{parent_id.split('::')[-1]}.{name}"
         docstring = self._extract_doc_comment(node, source_lines)
         visibility = self._extract_visibility(node)
@@ -311,7 +313,7 @@ class RustParser(TreeSitterParser):
             # Fallback: This should never happen in valid Rust code
             return entities, relationships
 
-        type_name = self._get_text(type_node, None)
+        type_name = self._get_text(type_node)
         if not type_name:
             return entities, relationships
 
@@ -322,7 +324,7 @@ class RustParser(TreeSitterParser):
         # Strip generics from trait name for cleaner linking
         trait_name = None
         if is_trait_impl:
-            trait_name_raw = self._get_text(trait_node, None)
+            trait_name_raw = self._get_text(trait_node)
             trait_name = self._strip_generics(trait_name_raw)
             relationships.append(
                 Relationship(
@@ -380,13 +382,13 @@ class RustParser(TreeSitterParser):
         source_code: str,
         source_lines: list[str],
         impl_type: Optional[str] = None,
-    ) -> tuple[Entity, list[Relationship]]:
+    ) -> tuple[Optional[Entity], list[Relationship]]:
         """Parse a function declaration."""
         name_node = node.child_by_field_name("name")
         if not name_node:
             return None, []
 
-        name = self._get_text(name_node, None)
+        name = self._get_text(name_node)
 
         # Build qualified name
         if impl_type:
@@ -448,13 +450,13 @@ class RustParser(TreeSitterParser):
         parent_id: str,
         source_code: str,
         source_lines: list[str],
-    ) -> Entity:
+    ) -> Optional[Entity]:
         """Parse a const declaration."""
         name_node = node.child_by_field_name("name")
         if not name_node:
             return None
 
-        name = self._get_text(name_node, None)
+        name = self._get_text(name_node)
         qualified_name = f"{parent_id.split('::')[-1]}.{name}"
         visibility = self._extract_visibility(node)
 
@@ -480,13 +482,13 @@ class RustParser(TreeSitterParser):
         parent_id: str,
         source_code: str,
         source_lines: list[str],
-    ) -> Entity:
+    ) -> Optional[Entity]:
         """Parse a static declaration."""
         name_node = node.child_by_field_name("name")
         if not name_node:
             return None
 
-        name = self._get_text(name_node, None)
+        name = self._get_text(name_node)
         qualified_name = f"{parent_id.split('::')[-1]}.{name}"
         visibility = self._extract_visibility(node)
 
@@ -512,13 +514,13 @@ class RustParser(TreeSitterParser):
         parent_id: str,
         source_code: str,
         source_lines: list[str],
-    ) -> Entity:
+    ) -> Optional[Entity]:
         """Parse a type alias declaration."""
         name_node = node.child_by_field_name("name")
         if not name_node:
             return None
 
-        name = self._get_text(name_node, None)
+        name = self._get_text(name_node)
         qualified_name = f"{parent_id.split('::')[-1]}.{name}"
         visibility = self._extract_visibility(node)
 
@@ -544,7 +546,7 @@ class RustParser(TreeSitterParser):
         parent_id: str,
         source_code: str,
         source_lines: list[str],
-    ) -> tuple[Entity, list[Relationship]]:
+    ) -> tuple[list[Entity], list[Relationship]]:
         """Parse a module declaration.
 
         Handles both:
@@ -553,9 +555,9 @@ class RustParser(TreeSitterParser):
         """
         name_node = node.child_by_field_name("name")
         if not name_node:
-            return None, []
+            return [], []
 
-        name = self._get_text(name_node, None)
+        name = self._get_text(name_node)
         qualified_name = f"{parent_id.split('::')[-1]}.{name}"
         visibility = self._extract_visibility(node)
 
@@ -606,9 +608,9 @@ class RustParser(TreeSitterParser):
                     source_lines,
                 )
                 # Return both the module and its nested entities
-                return [mod_entity] + nested_entities, relationships + nested_rels
+                return [mod_entity, *nested_entities], relationships + nested_rels
 
-        return mod_entity, relationships
+        return [mod_entity], relationships
 
     def _parse_use_declaration(self, node: Any, parent_id: str) -> list[Relationship]:
         """Parse use declarations (imports).
@@ -643,10 +645,10 @@ class RustParser(TreeSitterParser):
         return_type_node = node.child_by_field_name("return_type")
 
         name_node = node.child_by_field_name("name")
-        name = self._get_text(name_node, None) if name_node else "unknown"
+        name = self._get_text(name_node) if name_node else "unknown"
 
-        params_text = self._get_text(params_node, None) if params_node else "()"
-        return_text = self._get_text(return_type_node, None) if return_type_node else ""
+        params_text = self._get_text(params_node) if params_node else "()"
+        return_text = self._get_text(return_type_node) if return_type_node else ""
 
         # Resolve Self keyword in return type
         if return_text and impl_type:
@@ -658,14 +660,14 @@ class RustParser(TreeSitterParser):
 
     def _extract_calls_from_body(self, body_node: Any, caller_id: str) -> list[Relationship]:
         """Extract function calls from a function body."""
-        relationships = []
+        relationships: list[Relationship] = []
 
         def visit_node(node: Any) -> None:
             if node.type == "call_expression":
                 # Get function being called
                 function_node = node.child_by_field_name("function")
                 if function_node:
-                    callee_name = self._get_text(function_node, None)
+                    callee_name = self._get_text(function_node)
                     relationships.append(
                         Relationship(
                             source_id=caller_id,
@@ -689,7 +691,7 @@ class RustParser(TreeSitterParser):
         start_line = node.start_point[0]
 
         # Look backwards for doc comments
-        doc_lines = []
+        doc_lines: list[str] = []
         line_idx = start_line - 1
 
         while line_idx >= 0:
@@ -719,7 +721,7 @@ class RustParser(TreeSitterParser):
         if not macro_node:
             return None
 
-        macro_name = self._get_text(macro_node, None)
+        macro_name = self._get_text(macro_node)
 
         # Create CALLS relationship for the macro
         return Relationship(
@@ -757,13 +759,13 @@ class RustParser(TreeSitterParser):
             list_node = use_tree_node.child_by_field_name("list")
 
             if path_node and list_node:
-                prefix = self._get_text(path_node, None)
+                prefix = self._get_text(path_node)
                 sub_paths = self._parse_use_tree(list_node)
                 paths.extend([f"{prefix}::{sub}" for sub in sub_paths])
 
         else:
             # Simple import: use std::vec or an identifier
-            path_text = self._get_text(use_tree_node, None)
+            path_text = self._get_text(use_tree_node)
             if path_text:
                 paths.append(path_text.strip())
 
@@ -777,7 +779,7 @@ class RustParser(TreeSitterParser):
         # Look for visibility_modifier child
         for child in node.children:
             if child.type == "visibility_modifier":
-                vis_text = self._get_text(child, None)
+                vis_text = self._get_text(child)
                 if vis_text == "pub":
                     return "public"
                 elif vis_text.startswith("pub("):
@@ -791,7 +793,7 @@ class RustParser(TreeSitterParser):
         Captures attributes like #[test], #[derive(Debug)], #[inline], etc.
         """
         start_line = node.start_point[0]
-        attributes = []
+        attributes: list[str] = []
         line_idx = start_line - 1
 
         while line_idx >= 0:
