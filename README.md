@@ -2,9 +2,6 @@
 
 Know a codebase using KnowCode.  Ask questions and get responses in natural language about a codebase to learn more about it. Provide accurate, relevant context to your AI coding agent and make its token usage limits last 10x longer.
 
-[![codecov](https://codecov.io/gh/deepakdgupta1/KnowCode/graph/badge.svg?token=placeholder)](https://codecov.io/gh/deepakdgupta1/KnowCode) [![CI/CD Pipeline](https://github.com/deepakdgupta1/KnowCode/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/deepakdgupta1/KnowCode/actions/workflows/ci-cd.yml)
-
-
 ## Overview
 
 KnowCode analyzes your codebase and builds a semantic graph of entities (functions, classes, modules) and their relationships (calls, imports, dependencies). This structured knowledge enables:
