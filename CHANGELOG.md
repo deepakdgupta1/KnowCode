@@ -845,3 +845,40 @@
 
 #### 📦 Other Changes
 * rust and vue parser added (`2601b4d`)
+
+
+---
+
+## [Unreleased] - 2026-02-22
+
+**Origin:** Generated
+**Range:** `HEAD~5..HEAD`
+**Commit Count:** 5
+**Confidence:** high
+
+**Focus:** Bug Fixes
+
+### 🧠 Temporal Context & Intent
+> *Auto-generated: Add context about why these changes were made.*
+
+### 🏗️ Architectural Impact
+> *Auto-generated: Describe high-level architectural shifts.*
+
+### 📝 Delta Changes
+
+#### 🚀 Features
+* **deps:** add MCP and VoyageAI as optional dependencies (`48e84a4`)
+    * *Context:* Add optional dependencies for MCP (Model Context Protocol) server support
+    * *Context:* and VoyageAI embedding provider. These integrations can be installed via:
+    * *Context:* - pip install knowcode[mcp]
+    * *Context:* - pip install knowcode[voyageai]
+
+#### 🐛 Fixes
+* restore rust parser compatibility and typing (`c990e80`)
+
+#### 🔧 Maintenance
+* checkpoint forensic fixes and docs alignment (`717a50d`)
+
+#### 📚 Documentation
+* update changelog [skip ci] (`0251880`)
+* update changelog [skip ci] (`116ab12`)
