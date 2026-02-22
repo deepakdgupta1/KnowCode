@@ -808,3 +808,40 @@
 #### 📦 Other Changes
 * rust and vue parser added (`2601b4d`)
 * Add comprehensive MCP workflow test plan and E2E integration tests (`eab9113`)
+
+
+---
+
+## [Unreleased] - 2026-02-22
+
+**Origin:** Generated
+**Range:** `HEAD~5..HEAD`
+**Commit Count:** 5
+**Confidence:** medium
+
+**Focus:** Feature Development
+
+### 🧠 Temporal Context & Intent
+> *Auto-generated: Add context about why these changes were made.*
+
+### 🏗️ Architectural Impact
+> *Auto-generated: Describe high-level architectural shifts.*
+
+### 📝 Delta Changes
+
+#### 🚀 Features
+* **deps:** add MCP and VoyageAI as optional dependencies (`48e84a4`)
+    * *Context:* Add optional dependencies for MCP (Model Context Protocol) server support
+    * *Context:* and VoyageAI embedding provider. These integrations can be installed via:
+    * *Context:* - pip install knowcode[mcp]
+    * *Context:* - pip install knowcode[voyageai]
+
+#### 📚 Documentation
+* update changelog [skip ci] (`116ab12`)
+* update changelog [skip ci] (`5ccc922`)
+
+#### 🔨 Refactoring
+* improve context retrieval instructions and clarify tool usage (`d9e30ea`)
+
+#### 📦 Other Changes
+* rust and vue parser added (`2601b4d`)
