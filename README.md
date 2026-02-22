@@ -258,6 +258,16 @@ KnowCode enables token-efficient IDE agent workflows. When your IDE agent needs 
 }
 ```
 
+## AI Gateway Scaffold (Extractable)
+
+For OpenAPI-to-tool orchestration through LiteLLM, this repository now includes a self-contained gateway app at `apps/agent-gateway/`.
+
+- Source code: `apps/agent-gateway/src/agent_gateway/`
+- Setup + local run: `apps/agent-gateway/README.md`
+- Clean repo split playbook: `apps/agent-gateway/EXTRACTION.md`
+
+The gateway intentionally integrates with KnowCode only over HTTP (`/openapi.json` and `/api/v1/*`) so it can be moved to a separate repository without code changes.
+
 **Token Savings:**
 - Simple "locate" queries → **100% savings** (answered locally)
 - Code explanations → **60-80% savings** (precise context only)

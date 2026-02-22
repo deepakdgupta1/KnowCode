@@ -1,0 +1,19 @@
+model_list:
+  - model_name: gemini/gemini-3-flash-preview
+    litellm_params:
+      model: gemini/gemini-3-flash-preview
+      api_key: "os.environ/GOOGLE_API_KEY_1"
+
+  - model_name: ollama/llama3.1:8b
+    litellm_params:
+      model: ollama/llama3.1:8b
+      api_base: "http://host.docker.internal:11434"
+
+router_settings:
+  fallbacks:
+    - gemini/gemini-3-flash-preview:
+        - ollama/llama3.1:8b
+
+general_settings:
+  master_key: "os.environ/LITELLM_MASTER_KEY"
+  max_budget: "os.environ/LITELLM_MAX_BUDGET"

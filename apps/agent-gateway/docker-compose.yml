@@ -1,0 +1,27 @@
+services:
+  litellm:
+    image: ghcr.io/berriai/litellm:main-stable
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    environment:
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-local-proxy}
+      LITELLM_MAX_BUDGET: ${LITELLM_MAX_BUDGET:-10}
+      GOOGLE_API_KEY_1: ${GOOGLE_API_KEY_1}
+    volumes:
+      - ./litellm.config.yaml:/app/config.yaml:ro
+    ports:
+      - "4000:4000"
+
+  agent-gateway:
+    build: .
+    environment:
+      KNOWCODE_API_BASE_URL: ${KNOWCODE_API_BASE_URL:-http://host.docker.internal:8000}
+      LITELLM_BASE_URL: http://litellm:4000
+      LITELLM_API_KEY: ${LITELLM_MASTER_KEY:-sk-local-proxy}
+      AGENT_DEFAULT_MODEL: ${AGENT_DEFAULT_MODEL:-gemini/gemini-3-flash-preview}
+      PORT: 8081
+    depends_on:
+      - litellm
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8081:8081"
