@@ -1,4 +1,3 @@
-import re
 from collections import defaultdict
 from pathlib import Path
 
@@ -16,7 +15,8 @@ def main():
                 errors_by_file[filepath].append((lineno, msg))
 
     for filepath, file_errors in errors_by_file.items():
-        if not Path(filepath).exists(): continue
+        if not Path(filepath).exists():
+            continue
         
         file_lines = Path(filepath).read_text().splitlines()
         
@@ -27,7 +27,8 @@ def main():
             
         for lineno in sorted(line_actions.keys(), reverse=True):
             idx = lineno - 1
-            if idx < 0 or idx >= len(file_lines): continue
+            if idx < 0 or idx >= len(file_lines):
+                continue
             
             line = file_lines[idx]
             msgs = line_actions[lineno]

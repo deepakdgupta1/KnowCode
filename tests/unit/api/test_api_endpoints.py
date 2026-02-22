@@ -3,14 +3,26 @@
 from __future__ import annotations
 
 from typing import Any
+
 from knowcode.api import api
 from knowcode.data_models import CodeChunk
-from typing import Any
+
+
+class DummyChunkRepo:
+    def __init__(self, chunks: list[CodeChunk]) -> None:
+        self._chunks = {c.id: c for c in chunks}
+
+    def get(self, chunk_id: str) -> CodeChunk | None:
+        return self._chunks.get(chunk_id)
 
 
 class DummySearchEngine:
+    def __init__(self) -> None:
+        self._chunks = [CodeChunk(id="c1", entity_id="e1", content="hi", tokens=["hi"])]
+        self.chunk_repo = DummyChunkRepo(self._chunks)
+
     def search(self, query: Any, limit: Any=5, expand_deps: Any=True, **_kwargs: Any) -> Any:  # noqa: ANN001  # type: ignore
-        return [CodeChunk(id="c1", entity_id="e1", content="hi", tokens=["hi"])]
+        return self._chunks
 
 
 class DummyStore:
@@ -41,6 +53,7 @@ class DummyService:
     def __init__(self) -> None:
         self.reload_called = False
         self.store = DummyStore()
+        self._engine = DummySearchEngine()
 
     def get_stats(self):  # type: ignore
         return {"total_entities": 1}
@@ -78,7 +91,23 @@ class DummyService:
         return []
 
     def get_search_engine(self, _index_path=None):  # type: ignore
-        return DummySearchEngine()
+        return self._engine
+
+    def retrieve_context_for_query(
+        self,
+        query: str,
+        task_type: Any = None,
+        limit_entities: int = 5,
+        expand_deps: bool = True,
+    ) -> dict[str, Any]:
+        _ = (query, limit_entities, expand_deps)
+        task_name = task_type.value if task_type else "general"
+        return {
+            "task_type": task_name,
+            "evidence": [
+                {"rank": 1, "chunk_id": "c1", "entity_id": "e1", "score": 0.91, "source": "retrieved"}
+            ],
+        }
 
     def reload(self) -> Any:
         self.reload_called = True

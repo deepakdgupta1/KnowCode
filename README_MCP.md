@@ -46,7 +46,7 @@ KnowCode MCP Server returns:
     ...
 }
     ↓
-Agent checks: sufficiency_score >= 0.88?
+Agent checks: sufficiency_score >= 0.8?
     ↓
 YES → Answer from context_text only (no external LLM)
 NO  → Use external LLM (Claude Sonnet 4.5)
@@ -82,7 +82,7 @@ source .venv/bin/activate
 knowcode analyze . -o .
 ```
 
-**Note:** This automatically rebuilds both the knowledge store AND the semantic index!
+**Note:** This rebuilds the knowledge store and attempts semantic indexing. If indexing is skipped, run `knowcode index .` after configuring embeddings.
 
 ## 🐛 Troubleshooting
 
@@ -107,9 +107,9 @@ knowcode analyze . -o .
    ls -la knowcode_index/
    ```
 
-2. If missing, re-run analyze (it will rebuild the index):
+2. If missing, run a dedicated index build:
    ```bash
-   knowcode analyze . -o .
+   knowcode index . --output knowcode_index
    ```
 
 3. Increase token budget in `.agent/context.md`:
@@ -120,7 +120,7 @@ knowcode analyze . -o .
 ## 📊 Success Metrics
 
 After setup, you should see:
-- ✅ 70%+ queries with `sufficiency_score >= 0.88`
+- ✅ 70%+ queries with `sufficiency_score >= 0.8`
 - ✅ Faster responses for codebase questions
 - ✅ 50%+ reduction in external LLM token usage
 - ✅ Accurate answers from local context
@@ -134,8 +134,8 @@ After setup, you should see:
 ## 🎓 Key Concepts
 
 **Sufficiency Score**: Confidence that retrieved context is enough to answer the query
-- `>= 0.88` → Answer locally
-- `< 0.88` → Use external LLM
+- `>= 0.8` → Answer locally
+- `< 0.8` → Use external LLM
 
 **Retrieval Modes**:
 - **Semantic**: Uses embeddings + vector search (better)

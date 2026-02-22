@@ -7,7 +7,7 @@ Provides integration with VoyageAI's embedding and reranking APIs:
 
 from typing import Any
 import os
-from typing import Any, Optional
+from typing import Optional
 
 # VoyageAI imports - requires: pip install voyageai
 try:

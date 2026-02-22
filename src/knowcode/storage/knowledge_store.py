@@ -6,7 +6,7 @@ from typing import Any
 import json
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 from knowcode.indexing.graph_builder import GraphBuilder
 from knowcode.data_models import (

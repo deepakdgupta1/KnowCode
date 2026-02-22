@@ -24,8 +24,8 @@ Knowledge Store + Semantic Index
 Context Bundle (with sufficiency_score)
     ↓
 Agent Decision:
-    • If sufficiency_score >= 0.88 → Answer from context only
-    • If sufficiency_score < 0.88 → Use external LLM
+    • If sufficiency_score >= 0.8 → Answer from context only
+    • If sufficiency_score < 0.8 → Use external LLM
 ```
 
 ## Prerequisites
@@ -66,9 +66,9 @@ Agent Decision:
 ```markdown
 Always call the tool retrieve_context_for_query before answering.
 Use task_type=auto, max_tokens=3000, limit_entities=3, expand_deps=true.
-If sufficiency_score >= 0.88 and context_text is non-empty, answer ONLY from context_text.
+If sufficiency_score >= 0.8 and context_text is non-empty, answer ONLY from context_text.
 Do not call other tools or request more context.
-If sufficiency_score < 0.88, then proceed with a full LLM answer.
+If sufficiency_score < 0.8, then proceed with a full LLM answer.
 ```
 
 This ensures the agent follows the local-first workflow.
@@ -83,13 +83,13 @@ source .venv/bin/activate
 knowcode analyze . -o .
 ```
 
-This **automatically**:
+This command:
 - ✅ Parses the codebase and builds the knowledge graph
 - ✅ Creates `knowcode_knowledge.json` with all entities and relationships
-- ✅ **Builds the semantic index** at `knowcode_index/` with vector embeddings
-- ✅ Reports statistics including indexed chunk count
+- ✅ Attempts to build the semantic index at `knowcode_index/`
+- ✅ Reports indexed chunk count (or indexing warning if embedding setup is unavailable)
 
-**Note:** You do NOT need to run a separate `knowcode index` command - it's built-in!
+**Note:** If semantic indexing is skipped (e.g., missing embedding API credentials), run `knowcode index .` after configuring embeddings.
 
 ### Step 3: Configure MCP Server
 
@@ -131,8 +131,8 @@ How does search work in KnowCode?
 **Expected behavior:**
 1. Agent calls `retrieve_context_for_query`
 2. Returns context with `sufficiency_score`
-3. If score >= 0.88, answers from context only
-4. If score < 0.88, uses external LLM
+3. If score >= 0.8, answers from context only
+4. If score < 0.8, uses external LLM
 
 ### Test 3: Verify All Tools
 
@@ -179,7 +179,7 @@ Answering from local context only.
 ### Issue 3: Low Sufficiency Scores
 
 **Symptoms:**
-- `sufficiency_score` always < 0.88
+- `sufficiency_score` always < 0.8
 - Agent always uses external LLM
 
 **Solutions:**
@@ -196,7 +196,7 @@ Answering from local context only.
 
 **Solutions:**
 1. Verify `knowcode_index/` directory exists
-2. Check `knowcode_index/manifest.json` exists
+2. Check `knowcode_index/index_manifest.json` exists
 3. Verify embedding model is configured in `aimodels.yaml`
 4. Check API keys for embedding provider (VoyageAI, OpenAI, etc.)
 
@@ -276,13 +276,13 @@ Use task_type=auto, max_tokens=3000, limit_entities=3, expand_deps=true.
 ### Check Token Savings
 
 The MCP server logs show:
-- Queries answered locally (sufficiency >= 0.88)
-- Queries sent to external LLM (sufficiency < 0.88)
+- Queries answered locally (sufficiency >= 0.8)
+- Queries sent to external LLM (sufficiency < 0.8)
 - Token counts for each response
 
 ### Metrics to Track
 
-1. **Sufficiency Score Distribution**: Aim for >70% of queries with score >= 0.88
+1. **Sufficiency Score Distribution**: Aim for >70% of queries with score >= 0.8
 2. **Token Consumption**: Compare before/after MCP integration
 3. **Response Quality**: Verify local answers are accurate
 

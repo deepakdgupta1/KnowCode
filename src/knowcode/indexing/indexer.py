@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 from pathlib import Path
-from typing import Optional, Any
+from typing import Optional
 
 from knowcode.storage.chunk_repository import InMemoryChunkRepository
 from knowcode.indexing.chunker import Chunker

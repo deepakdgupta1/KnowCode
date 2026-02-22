@@ -17,7 +17,6 @@ from knowcode.config import AppConfig, ModelConfig
 from knowcode.data_models import TaskType
 from knowcode.llm.agent import Agent
 from knowcode.mcp.server import KnowCodeMCPServer
-from typing import Any
 
 
 class MockService:

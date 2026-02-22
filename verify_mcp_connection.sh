@@ -129,5 +129,5 @@ echo "3. ${YELLOW}Antigravity will auto-start the MCP server using the config${N
 echo ""
 echo "Expected behavior after restart:"
 echo "  • All 4 KnowCode tools will be available in the IDE"
-echo "  • Agent rules in .agent/rules/context.md will guide tool usage"
+echo "  • Agent rules in .agent/context.md will guide tool usage"
 echo ""

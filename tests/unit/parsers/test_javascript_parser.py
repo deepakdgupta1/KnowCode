@@ -60,3 +60,47 @@ def test_parse_simple_js(tmp_path: Path) -> None:
     targets = {r.target_id for r in calls}
     assert "ref::something" in targets
     # assert "ref::MyClass" in targets # Constructor call logic might need verifying
+
+
+def test_parse_lexical_function_assignments(tmp_path: Path) -> None:
+    """Parse const/let function assignments as top-level functions."""
+    source = """
+    const bar = () => 1;
+    let baz = function() {
+        return bar();
+    };
+    """
+
+    file_path = tmp_path / "lexical.js"
+    file_path.write_text(source, encoding="utf-8")
+
+    parser = JavaScriptParser()
+    result = parser.parse_file(file_path)
+
+    entities = {e.qualified_name: e for e in result.entities}
+    assert "bar" in entities
+    assert entities["bar"].kind == EntityKind.FUNCTION
+    assert "baz" in entities
+    assert entities["baz"].kind == EntityKind.FUNCTION
+
+    calls = [r for r in result.relationships if r.kind == RelationshipKind.CALLS]
+    assert any(r.source_id.endswith("::baz") and r.target_id == "ref::bar" for r in calls)
+
+
+def test_parse_export_default_anonymous_function(tmp_path: Path) -> None:
+    """Handle anonymous default export functions with a stable fallback name."""
+    source = """
+    export default function() {
+        return 1;
+    }
+    """
+
+    file_path = tmp_path / "default_export.js"
+    file_path.write_text(source, encoding="utf-8")
+
+    parser = JavaScriptParser()
+    result = parser.parse_file(file_path)
+
+    entities = {e.qualified_name: e for e in result.entities}
+    assert "default_export" in entities
+    assert entities["default_export"].kind == EntityKind.FUNCTION

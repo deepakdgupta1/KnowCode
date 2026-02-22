@@ -3,7 +3,7 @@
 from __future__ import annotations
 from typing import Any
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 from tree_sitter import Parser
 import tree_sitter_languages

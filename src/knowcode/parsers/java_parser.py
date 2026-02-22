@@ -2,7 +2,6 @@
 
 from typing import Any
 from pathlib import Path
-from typing import Any
 
 from knowcode.data_models import Entity, EntityKind, Relationship, RelationshipKind
 from knowcode.parsers.base import TreeSitterParser

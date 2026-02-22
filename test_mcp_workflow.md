@@ -10,7 +10,7 @@ How does search work in KnowCode?
 ```
 
 **Expected Result:**
-- `sufficiency_score >= 0.88`
+- `sufficiency_score >= 0.8`
 - Agent answers from context only
 - No external LLM call
 - Response includes details about SearchEngine, HybridIndex, etc.
@@ -23,7 +23,7 @@ What does the retrieve_context_for_query method do?
 ```
 
 **Expected Result:**
-- `sufficiency_score >= 0.88`
+- `sufficiency_score >= 0.8`
 - Agent answers from context only
 - Response includes method signature, parameters, and logic
 
@@ -47,7 +47,7 @@ Show me how semantic search is implemented
 ```
 
 **Expected Result:**
-- `sufficiency_score >= 0.88`
+- `sufficiency_score >= 0.8`
 - Agent answers from context only
 - Response includes HybridIndex, VectorStore, embeddings
 
@@ -74,7 +74,7 @@ The agent should have access to `retrieve_context_for_query` tool.
 Look for these indicators in the agent's response:
 - "Retrieving context from codebase..."
 - "Sufficiency score: X.XX"
-- "Answering from local context" (when score >= 0.88)
+- "Answering from local context" (when score >= 0.8)
 
 ### Check 3: MCP Server Process
 ```bash
@@ -134,9 +134,9 @@ You should NOT need to manually run `knowcode mcp-server` - Antigravity starts i
 ✅ MCP server starts automatically when IDE starts
 ✅ `retrieve_context_for_query` tool is available
 ✅ Agent retrieves context before answering
-✅ High sufficiency scores (>0.88) for codebase questions
+✅ High sufficiency scores (>0.8) for codebase questions
 ✅ Agent answers from context only when sufficient
-✅ Agent uses external LLM only when needed (score < 0.88)
+✅ Agent uses external LLM only when needed (score < 0.8)
 
 ---
 
@@ -156,7 +156,7 @@ Track these metrics over time:
 
 | Metric | Target | Current |
 |--------|--------|---------|
-| % Queries with score >= 0.88 | >70% | TBD |
+| % Queries with score >= 0.8 | >70% | TBD |
 | Avg response time (local) | <2s | TBD |
 | Avg response time (external) | <10s | TBD |
 | Token savings per day | >50% | TBD |

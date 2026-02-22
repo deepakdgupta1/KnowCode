@@ -2,7 +2,7 @@
 
 from typing import Any
 import os
-from typing import Optional, Any
+from typing import Optional
 
 from google import genai
 from google.api_core.exceptions import ResourceExhausted

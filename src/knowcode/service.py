@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any
 import re
 from pathlib import Path
-from typing import Any, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Optional
 
 from knowcode.analysis.context_synthesizer import ContextSynthesizer
 from knowcode.config import AppConfig
@@ -391,9 +390,9 @@ class KnowCodeService:
         self,
         directory: str | Path,
         output: str | Path,
-        ignore: list[str] = None,  # type: ignore
+        ignore: list[str] | None = None,
         temporal: bool = False,
-        coverage: str | Path = None,  # type: ignore
+        coverage: str | Path | None = None,
     ) -> dict[str, Any]:
         """Analyze a codebase and persist the resulting knowledge store.
 
@@ -422,11 +421,20 @@ class KnowCodeService:
 
         store_root = output_path if output_path.is_dir() else output_path.parent
         index_path = store_root / "knowcode_index"
-        index_count = self._build_index(Path(directory), index_path)
+        index_count = 0
+        index_error: str | None = None
+        try:
+            index_count = self._build_index(Path(directory), index_path)
+        except Exception as e:
+            # Keep analyze usable without embedding credentials; semantic
+            # indexing can still be built later with `knowcode index`.
+            index_error = str(e)
 
-        stats = builder.stats()
+        stats: dict[str, Any] = builder.stats()
         stats["indexed_chunks"] = index_count
-        stats["index_path"] = str(index_path)  # type: ignore
+        stats["index_path"] = str(index_path)
+        if index_error:
+            stats["index_error"] = index_error
         return stats
 
     def search(self, pattern: str) -> list[dict[str, Any]]:

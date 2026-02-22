@@ -1,6 +1,5 @@
 """JavaScript parser using Tree-sitter."""
 
-from typing import Any
 from pathlib import Path
 from typing import Any
 
@@ -27,70 +26,132 @@ class JavaScriptParser(TreeSitterParser):
         entities: list[Entity] = []
         relationships: list[Relationship] = []
 
-
-
-        # Traverse children
-        
-        # We need to iterate over all children. walk() gives a cursor.
-        # Tree-sitter cursors are stateful.
-        # Simplest way is often just to iterate node.children if the tree isn't massive,
-        # or use a recursive visitor pattern.
-        # For this implementation, we will iterate over node.children for the current scope,
-        # and recurse into relevant containers (class body, function body).
-        
+        # Traverse children in the current scope.
         for child in node.children:
             child_type = child.type
-            
+
             if child_type == "class_declaration":
                 class_entities, class_rels = self._parse_class(
                     child, file_path, parent_id, source_code, source_lines
                 )
                 entities.extend(class_entities)
                 relationships.extend(class_rels)
-                
+
             elif child_type == "function_declaration":
                 func_entity, func_rels = self._parse_function(
                     child, file_path, parent_id, source_code, source_lines, kind=EntityKind.FUNCTION
                 )
                 entities.append(func_entity)
                 relationships.extend(func_rels)
-                
-            elif child_type == "variable_declaration":
-                 # Check for arrow functions assigned to variables: const foo = () => {}
-                 for decl in child.children:
-                     if decl.type == "variable_declarator":
-                         # name is first child, value is last child
-                         var_name_node = decl.child_by_field_name("name")
-                         value_node = decl.child_by_field_name("value")
-                         
-                         if value_node and value_node.type == "arrow_function":
-                             # Treat as function
-                             func_entity, func_rels = self._parse_arrow_function(
-                                 value_node, var_name_node, file_path, parent_id, source_code, source_lines
-                             )
-                             entities.append(func_entity)
-                             relationships.extend(func_rels)
+
+            elif child_type in {"variable_declaration", "lexical_declaration"}:
+                var_entities, var_rels = self._parse_variable_declaration(
+                    child, file_path, parent_id, source_code, source_lines
+                )
+                entities.extend(var_entities)
+                relationships.extend(var_rels)
+
+            elif child_type == "export_statement":
+                exported = child.child_by_field_name("declaration") or child.child_by_field_name("value")
+                if not exported:
+                    continue
+
+                if exported.type == "class_declaration":
+                    class_entities, class_rels = self._parse_class(
+                        exported, file_path, parent_id, source_code, source_lines
+                    )
+                    entities.extend(class_entities)
+                    relationships.extend(class_rels)
+                elif exported.type == "function_declaration":
+                    func_entity, func_rels = self._parse_function(
+                        exported, file_path, parent_id, source_code, source_lines, kind=EntityKind.FUNCTION
+                    )
+                    entities.append(func_entity)
+                    relationships.extend(func_rels)
+                elif exported.type == "function":
+                    func_entity, func_rels = self._parse_function(
+                        exported,
+                        file_path,
+                        parent_id,
+                        source_code,
+                        source_lines,
+                        kind=EntityKind.FUNCTION,
+                        fallback_name="default_export",
+                    )
+                    entities.append(func_entity)
+                    relationships.extend(func_rels)
+                elif exported.type in {"variable_declaration", "lexical_declaration"}:
+                    var_entities, var_rels = self._parse_variable_declaration(
+                        exported, file_path, parent_id, source_code, source_lines
+                    )
+                    entities.extend(var_entities)
+                    relationships.extend(var_rels)
 
             elif child_type == "import_statement":
-                # import { foo } from 'bar';
-                # Source is usually the string literal at the end
                 source_node = child.child_by_field_name("source")
                 if source_node:
-                    # Remove quotes
                     module_name = self._get_text(source_node).strip("'\"")
                     relationships.append(
                         Relationship(
-                            source_id=parent_id, # Imports belong to the module scope usually
+                            source_id=parent_id,
                             target_id=f"external::{module_name}",
                             kind=RelationshipKind.IMPORTS
                         )
                     )
-            
+
             elif child_type == "call_expression":
-                 # Extract calls
-                 call_rel = self._extract_call(child, parent_id)
-                 if call_rel:
-                     relationships.append(call_rel)
+                call_rel = self._extract_call(child, parent_id)
+                if call_rel:
+                    relationships.append(call_rel)
+
+        return entities, relationships
+
+    def _parse_variable_declaration(
+        self,
+        node: Any,
+        file_path: Path,
+        parent_id: str,
+        source_code: str,
+        source_lines: list[str],
+    ) -> tuple[list[Entity], list[Relationship]]:
+        """Extract function-like entities assigned to variables."""
+        entities: list[Entity] = []
+        relationships: list[Relationship] = []
+
+        for decl in node.children:
+            if decl.type != "variable_declarator":
+                continue
+
+            var_name_node = decl.child_by_field_name("name")
+            value_node = decl.child_by_field_name("value")
+            fallback_name = self._get_text(var_name_node) if var_name_node else "anonymous"
+            if not value_node:
+                continue
+
+            if value_node.type == "arrow_function":
+                func_entity, func_rels = self._parse_arrow_function(
+                    value_node,
+                    var_name_node,
+                    file_path,
+                    parent_id,
+                    source_code,
+                    source_lines,
+                    fallback_name=fallback_name,
+                )
+                entities.append(func_entity)
+                relationships.extend(func_rels)
+            elif value_node.type == "function":
+                func_entity, func_rels = self._parse_function(
+                    value_node,
+                    file_path,
+                    parent_id,
+                    source_code,
+                    source_lines,
+                    kind=EntityKind.FUNCTION,
+                    fallback_name=fallback_name,
+                )
+                entities.append(func_entity)
+                relationships.extend(func_rels)
 
         return entities, relationships
 
@@ -162,69 +223,70 @@ class JavaScriptParser(TreeSitterParser):
         source_code: str,
         source_lines: list[str],
         kind: EntityKind,
-        parent_name: str = ""
+        parent_name: str = "",
+        fallback_name: str | None = None,
     ) -> tuple[Entity, list[Relationship]]:
         name_node = node.child_by_field_name("name")
         if not name_node:
-            # Check if it is a constructor
             if kind == EntityKind.METHOD:
-                 name_node = node.child_by_field_name("name") # method_definition has name
-                 if not name_node and self._get_text(node).startswith("constructor"):
-                     name = "constructor"
-                 else:
-                     name = self._get_text(name_node) if name_node else "anonymous"
+                if self._get_text(node).startswith("constructor"):
+                    name = "constructor"
+                else:
+                    name = fallback_name or "anonymous"
             else:
-                return Exception("Anonymous function not fully supported yet"), []   # type: ignore
-                
-        name = self._get_text(name_node) if name_node else "constructor"
-        
+                name = fallback_name or "anonymous"
+        else:
+            name = self._get_text(name_node)
+
         if parent_name:
             qualified_name = f"{parent_name}.{name}"
         else:
             qualified_name = name
-            
+
         func_id = f"{file_path}::{qualified_name}"
-        
+
         entity = self._create_entity(
             node, kind, name, qualified_name, file_path, source_lines
         )
-        
+
         relationships = [
             Relationship(source_id=parent_id, target_id=func_id, kind=RelationshipKind.CONTAINS)
         ]
-        
+
         # Extract calls from body
         body_node = node.child_by_field_name("body")
         if body_node:
-            child_entities, child_rels = self._extract_entities(body_node, file_path, func_id, source_code, source_lines)
-            # We ignore child entities declared INSIDE functions for now (local vars/funcs), 
-            # but we want the calls from child_rels
-            # Actually, _extract_entities returns variable_declarations too.
-            # For now, let's just grab calls.
-            
-            # Helper to just walk for calls
             calls = self._walk_for_calls(body_node, func_id)
             relationships.extend(calls)
 
         return entity, relationships
 
-    def _parse_arrow_function(self, node, name_node, file_path, parent_id, source_code, source_lines) -> Any:  # type: ignore
-        name = self._get_text(name_node)
+    def _parse_arrow_function(
+        self,
+        node: Any,
+        name_node: Any | None,
+        file_path: Path,
+        parent_id: str,
+        source_code: str,
+        source_lines: list[str],
+        fallback_name: str | None = None,
+    ) -> tuple[Entity, list[Relationship]]:
+        name = self._get_text(name_node) if name_node else (fallback_name or "anonymous")
         func_id = f"{file_path}::{name}"
-        
+
         entity = self._create_entity(
             node, EntityKind.FUNCTION, name, name, file_path, source_lines
         )
-        
+
         relationships = [
             Relationship(source_id=parent_id, target_id=func_id, kind=RelationshipKind.CONTAINS)
         ]
-        
+
         body_node = node.child_by_field_name("body")
         if body_node:
             calls = self._walk_for_calls(body_node, func_id)
             relationships.extend(calls)
-            
+
         return entity, relationships
 
     def _walk_for_calls(self, node, source_id) -> Any:  # type: ignore

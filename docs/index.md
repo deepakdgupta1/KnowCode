@@ -47,7 +47,8 @@ knowcode context "MyClass.important_method"
 # 4. Export documentation
 knowcode export -o docs/
 
-# 5. Build semantic search index
+# 5. (Optional) Build semantic search index explicitly
+#    `analyze` also attempts indexing; this command is useful for rebuilds.
 knowcode index src/
 
 # 6. Perform semantic search
@@ -98,12 +99,12 @@ knowcode query deps "PythonParser" --json
 Generate a context bundle for an entity (ready for AI consumption).
 
 ```bash
-knowcode context <entity> [--store <path>] [--max-chars <n>]
+knowcode context <entity> [--store <path>] [--max-tokens <n>]
 ```
 
 **Example:**
 ```bash
-knowcode context "GraphBuilder.build_from_directory" --max-chars 4000
+knowcode context "GraphBuilder.build_from_directory" --max-tokens 4000
 ```
 
 ### `export`
@@ -210,17 +211,18 @@ knowcode ask "How does the graph builder work?"
 Start an MCP (Model Context Protocol) server for IDE agent integration.
 
 ```bash
-knowcode mcp-server [--store <path>]
+knowcode mcp-server [--store <path>] [--config <path>]
 ```
 
 **Tools Exposed:**
 - `search_codebase` - Search for code entities by name
 - `get_entity_context` - Get detailed context for an entity
 - `trace_calls` - Trace call graph (callers/callees) with depth
+- `retrieve_context_for_query` - Unified query→retrieval→context bundle
 
 ## Supported Languages (MVP)
 
-- **Python** (.py) - Full AST parsing (Supports Python 3.9 - 3.12)
+- **Python** (.py) - Full AST parsing (Supports Python 3.10 - 3.12)
 - **JavaScript / TypeScript** (.js, .ts) - Classes, functions, imports (via tree-sitter)
 - **Java** (.java) - Classes, methods, imports, inheritance (via tree-sitter)
 - **Markdown** (.md) - Document structure with heading hierarchy

@@ -1,6 +1,5 @@
 """CLI interface for KnowCode."""
 
-from typing import Any
 import json
 import sys
 from pathlib import Path
@@ -60,7 +59,7 @@ def analyze(directory: str, output: str, ignore: tuple[str, ...], temporal: bool
         output=output,
         ignore=list(ignore),
         temporal=temporal,
-        coverage=coverage,  # type: ignore
+        coverage=coverage,
     )
 
     click.echo("\n✓ Analysis complete!")
@@ -70,6 +69,9 @@ def analyze(directory: str, output: str, ignore: tuple[str, ...], temporal: bool
         click.echo(f"  Errors: {stats['total_errors']}")
     if stats.get("indexed_chunks") is not None:
         click.echo(f"  Indexed chunks: {stats['indexed_chunks']}")
+    if stats.get("index_error"):
+        click.echo("  Indexing warning: semantic index build skipped.", err=True)
+        click.echo(f"    {stats['index_error']}", err=True)
 
     output_path = Path(output)
     save_path = output_path / KnowledgeStore.DEFAULT_FILENAME if output_path.is_dir() else output_path
@@ -543,12 +545,13 @@ def mcp_server(store: str, config: Optional[str]) -> None:
     """Start MCP server for IDE integration.
     
     Exposes KnowCode tools via the Model Context Protocol (MCP) using
-    STDIO transport. Three tools are available:
+    STDIO transport. Four tools are available:
     
     \b
     - search_codebase: Search for code entities by name
     - get_entity_context: Get detailed context for an entity  
     - trace_calls: Trace call graph (callers/callees) with depth
+    - retrieve_context_for_query: Unified query-to-context retrieval bundle
     
     Example usage with Claude Desktop or other MCP clients:
     

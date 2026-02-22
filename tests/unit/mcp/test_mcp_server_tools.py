@@ -8,7 +8,6 @@ from pathlib import Path
 
 from knowcode.mcp.server import KnowCodeMCPServer
 from knowcode.data_models import Entity, EntityKind, Location
-from typing import Any
 
 
 class DummyService:

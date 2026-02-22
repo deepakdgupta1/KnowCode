@@ -1,10 +1,10 @@
 """FastAPI endpoints for KnowCode."""
 
-from typing import Any
-from fastapi import APIRouter, Depends, HTTPException, Query
-from typing import Any, Optional
-from pydantic import BaseModel
 from enum import Enum
+from typing import Any, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 
 from knowcode.service import KnowCodeService
 from knowcode.data_models import TaskType
@@ -85,28 +85,71 @@ def query_context(
     request: QueryRequest,
     service: KnowCodeService = Depends(get_service)
 ) -> QueryResponse:
-    """Execute semantic search and return relevant code chunks with context."""
-    engine = service.get_search_engine()
-    chunks = engine.search(
+    """Execute task-aware retrieval and return relevant code chunks with scores."""
+    limit = max(1, request.limit or 5)
+    expand_deps = request.expand_deps if request.expand_deps is not None else True
+    task_override = TaskType(request.task_type.value) if request.task_type else None
+
+    retrieval = service.retrieve_context_for_query(
         query=request.query,
-        limit=request.limit or 5,
-        expand_deps=request.expand_deps if request.expand_deps is not None else True
+        task_type=task_override,
+        limit_entities=limit,
+        expand_deps=expand_deps,
     )
-    
-    results = [
-        ChunkResult(
-            id=c.id,
-            content=c.content,
-            entity_id=c.entity_id,
-            score=0.0 # Score not easily exposed from engine currently
+
+    engine = service.get_search_engine()
+    results: list[ChunkResult] = []
+    seen_ids: set[str] = set()
+
+    evidence_items = retrieval.get("evidence", [])
+    if isinstance(evidence_items, list):
+        for item in evidence_items:
+            if not isinstance(item, dict):
+                continue
+
+            chunk_id = item.get("chunk_id")
+            if not isinstance(chunk_id, str) or chunk_id in seen_ids:
+                continue
+
+            chunk = engine.chunk_repo.get(chunk_id)
+            if not chunk:
+                continue
+
+            score_raw = item.get("score", 0.0)
+            score = float(score_raw) if isinstance(score_raw, (int, float)) else 0.0
+            results.append(
+                ChunkResult(
+                    id=chunk.id,
+                    content=chunk.content,
+                    entity_id=chunk.entity_id,
+                    score=score,
+                )
+            )
+            seen_ids.add(chunk_id)
+            if len(results) >= limit:
+                break
+
+    # Fallback for lexical-only retrieval paths where no chunk IDs are available.
+    if not results:
+        fallback_chunks = engine.search(
+            query=request.query,
+            limit=limit,
+            expand_deps=expand_deps,
         )
-        for c in chunks
-    ]
-    
+        results = [
+            ChunkResult(
+                id=c.id,
+                content=c.content,
+                entity_id=c.entity_id,
+                score=0.0,
+            )
+            for c in fallback_chunks
+        ]
+
     return QueryResponse(
         chunks=results,
         total=len(results),
-        task_type=request.task_type.value if request.task_type else "general"
+        task_type=str(retrieval.get("task_type", request.task_type.value if request.task_type else "general")),
     )
 
 @router.get("/search", response_model=list[SearchResult], summary="Search Entities")

@@ -1,5 +1,3 @@
-import re
-import sys
 from collections import defaultdict
 from pathlib import Path
 
@@ -34,7 +32,8 @@ def main():
             Path(fn).write_text(content)
 
     for filepath, file_errors in errors_by_file.items():
-        if not Path(filepath).exists(): continue
+        if not Path(filepath).exists():
+            continue
         
         file_lines = Path(filepath).read_text().splitlines()
         
@@ -42,7 +41,8 @@ def main():
         # For appending # type: ignore, order doesn't impact line numbers
         for lineno, msg in sorted(file_errors, key=lambda x: x[0], reverse=True):
             idx = lineno - 1
-            if idx < 0 or idx >= len(file_lines): continue
+            if idx < 0 or idx >= len(file_lines):
+                continue
             
             line = file_lines[idx]
             

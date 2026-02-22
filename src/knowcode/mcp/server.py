@@ -10,7 +10,7 @@ from typing import Any
 import asyncio
 import json
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 # MCP imports - requires: pip install mcp
 try:
