@@ -5,22 +5,22 @@ from knowcode.retrieval.hybrid_index import HybridIndex
 
 
 class StubRepo:
-    def __init__(self, chunks):
+    def __init__(self, chunks) -> None:  # type: ignore
         self._chunks = {c.id: c for c in chunks}
         self._sparse = chunks
 
-    def search_by_tokens(self, _tokens, limit=10):
+    def search_by_tokens(self, _tokens, limit=10):  # type: ignore
         return self._sparse[:limit]
 
-    def get(self, chunk_id):
+    def get(self, chunk_id):  # type: ignore
         return self._chunks.get(chunk_id)
 
 
 class StubVectorStore:
-    def __init__(self, results):
+    def __init__(self, results) -> None:  # type: ignore
         self._results = results
 
-    def search(self, _embedding, limit=10):
+    def search(self, _embedding, limit=10):  # type: ignore
         return self._results[:limit]
 
 
@@ -31,7 +31,7 @@ def test_hybrid_index_alpha_zero_prefers_sparse() -> None:
     repo = StubRepo([c1, c2])
     vector_store = StubVectorStore([("c2", 0.9), ("c1", 0.8)])
 
-    index = HybridIndex(repo, vector_store, alpha=0.0)
+    index = HybridIndex(repo, vector_store, alpha=0.0)  # type: ignore
     results = index.search("a", [0.0], limit=2)
 
     assert results[0][0].id == "c1"
@@ -44,7 +44,7 @@ def test_hybrid_index_alpha_one_prefers_dense() -> None:
     repo = StubRepo([c1, c2])
     vector_store = StubVectorStore([("c2", 0.9), ("c1", 0.8)])
 
-    index = HybridIndex(repo, vector_store, alpha=1.0)
+    index = HybridIndex(repo, vector_store, alpha=1.0)  # type: ignore
     results = index.search("a", [0.0], limit=2)
 
     assert results[0][0].id == "c2"

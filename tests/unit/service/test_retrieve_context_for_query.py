@@ -14,7 +14,7 @@ class DummySearchEngine:
     def __init__(self, scored: list[ScoredChunk] | Exception) -> None:
         self._scored = scored
 
-    def search_scored(self, _query: str, **_kwargs) -> list[ScoredChunk]:
+    def search_scored(self, _query: str, **_kwargs) -> list[ScoredChunk]:  # type: ignore
         if isinstance(self._scored, Exception):
             raise self._scored
         return self._scored
@@ -27,10 +27,10 @@ class DummyService(KnowCodeService):
         self.context_calls: list[tuple[str, int, TaskType]] = []
         self.search_calls: list[str] = []
 
-    def get_search_engine(self, _index_path=None):  # type: ignore[override]
+    def get_search_engine(self, _index_path=None):  # type: ignore
         return self._engine
 
-    def get_context(self, target: str, max_tokens: int = 2000, task_type: TaskType | None = None):  # type: ignore[override]
+    def get_context(self, target: str, max_tokens: int = 2000, task_type: TaskType | None = None):  # type: ignore
         assert task_type is not None
         self.context_calls.append((target, max_tokens, task_type))
         return {
@@ -43,11 +43,11 @@ class DummyService(KnowCodeService):
             "sufficiency_score": 1.0,
         }
 
-    def search(self, pattern: str):  # type: ignore[override]
+    def search(self, pattern: str):  # type: ignore
         self.search_calls.append(pattern)
         return [{"id": "e1"}, {"id": "e2"}]
 
-    def _validate_index_compatibility(self, _index_path: Path) -> None:  # type: ignore[override]
+    def _validate_index_compatibility(self, _index_path: Path) -> None:
         return
 
 

@@ -1,5 +1,6 @@
 """End-to-End Search Pipeline Test."""
 
+from typing import Any
 from knowcode.indexing.indexer import Indexer
 from knowcode.retrieval.search_engine import SearchEngine
 from knowcode.llm.embedding import OpenAIEmbeddingProvider
@@ -9,7 +10,7 @@ from knowcode.storage.chunk_repository import InMemoryChunkRepository
 from knowcode.storage.vector_store import VectorStore
 
 class MockEmbeddingProvider(OpenAIEmbeddingProvider):
-    def __init__(self):
+    def __init__(self) -> Any:  # type: ignore
         self.config = EmbeddingConfig(dimension=8)
         
     def embed(self, texts: list[str]) -> list[list[float]]:
@@ -19,7 +20,7 @@ class MockEmbeddingProvider(OpenAIEmbeddingProvider):
     def embed_single(self, text: str) -> list[float]:
         return [0.1] * 8
 
-def test_full_search_flow(tmp_path):
+def test_full_search_flow(tmp_path) -> None:  # type: ignore
     """Test full pipeline: Indexing -> Search -> Results."""
     # 1. Setup
     repo = InMemoryChunkRepository()
@@ -43,10 +44,10 @@ def calculate_metrics(data):
     hybrid = HybridIndex(repo, vs)
     # Mock knowledge store for dependency expansion
     class MockStore:
-        def get_callers(self, _): return []
-        def get_callees(self, _): return []
+        def get_callers(self, _): return []  # type: ignore
+        def get_callees(self, _): return []  # type: ignore
 
-    engine = SearchEngine(repo, provider, hybrid, MockStore())
+    engine = SearchEngine(repo, provider, hybrid, MockStore())  # type: ignore
     
     results = engine.search("metrics", limit=5)
     

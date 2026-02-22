@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 import json
 from dataclasses import asdict
 from pathlib import Path

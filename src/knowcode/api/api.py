@@ -1,5 +1,6 @@
 """FastAPI endpoints for KnowCode."""
 
+from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import Any, Optional
 from pydantic import BaseModel

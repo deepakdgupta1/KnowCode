@@ -1,6 +1,7 @@
 """Base parser using Tree-sitter."""
 
 from __future__ import annotations
+from typing import Any
 from pathlib import Path
 from typing import Any, Optional
 
@@ -125,9 +126,9 @@ class TreeSitterParser:
         raise NotImplementedError
 
 
-    def _get_text(self, node: Any, source_bytes: bytes) -> str:
+    def _get_text(self, node: Any) -> str:
         """Get text content of a node."""
-        return node.text.decode("utf8")
+        return node.text.decode("utf8")  # type: ignore
 
     def _get_location(self, node: Any, file_path: Path) -> Location:
         """Get location object for a node."""

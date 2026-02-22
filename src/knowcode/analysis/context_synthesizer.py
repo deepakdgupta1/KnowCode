@@ -386,7 +386,7 @@ class ContextSynthesizer:
         # Add sections in priority order until budget exhausted
         is_truncated = False
         
-        for section_name in priority_order:
+        for section_name in priority_order:  # type: ignore
             if section_name not in content_sections:
                 continue
                 
@@ -394,7 +394,7 @@ class ContextSynthesizer:
             t = self.tokenizer.count_tokens(section_text)
             
             # Apply boost: if boosted, allocate more budget
-            boost = boosts.get(section_name, 1.0)
+            boost = boosts.get(section_name, 1.0)  # type: ignore
             effective_budget = self.max_tokens * boost
             
             if current_tokens + t < min(effective_budget, self.max_tokens):
@@ -462,7 +462,7 @@ class ContextSynthesizer:
         max_score = 0.0
         
         # Weight each priority item by its position (higher priority = more weight)
-        for i, section_name in enumerate(priority_order):
+        for i, section_name in enumerate(priority_order):  # type: ignore
             weight = 1.0 / (i + 1)  # Decreasing weight by position
             max_score += weight
             

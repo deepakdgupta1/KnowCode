@@ -2,20 +2,22 @@
 
 from __future__ import annotations
 
+from typing import Any
 import json
 from pathlib import Path
 
 from knowcode.mcp.server import KnowCodeMCPServer
 from knowcode.data_models import Entity, EntityKind, Location
+from typing import Any
 
 
 class DummyService:
     """Dummy service for testing retrieve_context_for_query."""
 
     def __init__(self) -> None:
-        self.calls: list[tuple[str, dict]] = []
+        self.calls: list[tuple[str, dict]] = []  # type: ignore
 
-    def retrieve_context_for_query(self, query: str, **kwargs):  # noqa: ANN001
+    def retrieve_context_for_query(self, query: str, **kwargs: Any) -> Any:  # noqa: ANN001  # type: ignore
         self.calls.append(("retrieve_context_for_query", {"query": query, **kwargs}))
         return {
             "query": query,
@@ -62,7 +64,7 @@ class MockStore:
 
     def trace_calls(
         self, entity_id: str, direction: str = "callees", depth: int = 1, max_results: int = 50
-    ) -> list[dict]:
+    ) -> list[dict]:  # type: ignore
         return [
             {
                 "entity_id": "callee1",
@@ -81,9 +83,9 @@ class MockServiceWithStore:
     def __init__(self, tmp_path: Path) -> None:
         self.store = MockStore()
         self.store_path = tmp_path  # Required by _ensure_store_ready
-        self.context_calls: list[tuple] = []
+        self.context_calls: list[tuple] = []  # type: ignore
 
-    def get_context(self, target: str, max_tokens: int = 2000, task_type=None):  # noqa: ANN001
+    def get_context(self, target: str, max_tokens: int = 2000, task_type: Any=None) -> Any:  # noqa: ANN001  # type: ignore
         self.context_calls.append((target, max_tokens, task_type))
         return {
             "entity_id": target,
@@ -99,7 +101,7 @@ def test_handle_tool_call_retrieve_context_for_query(tmp_path: Path) -> None:
     """Test retrieve_context_for_query tool routing."""
     server = KnowCodeMCPServer(store_path=tmp_path)
     dummy = DummyService()
-    server._ensure_service = lambda allow_missing_store=False: dummy  # type: ignore[method-assign]
+    server._ensure_service = lambda allow_missing_store=False: dummy  # type: ignore
 
     payload = json.loads(
         server.handle_tool_call(
@@ -125,7 +127,7 @@ def test_handle_tool_call_search_codebase(tmp_path: Path) -> None:
     
     server = KnowCodeMCPServer(store_path=tmp_path)
     mock_service = MockServiceWithStore(tmp_path)
-    server._ensure_service = lambda allow_missing_store=False: mock_service  # type: ignore[method-assign]
+    server._ensure_service = lambda allow_missing_store=False: mock_service  # type: ignore
 
     result = json.loads(
         server.handle_tool_call("search_codebase", {"query": "Foo", "limit": 5})
@@ -147,7 +149,7 @@ def test_handle_tool_call_get_entity_context(tmp_path: Path) -> None:
     
     server = KnowCodeMCPServer(store_path=tmp_path)
     mock_service = MockServiceWithStore(tmp_path)
-    server._ensure_service = lambda allow_missing_store=False: mock_service  # type: ignore[method-assign]
+    server._ensure_service = lambda allow_missing_store=False: mock_service  # type: ignore
 
     result = json.loads(
         server.handle_tool_call(
@@ -170,7 +172,7 @@ def test_handle_tool_call_trace_calls(tmp_path: Path) -> None:
     
     server = KnowCodeMCPServer(store_path=tmp_path)
     mock_service = MockServiceWithStore(tmp_path)
-    server._ensure_service = lambda allow_missing_store=False: mock_service  # type: ignore[method-assign]
+    server._ensure_service = lambda allow_missing_store=False: mock_service  # type: ignore
 
     result = json.loads(
         server.handle_tool_call(

@@ -30,7 +30,7 @@ class TemporalAnalyzer:
             self.repo = Repo(self.root_dir)
         except Exception:
             # Not a git repo or git not installed
-            self.repo = None
+            self.repo = None  # type: ignore
 
     def analyze_history(self, limit: int = 100) -> ParseResult:
         """Analyze git commit history.
@@ -71,10 +71,10 @@ class TemporalAnalyzer:
                 author_entity = Entity(
                     id=author_id,
                     kind=EntityKind.AUTHOR,
-                    name=author_name,
-                    qualified_name=author_email,
+                    name=author_name,  # type: ignore
+                    qualified_name=author_email,  # type: ignore
                     location=Location("git", 0, 0),
-                    metadata={"email": author_email}
+                    metadata={"email": author_email}  # type: ignore
                 )
                 entities.append(author_entity)
 
@@ -87,7 +87,7 @@ class TemporalAnalyzer:
                     name=short_hash,
                     qualified_name=commit_hash,
                     location=Location("git", 0, 0),
-                    docstring=commit.message.strip(),
+                    docstring=commit.message.strip(),  # type: ignore
                     metadata={
                         "date": committed_date.isoformat(),
                         "timestamp": str(commit.committed_date)

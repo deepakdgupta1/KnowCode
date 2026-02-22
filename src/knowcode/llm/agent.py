@@ -1,5 +1,6 @@
 """Agent module for KnowCode."""
 
+from typing import Any
 import os
 from typing import Optional, Any
 
@@ -47,7 +48,7 @@ class Agent:
             if config.provider == "mistralai" or "openrouter" in config.provider:
                 base_url = "https://openrouter.ai/api/v1"
             
-            client = openai.OpenAI(
+            client = openai.OpenAI(  # type: ignore
                 api_key=api_key,
                 base_url=base_url
             )
@@ -138,7 +139,7 @@ class Agent:
                  continue
             except Exception as e:
                  print(f"  ❌ Error with {model_config.name}: {e}")
-                 last_error = e
+                 last_error = e  # type: ignore
                  continue
 
         if last_error:

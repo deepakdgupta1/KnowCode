@@ -9,6 +9,7 @@ Simulates the full workflow:
 
 from __future__ import annotations
 
+from typing import Any
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -16,6 +17,7 @@ from knowcode.config import AppConfig, ModelConfig
 from knowcode.data_models import TaskType
 from knowcode.llm.agent import Agent
 from knowcode.mcp.server import KnowCodeMCPServer
+from typing import Any
 
 
 class MockService:
@@ -26,7 +28,7 @@ class MockService:
         self.sufficiency = sufficiency
         self.retrieve_calls: list[str] = []
 
-    def retrieve_context_for_query(self, query: str, **kwargs):  # noqa: ANN001
+    def retrieve_context_for_query(self, query: str, **kwargs: Any) -> Any:  # noqa: ANN001  # type: ignore
         self.retrieve_calls.append(query)
         return {
             "query": query,
@@ -64,7 +66,7 @@ def test_usecase2_high_sufficiency_uses_local_answer(tmp_path: Path) -> None:
     # Track if LLM was called
     llm_called = False
     original_get_client = agent._get_client
-    def mock_get_client(cfg):
+    def mock_get_client(cfg):   # type: ignore
         nonlocal llm_called
         llm_called = True
         return original_get_client(cfg)
@@ -122,7 +124,7 @@ def test_usecase2_mcp_tool_returns_sufficiency_score(tmp_path: Path) -> None:
     
     server = KnowCodeMCPServer(store_path=tmp_path)
     mock_service = MockService(tmp_path, sufficiency=0.85)
-    server._ensure_service = lambda allow_missing_store=False: mock_service  # type: ignore[method-assign]
+    server._ensure_service = lambda allow_missing_store=False: mock_service  # type: ignore
     
     # Simulate IDE agent calling retrieve_context_for_query
     result = json.loads(

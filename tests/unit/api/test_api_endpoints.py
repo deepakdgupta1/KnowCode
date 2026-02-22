@@ -2,17 +2,19 @@
 
 from __future__ import annotations
 
+from typing import Any
 from knowcode.api import api
 from knowcode.data_models import CodeChunk
+from typing import Any
 
 
 class DummySearchEngine:
-    def search(self, query, limit=5, expand_deps=True, **_kwargs):  # noqa: ANN001
+    def search(self, query: Any, limit: Any=5, expand_deps: Any=True, **_kwargs: Any) -> Any:  # noqa: ANN001  # type: ignore
         return [CodeChunk(id="c1", entity_id="e1", content="hi", tokens=["hi"])]
 
 
 class DummyStore:
-    def trace_calls(self, _entity_id, direction="callees", depth=1, max_results=50):  # noqa: ANN001
+    def trace_calls(self, _entity_id: Any, direction: Any="callees", depth: Any=1, max_results: Any=50) -> Any:  # noqa: ANN001  # type: ignore
         return [
             {
                 "entity_id": "e2",
@@ -25,7 +27,7 @@ class DummyStore:
             }
         ]
 
-    def get_impact(self, entity_id: str, max_depth: int = 3):
+    def get_impact(self, entity_id: str, max_depth: int = 3):  # type: ignore
         return {
             "entity_id": entity_id,
             "direct_dependents": [],
@@ -40,10 +42,10 @@ class DummyService:
         self.reload_called = False
         self.store = DummyStore()
 
-    def get_stats(self):
+    def get_stats(self):  # type: ignore
         return {"total_entities": 1}
 
-    def search(self, _pattern):
+    def search(self, _pattern):  # type: ignore
         return [
             {
                 "id": "e1",
@@ -55,7 +57,7 @@ class DummyService:
             }
         ]
 
-    def get_context(self, _target, max_tokens=2000, task_type=None):  # noqa: ANN001
+    def get_context(self, _target: Any, max_tokens: Any=2000, task_type: Any=None) -> Any:  # noqa: ANN001  # type: ignore
         return {
             "entity_id": "e1",
             "context_text": "ctx",
@@ -66,19 +68,19 @@ class DummyService:
             "sufficiency_score": 0.0,
         }
 
-    def get_entity_details(self, _entity_id):
+    def get_entity_details(self, _entity_id):  # type: ignore
         return {"id": "e1", "source_code": "pass", "location": {"file_path": "file.py"}}
 
-    def get_callers(self, _entity_id):
+    def get_callers(self, _entity_id):  # type: ignore
         return []
 
-    def get_callees(self, _entity_id):
+    def get_callees(self, _entity_id):  # type: ignore
         return []
 
-    def get_search_engine(self, _index_path=None):
+    def get_search_engine(self, _index_path=None):  # type: ignore
         return DummySearchEngine()
 
-    def reload(self):
+    def reload(self) -> Any:
         self.reload_called = True
 
 
@@ -86,21 +88,21 @@ def test_health_and_stats_endpoints() -> None:
     assert api.health() == {"status": "ok"}
 
     service = DummyService()
-    stats = api.get_stats(service=service)
+    stats = api.get_stats(service=service)  # type: ignore
     assert stats["total_entities"] == 1
 
 
 def test_search_and_context_endpoints() -> None:
     service = DummyService()
 
-    results = api.search(q="foo", service=service)
+    results = api.search(q="foo", service=service)  # type: ignore
     assert results[0]["id"] == "e1"
 
     context = api.get_context(
         target="e1",
         max_tokens=2000,
         task_type=api.TaskTypeParam.general,
-        service=service,
+        service=service,  # type: ignore
     )
     assert context["context_text"] == "ctx"
 
@@ -108,16 +110,16 @@ def test_search_and_context_endpoints() -> None:
 def test_query_and_entity_endpoints() -> None:
     service = DummyService()
 
-    resp = api.query_context(api.QueryRequest(query="hi", limit=1), service=service)
+    resp = api.query_context(api.QueryRequest(query="hi", limit=1), service=service)  # type: ignore
     assert resp.chunks[0].id == "c1"
 
-    entity = api.get_entity(entity_id="e1", service=service)
+    entity = api.get_entity(entity_id="e1", service=service)  # type: ignore
     assert entity["id"] == "e1"
 
 
 def test_reload_endpoint() -> None:
     service = DummyService()
-    resp = api.reload_store(service=service)
+    resp = api.reload_store(service=service)  # type: ignore
     assert resp["status"] == "reloaded"
     assert service.reload_called is True
 
@@ -130,9 +132,9 @@ def test_trace_calls_and_impact_endpoints() -> None:
         direction=api.DirectionParam.callees,
         depth=1,
         max_results=50,
-        service=service,
+        service=service,  # type: ignore
     )
     assert trace[0]["entity_id"] == "e2"
 
-    impact = api.get_impact(entity_id="e1", max_depth=3, service=service)
+    impact = api.get_impact(entity_id="e1", max_depth=3, service=service)  # type: ignore
     assert impact["entity_id"] == "e1"

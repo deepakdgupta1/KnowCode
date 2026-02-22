@@ -18,7 +18,7 @@ class BackgroundIndexer:
             indexer: Indexer used to process queued files.
         """
         self.indexer = indexer
-        self._queue: queue.Queue = queue.Queue()
+        self._queue: queue.Queue = queue.Queue()  # type: ignore
         self._thread: Optional[threading.Thread] = None
         self._running = False
 

@@ -6,6 +6,7 @@ to LLM applications via the Model Context Protocol.
 
 from __future__ import annotations
 
+from typing import Any
 import asyncio
 import json
 from pathlib import Path
@@ -321,7 +322,7 @@ class KnowCodeMCPServer:
                     limit=arguments.get("limit", 10),
                 )
             elif name == "get_entity_context":
-                result = self.get_entity_context(
+                result = self.get_entity_context(  # type: ignore
                     entity_id=arguments["entity_id"],
                     task_type=arguments.get("task_type", "general"),
                     max_tokens=arguments.get("max_tokens", 2000),
@@ -333,7 +334,7 @@ class KnowCodeMCPServer:
                     depth=arguments.get("depth", 1),
                 )
             elif name == "retrieve_context_for_query":
-                result = self.retrieve_context_for_query(
+                result = self.retrieve_context_for_query(  # type: ignore
                     query=arguments["query"],
                     task_type=arguments.get("task_type", "auto"),
                     max_tokens=arguments.get("max_tokens", 6000),
@@ -341,7 +342,7 @@ class KnowCodeMCPServer:
                     expand_deps=arguments.get("expand_deps", True),
                 )
             else:
-                result = {"error": f"Unknown tool: {name}"}
+                result = {"error": f"Unknown tool: {name}"}  # type: ignore
                 
             return json.dumps(result, indent=2)
         except Exception as e:
@@ -366,19 +367,19 @@ def create_server(store_path: str | Path, config_path: Optional[str] = None) -> 
     server = Server("knowcode")
     knowcode = KnowCodeMCPServer(store_path, config_path=config_path)
     
-    @server.list_tools()
+    @server.list_tools()  # type: ignore
     async def list_tools() -> list[Tool]:
         """List available KnowCode tools."""
         return [
             Tool(
-                name=t["name"],
-                description=t["description"],
-                inputSchema=t["inputSchema"],
+                name=t["name"],  # type: ignore
+                description=t["description"],  # type: ignore
+                inputSchema=t["inputSchema"],  # type: ignore
             )
             for t in TOOL_DEFINITIONS
         ]
     
-    @server.call_tool()
+    @server.call_tool()  # type: ignore
     async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
         """Execute a KnowCode tool."""
         result_text = knowcode.handle_tool_call(name, arguments)

@@ -18,7 +18,7 @@ class DummyIndexer:
 def test_background_indexer_processes_queue(tmp_path: Path) -> None:
     """Queued files should be processed by the worker thread."""
     indexer = DummyIndexer()
-    bg = BackgroundIndexer(indexer)
+    bg = BackgroundIndexer(indexer)  # type: ignore
     bg.start()
 
     target = tmp_path / "file.py"

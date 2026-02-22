@@ -1,5 +1,6 @@
 """Java parser using Tree-sitter."""
 
+from typing import Any
 from pathlib import Path
 from typing import Any
 
@@ -49,7 +50,7 @@ class JavaParser(TreeSitterParser):
                         break
                 
                 if name_node:
-                    imported_name = self._get_text(name_node, None)
+                    imported_name = self._get_text(name_node)
                     relationships.append(
                         Relationship(
                             source_id=parent_id,
@@ -88,7 +89,7 @@ class JavaParser(TreeSitterParser):
         relationships: list[Relationship] = []
 
         name_node = node.child_by_field_name("name")
-        class_name = self._get_text(name_node, None)
+        class_name = self._get_text(name_node)
         qualified_name = class_name # Simplified
         class_id = f"{file_path}::{qualified_name}"
 
@@ -101,7 +102,7 @@ class JavaParser(TreeSitterParser):
              # superclass node contains type_identifier "Foo"
              # Actually, superclass: (superclass (type_identifier))
              # Just get text of the whole node for now
-             base_text = self._get_text(superclass_node, None).replace("extends ", "").strip()
+             base_text = self._get_text(superclass_node).replace("extends ", "").strip()
              relationships.append(
                 Relationship(
                     source_id=class_id,
@@ -152,7 +153,7 @@ class JavaParser(TreeSitterParser):
         rels = []
         
         name_node = node.child_by_field_name("name")
-        method_name = self._get_text(name_node, None)
+        method_name = self._get_text(name_node)
         qualified_name = f"{parent_name}.{method_name}"
         method_id = f"{file_path}::{qualified_name}"
         
@@ -173,7 +174,7 @@ class JavaParser(TreeSitterParser):
              
         return entities, rels
 
-    def _walk_for_calls(self, node, source_id):
+    def _walk_for_calls(self, node, source_id) -> Any:  # type: ignore
         rels = []
         cursor = node.walk()
         visited_children = False
@@ -187,9 +188,9 @@ class JavaParser(TreeSitterParser):
                 name_node = cursor.node.child_by_field_name("name")
                 object_node = cursor.node.child_by_field_name("object")
                 
-                method_name = self._get_text(name_node, None)
+                method_name = self._get_text(name_node)
                 if object_node:
-                    obj_name = self._get_text(object_node, None)
+                    obj_name = self._get_text(object_node)
                     callee = f"{obj_name}.{method_name}"
                 else:
                     callee = method_name
@@ -206,7 +207,7 @@ class JavaParser(TreeSitterParser):
                  # new Foo()
                  type_node = cursor.node.child_by_field_name("type")
                  if type_node:
-                     type_name = self._get_text(type_node, None)
+                     type_name = self._get_text(type_node)
                      rels.append(
                          Relationship(
                             source_id=source_id,

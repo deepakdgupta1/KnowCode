@@ -9,8 +9,8 @@ try:
     from watchdog.observers import Observer
     from watchdog.events import FileSystemEventHandler
 except ImportError:
-    Observer = None
-    FileSystemEventHandler = object
+    Observer = None  # type: ignore
+    FileSystemEventHandler = object  # type: ignore
 
 if TYPE_CHECKING:
     from knowcode.indexing.background_indexer import BackgroundIndexer
@@ -37,9 +37,9 @@ class FileMonitor:
             return
 
         event_handler = IndexingHandler(self.background_indexer)
-        self.observer = Observer()
-        self.observer.schedule(event_handler, str(self.root_dir), recursive=True)
-        self.observer.start()
+        self.observer = Observer()  # type: ignore
+        self.observer.schedule(event_handler, str(self.root_dir), recursive=True)  # type: ignore
+        self.observer.start()  # type: ignore
 
     def stop(self) -> None:
         """Stop watching and join the observer thread."""
@@ -59,12 +59,12 @@ class IndexingHandler(FileSystemEventHandler):
         """
         self.background_indexer = background_indexer
 
-    def on_modified(self, event):
+    def on_modified(self, event):   # type: ignore
         """Handle modified file events."""
         if not event.is_directory:
             self._handle_change(event.src_path)
 
-    def on_created(self, event):
+    def on_created(self, event):   # type: ignore
         """Handle created file events."""
         if not event.is_directory:
             self._handle_change(event.src_path)

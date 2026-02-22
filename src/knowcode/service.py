@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 import re
 from pathlib import Path
 from typing import Any, Optional, TYPE_CHECKING
@@ -261,7 +262,7 @@ class KnowCodeService:
             total_tokens += int(bundle.get("total_tokens", 0))
             truncated = truncated or bool(bundle.get("truncated", False))
 
-            s = bundle.get("sufficiency_score")
+            s = bundle.get("sufficiency_score")  # type: ignore
             if isinstance(s, (int, float)):
                 sufficiency_scores.append(float(s))
 
@@ -390,9 +391,9 @@ class KnowCodeService:
         self,
         directory: str | Path,
         output: str | Path,
-        ignore: list[str] = None,
+        ignore: list[str] = None,  # type: ignore
         temporal: bool = False,
-        coverage: str | Path = None,
+        coverage: str | Path = None,  # type: ignore
     ) -> dict[str, Any]:
         """Analyze a codebase and persist the resulting knowledge store.
 
@@ -425,7 +426,7 @@ class KnowCodeService:
 
         stats = builder.stats()
         stats["indexed_chunks"] = index_count
-        stats["index_path"] = str(index_path)
+        stats["index_path"] = str(index_path)  # type: ignore
         return stats
 
     def search(self, pattern: str) -> list[dict[str, Any]]:

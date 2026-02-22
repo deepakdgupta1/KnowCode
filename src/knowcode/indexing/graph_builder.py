@@ -7,6 +7,7 @@ from typing import Optional
 from knowcode.data_models import Entity, ParseResult, Relationship
 from knowcode.parsers import MarkdownParser, PythonParser, YamlParser
 from knowcode.parsers.javascript_parser import JavaScriptParser
+from knowcode.parsers.typescript_parser import TypeScriptParser
 from knowcode.parsers.java_parser import JavaParser
 from knowcode.parsers.rust_parser import RustParser
 from knowcode.parsers.vue_parser import VueParser
@@ -24,6 +25,7 @@ class GraphBuilder:
         self.markdown_parser = MarkdownParser()
         self.yaml_parser = YamlParser()
         self.js_parser = JavaScriptParser()
+        self.ts_parser = TypeScriptParser()
         self.java_parser = JavaParser()
         self.rust_parser = RustParser()
         self.vue_parser = VueParser()
@@ -99,8 +101,10 @@ class GraphBuilder:
             return self.markdown_parser.parse_file(file_info.path)
         elif file_info.extension in {".yaml", ".yml"}:
             return self.yaml_parser.parse_file(file_info.path)
-        elif file_info.extension in {".js", ".ts"}:
+        elif file_info.extension in {".js", ".jsx"}:
             return self.js_parser.parse_file(file_info.path)
+        elif file_info.extension in {".ts", ".tsx"}:
+            return self.ts_parser.parse_file(file_info.path)
         elif file_info.extension == ".java":
             return self.java_parser.parse_file(file_info.path)
         elif file_info.extension == ".rs":

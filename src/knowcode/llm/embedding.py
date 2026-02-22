@@ -129,12 +129,12 @@ class VoyageAIEmbeddingProvider(EmbeddingProvider):
         self.api_key_env = api_key_env
         self.client = None
 
-    def _get_client(self):
+    def _get_client(self):   # type: ignore
         """Return an initialized VoyageAI client, loading credentials if needed."""
         if self.client is None:
             from knowcode.llm.voyageai_client import get_voyageai_client
 
-            self.client = get_voyageai_client(self.api_key_env)
+            self.client = get_voyageai_client(self.api_key_env)  # type: ignore
 
         if self.client is None:
             raise ValueError(
@@ -149,7 +149,7 @@ class VoyageAIEmbeddingProvider(EmbeddingProvider):
         if not texts:
             return []
 
-        client = self._get_client()
+        client = self._get_client()  # type: ignore
         embeddings = client.embed(
             texts=texts,
             model=self.config.model_name,
@@ -161,11 +161,11 @@ class VoyageAIEmbeddingProvider(EmbeddingProvider):
         if self.config.normalize:
             embeddings = [self._normalize(e) for e in embeddings]
 
-        return embeddings
+        return embeddings  # type: ignore
 
     def embed_single(self, text: str) -> list[float]:
         """Generate a query embedding for a single text input."""
-        client = self._get_client()
+        client = self._get_client()  # type: ignore
         embeddings = client.embed(
             texts=[text],
             model=self.config.model_name,

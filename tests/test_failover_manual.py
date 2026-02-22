@@ -5,7 +5,7 @@ from pathlib import Path
 from knowcode.config import AppConfig, ModelConfig
 from knowcode.llm.agent import Agent
 
-def test_agent_failover_logic():
+def test_agent_failover_logic() -> None:
     # Setup mock service and config
     mock_service = MagicMock()
     mock_service.store_path = Path(".")
@@ -38,7 +38,7 @@ def test_agent_failover_logic():
         
         # Simulate failover: first call raises ResourceExhausted, second succeeds
         mock_client.models.generate_content.side_effect = [
-            ResourceExhausted("Quota exceeded"),
+            ResourceExhausted("Quota exceeded"),  # type: ignore
             MagicMock(text="Success from backup")
         ]
         

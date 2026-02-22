@@ -5,7 +5,7 @@ from knowcode.analysis.signals import CoverageProcessor
 from knowcode.data_models import EntityKind, RelationshipKind
 
 @pytest.fixture
-def coverage_xml(tmp_path):
+def coverage_xml(tmp_path):  # type: ignore
     """Create a sample coverage.xml."""
     content = """<?xml version="1.0" ?>
     <coverage line-rate="0.5" branch-rate="0.0" lines-covered="10" lines-valid="20" timestamp="123456789">
@@ -32,7 +32,7 @@ def coverage_xml(tmp_path):
     path.write_text(content, encoding="utf-8")
     return path
 
-def test_process_cobertura(tmp_path, coverage_xml):
+def test_process_cobertura(tmp_path, coverage_xml) -> None:  # type: ignore
     """Test Cobertura XML processing."""
     # Create dummy files so they resolve
     (tmp_path / "module_a.py").touch()

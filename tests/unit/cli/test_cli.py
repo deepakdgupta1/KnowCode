@@ -7,7 +7,7 @@ from click.testing import CliRunner
 from knowcode.cli import cli
 
 
-def test_cli_analyze_query_stats_context(tmp_path):
+def test_cli_analyze_query_stats_context(tmp_path) -> None:  # type: ignore
     """Basic CLI commands should run against a temporary project."""
     (tmp_path / "sample.py").write_text("def foo():\n    return 1\n", encoding="utf-8")
 

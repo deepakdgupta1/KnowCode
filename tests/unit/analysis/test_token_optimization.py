@@ -5,7 +5,7 @@ from knowcode.utils.token_counter import TokenCounter
 from knowcode.analysis.context_synthesizer import ContextSynthesizer
 from knowcode.data_models import Entity, EntityKind, Location
 
-def test_token_counter():
+def test_token_counter() -> None:
     """Test functionality of TokenCounter."""
     counter = TokenCounter()
     
@@ -17,7 +17,7 @@ def test_token_counter():
     assert counter.count_tokens(truncated) == 1
     assert truncated != text
 
-def test_context_synthesizer_budget():
+def test_context_synthesizer_budget() -> None:
     """Test standard budgeting logic."""
     store = MagicMock()
     
@@ -47,7 +47,7 @@ def test_context_synthesizer_budget():
     # The text itself might not say 'truncated' if we omitted the whole section
     # assert "truncated" in bundle.context_text
 
-def test_context_synthesizer_priority():
+def test_context_synthesizer_priority() -> None:
     """Test that header is preserved even if code is truncated."""
     store = MagicMock()
     

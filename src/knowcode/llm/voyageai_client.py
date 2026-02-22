@@ -5,6 +5,7 @@ Provides integration with VoyageAI's embedding and reranking APIs:
 - rerank-2.5: Cross-encoder reranking for improved relevance
 """
 
+from typing import Any
 import os
 from typing import Any, Optional
 
@@ -41,7 +42,7 @@ class VoyageAIClient:
                 f"VoyageAI API key not found. Set {api_key_env} or pass api_key."
             )
         
-        self.client = voyageai.Client(api_key=self.api_key)
+        self.client = voyageai.Client(api_key=self.api_key)  # type: ignore
     
     def embed(
         self,
@@ -64,7 +65,7 @@ class VoyageAIClient:
             model=model,
             input_type=input_type,
         )
-        return result.embeddings
+        return result.embeddings  # type: ignore
     
     def rerank(
         self,

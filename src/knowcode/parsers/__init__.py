@@ -7,6 +7,7 @@ from knowcode.parsers.javascript_parser import JavaScriptParser
 from knowcode.parsers.java_parser import JavaParser
 from knowcode.parsers.rust_parser import RustParser
 from knowcode.parsers.vue_parser import VueParser
+from knowcode.parsers.typescript_parser import TypeScriptParser
 
 __all__ = [
     "PythonParser",
@@ -16,4 +17,5 @@ __all__ = [
     "JavaParser",
     "RustParser",
     "VueParser",
+    "TypeScriptParser"
 ]

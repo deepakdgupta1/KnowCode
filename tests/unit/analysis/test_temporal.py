@@ -7,7 +7,7 @@ from knowcode.analysis.temporal import TemporalAnalyzer
 from knowcode.data_models import EntityKind, RelationshipKind
 
 @pytest.fixture
-def git_repo(tmp_path):
+def git_repo(tmp_path):  # type: ignore
     """Create a temporary git repo with history."""
     repo_dir = tmp_path / "repo"
     repo_dir.mkdir()
@@ -29,7 +29,7 @@ def git_repo(tmp_path):
     
     return repo_dir
 
-def test_temporal_analysis(git_repo):
+def test_temporal_analysis(git_repo) -> None:  # type: ignore
     """Test standard temporal analysis."""
     analyzer = TemporalAnalyzer(git_repo)
     result = analyzer.analyze_history()

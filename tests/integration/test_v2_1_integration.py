@@ -19,7 +19,7 @@ class MockEmbeddingProvider(EmbeddingProvider):
         return [0.1] * self.config.dimension
 
 
-def test_indexer_flow(tmp_path):
+def test_indexer_flow(tmp_path) -> None:  # type: ignore
     config = EmbeddingConfig(dimension=8)
     provider = MockEmbeddingProvider(config)
     repo = InMemoryChunkRepository()
@@ -41,14 +41,14 @@ def test_indexer_flow(tmp_path):
     assert vs.index.ntotal > 0
 
 
-def test_search_engine_orchestration():
+def test_search_engine_orchestration() -> None:
     config = EmbeddingConfig(dimension=8)
     provider = MockEmbeddingProvider(config)
     repo = InMemoryChunkRepository()
     vs = VectorStore(dimension=8)
     
     # Add a chunk
-    from knowcode.models import CodeChunk
+    from knowcode.models import CodeChunk  # type: ignore
     chunk = CodeChunk(id="c1", entity_id="e1", content="find me", tokens=["find", "me"])
     repo.add(chunk)
     vs.add("c1", [0.1]*8)

@@ -4,7 +4,7 @@ from knowcode.config import AppConfig, ModelConfig
 from knowcode.llm.agent import Agent
 from knowcode.llm.rate_limiter import RateLimiter
 
-def test_rate_limiter_integration(tmp_path):
+def test_rate_limiter_integration(tmp_path) -> None:  # type: ignore
     mock_service = MagicMock()
     mock_service.store_path = tmp_path
     mock_service.retrieve_context_for_query.return_value = {

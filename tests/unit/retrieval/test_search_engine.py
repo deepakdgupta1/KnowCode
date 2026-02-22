@@ -7,15 +7,15 @@ from knowcode.storage.knowledge_store import KnowledgeStore
 
 
 class DummyEmbeddingProvider:
-    def embed_single(self, _text):
+    def embed_single(self, _text):  # type: ignore
         return [0.0]
 
 
 class StubHybridIndex:
-    def __init__(self, results):
+    def __init__(self, results) -> None:  # type: ignore
         self._results = results
 
-    def search(self, _query, _embedding, limit=10):
+    def search(self, _query, _embedding, limit=10):  # type: ignore
         return self._results[:limit]
 
 
@@ -52,7 +52,7 @@ def test_search_engine_expands_dependencies() -> None:
     ]
 
     hybrid = StubHybridIndex([(chunk_a, 1.0)])
-    engine = SearchEngine(repo, DummyEmbeddingProvider(), hybrid, store)
+    engine = SearchEngine(repo, DummyEmbeddingProvider(), hybrid, store)  # type: ignore
 
     results = engine.search("a", limit=1, expand_deps=True)
     ids = {c.id for c in results}

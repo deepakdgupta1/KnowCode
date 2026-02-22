@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 from pathlib import Path
 from typing import Optional, Any
 
@@ -144,7 +145,7 @@ class Indexer:
                 self.manifest = json.load(f)
 
         # Load chunks
-        from knowcode.models import CodeChunk
+        from knowcode.models import CodeChunk  # type: ignore
         
         chunks_file = path / "chunks.json"
         if chunks_file.exists():

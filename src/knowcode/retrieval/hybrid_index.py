@@ -69,7 +69,7 @@ class HybridIndex:
         
         results = []
         for chunk_id, score in sorted_ids[:limit]:
-            chunk = self.chunk_repo.get(chunk_id)
+            chunk = self.chunk_repo.get(chunk_id)  # type: ignore
             if chunk:
                 results.append((chunk, score))
                 

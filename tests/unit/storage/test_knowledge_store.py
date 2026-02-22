@@ -29,7 +29,7 @@ def test_kind_filters_and_relationship_helpers() -> None:
     assert store.get_incoming_relationships(bar.id) == [rel]
 
 
-def test_persistence_round_trip(tmp_path) -> None:
+def test_persistence_round_trip(tmp_path) -> None:  # type: ignore
     """Save/load should preserve entities, relationships, and metadata."""
     store = KnowledgeStore()
     store.metadata = {"stats": {"total": 1}}

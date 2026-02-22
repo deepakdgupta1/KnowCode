@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -14,9 +15,9 @@ class DummyService:
     def __init__(self, store_path: Path) -> None:
         self.store_path = store_path
         self.retrieve_calls: list[str] = []
-        self.retrieval_result: dict | None = None
+        self.retrieval_result: dict | None = None  # type: ignore
 
-    def retrieve_context_for_query(self, query: str, **_kwargs):
+    def retrieve_context_for_query(self, query: str, **_kwargs) -> Any:  # type: ignore
         self.retrieve_calls.append(query)
         if self.retrieval_result is not None:
             return self.retrieval_result
@@ -40,13 +41,13 @@ def _make_agent(service: DummyService) -> Agent:
     cfg = AppConfig(
         models=[ModelConfig(name="test-model", provider="google", api_key_env="TEST_KEY")]
     )
-    agent = Agent(service, cfg)
+    agent = Agent(service, cfg)  # type: ignore
     agent.rate_limiter = MagicMock()
     agent.rate_limiter.check_availability.return_value = True
 
     stub_client = MagicMock()
     stub_client.models.generate_content.return_value = MagicMock(text="ANSWER")
-    agent._get_client = MagicMock(return_value=stub_client)
+    agent._get_client = MagicMock(return_value=stub_client)  # type: ignore
     return agent
 
 

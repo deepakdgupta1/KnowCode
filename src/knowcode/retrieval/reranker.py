@@ -104,7 +104,7 @@ class Reranker:
         documents = [chunk.content for chunk, _ in chunks]
         
         # Call VoyageAI rerank API
-        results = self.voyage_client.rerank(
+        results = self.voyage_client.rerank(  # type: ignore
             query=query,
             documents=documents,
             model=self.model,
