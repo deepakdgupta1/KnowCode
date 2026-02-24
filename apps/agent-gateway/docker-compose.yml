@@ -8,6 +8,8 @@ services:
       GOOGLE_API_KEY_1: ${GOOGLE_API_KEY_1}
     volumes:
       - ./litellm.config.yaml:/app/config.yaml:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "4000:4000"
 
@@ -18,6 +20,9 @@ services:
       LITELLM_BASE_URL: http://litellm:4000
       LITELLM_API_KEY: ${LITELLM_MASTER_KEY:-sk-local-proxy}
       AGENT_DEFAULT_MODEL: ${AGENT_DEFAULT_MODEL:-gemini/gemini-3-flash-preview}
+      AGENT_STRICT_ENV_VALIDATION: ${AGENT_STRICT_ENV_VALIDATION:-false}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      HOST: 0.0.0.0
       PORT: 8081
     depends_on:
       - litellm

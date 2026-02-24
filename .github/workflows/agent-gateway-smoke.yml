@@ -1,0 +1,41 @@
+name: Agent Gateway Smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      gateway_url:
+        description: "Gateway base URL (for example https://gateway.example.com)"
+        required: true
+        type: string
+      min_tool_calls:
+        description: "Minimum successful tool executions"
+        required: false
+        default: "1"
+        type: string
+      tool_names:
+        description: "Optional comma-separated tool names"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run smoke test
+        run: |
+          set -euo pipefail
+          ARGS=(
+            --gateway-url "${{ inputs.gateway_url }}"
+            --min-tool-calls "${{ inputs.min_tool_calls }}"
+          )
+          if [ -n "${{ inputs.tool_names }}" ]; then
+            ARGS+=(--tool-names "${{ inputs.tool_names }}")
+          fi
+          python3 apps/agent-gateway/scripts/smoke_e2e.py "${ARGS[@]}"

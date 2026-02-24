@@ -99,3 +99,16 @@ def test_translate_merges_parameters_and_strips_openapi_noise() -> None:
     limit_type = properties["limit"].get("type")
     assert isinstance(limit_type, list)
     assert set(limit_type) == {"integer", "null"}
+
+
+def test_translate_maps_fastapi_generated_operation_ids_to_canonical_names() -> None:
+    spec = _sample_spec()
+    spec["paths"]["/api/v1/context/query"]["post"]["operationId"] = (
+        "query_context_api_v1_context_query_post"
+    )
+
+    translator = OpenAPIToolTranslator()
+    tools = translator.translate(spec, allowed_operation_ids=["query_context"])
+
+    assert len(tools) == 1
+    assert tools[0]["function"]["name"] == "query_context"

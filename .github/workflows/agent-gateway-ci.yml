@@ -1,0 +1,60 @@
+name: Agent Gateway CI
+
+on:
+  pull_request:
+    paths:
+      - "apps/agent-gateway/**"
+      - ".github/workflows/agent-gateway-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "apps/agent-gateway/**"
+      - ".github/workflows/agent-gateway-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint-and-test:
+    name: Lint and test gateway
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: "apps/agent-gateway/uv.lock"
+
+      - name: Install gateway dependencies
+        run: uv sync --project apps/agent-gateway --extra dev
+
+      - name: Ruff
+        run: uv run --project apps/agent-gateway ruff check src tests scripts
+        working-directory: apps/agent-gateway
+
+      - name: Pytest
+        run: uv run --project apps/agent-gateway pytest -q tests
+        working-directory: apps/agent-gateway
+
+  docker-build:
+    name: Build gateway image
+    runs-on: ubuntu-latest
+    needs: lint-and-test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v5
+        with:
+          context: apps/agent-gateway
+          file: apps/agent-gateway/Dockerfile
+          tags: knowcode-agent-gateway:ci
+          push: false

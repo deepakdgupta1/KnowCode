@@ -21,6 +21,20 @@ class KnowCodeClient:
     base_url: str
     timeout_seconds: float
 
+    def check_health(self) -> Dict[str, Any]:
+        """Check whether KnowCode API is reachable."""
+        last_error: Optional[Exception] = None
+        for path in ("/api/v1/health", "/health", "/openapi.json"):
+            try:
+                response = self._request_json("GET", path)
+                if isinstance(response, dict):
+                    return response
+                return {"status": "ok"}
+            except ToolExecutionError as exc:
+                last_error = exc
+
+        raise ToolExecutionError(str(last_error or "KnowCode API health check failed"))
+
     def execute_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Any:
         if tool_name == "query_context":
             query = self._require_string(arguments, "query")

@@ -61,6 +61,13 @@ While the Gemini 3 Flash free tier is generous, hitting rate limits (RPM/TPM) du
 - **Fallback Route:** If Gemini returns a 429 (Rate Limit) or 500 error, LiteLLM's router must automatically seamlessly failover to a local open-source model (e.g., Llama 3 8B via Ollama).
 - **Execution:** This self-healing architecture ensures the coding agent never crashes due to a temporary API bottleneck, sacrificing a slight degree of reasoning quality only when absolutely necessary to maintain zero-cost execution.
 
+> [!WARNING]
+> **Fallback Model Compatibility:** A local fallback model (e.g., Llama 3 8B) may have severely degraded or non-existent structured tool-calling capability compared to Gemini 3 Flash. If the agent is mid-loop expecting structured `tool_calls` JSON responses, the fallback model may return freeform text, breaking the execution loop. To mitigate this:
+>
+> 1. **Restrict fallbacks to tool-calling-verified models** (e.g., Llama 3.1 70B Instruct, Mistral Large, or Qwen 2.5 72B).
+> 2. **Implement graceful degradation:** The orchestrator should detect a fallback event (via LiteLLM's response headers indicating the model used) and switch to a simpler prompt strategy that does not rely on structured tool calls.
+> 3. **Consider queue-and-retry:** For rate limit errors (429), simply queue the request and retry after the rate limit window resets (typically 60 seconds), rather than falling back to a weaker model mid-task.
+
 ### 5.3 Unified Post-Inference Telemetry
 
 LiteLLM standardizes the post-inference telemetry, making it easy to track exactly what the Gemini model consumed.
@@ -124,6 +131,13 @@ The massive 10,000+ token block of system instructions and tool schemas is sent 
 2.  **Extending Rate Limits (TPM):** For API keys with strict Input Tokens Per Minute (ITPM) limits (e.g., 30,000 ITPM), cached tokens _do not count_ towards this limit. This effectively removes the context overhead from the rate-limit math, allowing the agent to execute dozens of high-context tool calls per minute without triggering a `429 Too Many Requests` error.
 3.  **Extending Fixed Budgets:** For accounts running on fixed financial limits (e.g., a $50/month hard cap configured in LiteLLM), the 50%-90% discount on cached reads acts as a massive throughput multiplier. An agent that would normally burn through its budget in 1,000 steps can safely execute 8,000+ steps because the static overhead is algorithmically discounted on every turn.
 
+**Cache Invalidation Strategy:**
+Context caching only saves money if the cached prefix remains _stable_. If the system prompt or tool schemas change between requests (e.g., during development, or when KnowCode endpoints are updated), the cache is invalidated and the API charges a full-price cache write on the next request. To mitigate this:
+
+1. **Version the system prompt.** Assign a semantic version string (e.g., `v1.2.0`) to the system prompt and tool schema block. Only bust the cache when the version explicitly changes.
+2. **Separate volatile from static content.** Place all stable instructions and tool schemas at the _beginning_ of the `messages` array (where caching operates on prefix matching), and append dynamic content (user messages, tool responses) _after_ the stable block.
+3. **Batch schema updates.** Rather than deploying KnowCode endpoint changes incrementally (which would bust the cache on every deploy), batch schema changes and deploy them in a single update to minimize cache write costs.
+
 ## 7. Implementing OpenAPI-to-Function-Calling Architecture with KnowCode
 
 Integrating KnowCode to give AI agents intelligent codebase context involves translating KnowCode's REST API (FastAPI) into native "tools" or "functions" that the agent can autonomously call.
@@ -160,6 +174,9 @@ sequenceDiagram
     Agent-->>User: "The search logic is located in `search_engine.py`..."
 ```
 
+> [!NOTE]
+> **Architecture Mode Clarification:** Example 1 above represents a **"Single-Tier" mode** — a lightweight architecture suitable for simple Q&A or lookup tasks where one LLM is sufficient to process KnowCode's results. Example 2 below represents a **"Two-Tier" mode** designed for complex, multi-step tasks (like feature implementation) where the added complexity of routing between a CheaperLLM (for context gathering) and a FrontierLLM (for high-reasoning output) is justified by significant cost savings. The orchestrator should select the appropriate mode based on task complexity.
+
 #### Example 2: Two-Tier Token Saving Architecture (Feature Implementation)
 
 ```mermaid
@@ -189,16 +206,22 @@ sequenceDiagram
     Gateway-->>Agent: Context Bundle
     end
 
+    Note over Agent: Design Choice: For simple, predictable queries
+    Note over Agent: (e.g. keyword search), the Agent can bypass
+    Note over Agent: the CheaperLLM and call KnowCode directly.
+
     rect rgba(177, 177, 241, 1)
     Note right of Agent: Phase 2: Feature Execution (High Reasoning)
     Agent->>Gateway: Send optimized prompt + Context Bundle
     Gateway-->>Gateway: Log Telemetry (Request Received)
     Gateway->>FrontierLLM: Route to Frontier LLM
 
-    alt Frontier LLM Needs More Context
+    alt Frontier LLM Needs More Context (max 3 iterations)
         FrontierLLM-->>Gateway: Outputs `tool_calls` JSON request
         Gateway-->>Agent: Proxies tool request to application
         Note right of Agent: Agent pauses Frontier loop and spins up CheaperLLM
+        Note right of Agent: context_iteration_count += 1
+        Note right of Agent: If count > MAX_CONTEXT_ITERATIONS: force final response
         Agent->>Gateway: Dispatch Context Gathering Prompt
         Gateway->>CheaperLLM: Route to Gemini 3 Flash
         CheaperLLM-->>Gateway: Output `tool_calls` (`get_context`)
@@ -288,29 +311,88 @@ response = client.chat.completions.create(
 )
 ```
 
-#### Step 3: Tool Execution Loop
+#### Step 3: Tool Execution Loop (with Error Handling & Response Capping)
 
-If the LLM responds with a `tool_calls` request, your application invokes the corresponding KnowCode HTTP endpoint:
+If the LLM responds with a `tool_calls` request, your application invokes the corresponding KnowCode HTTP endpoint. The implementation below includes critical safeguards: tool name validation against a whitelist, response size capping to prevent context window overflow, retry logic with exponential backoff, and structured error reporting back to the LLM.
 
 ```python
 import json
+import time
+
+# --- Configuration ---
+ALLOWED_TOOLS = {"query_context", "get_context", "search", "trace_calls"}
+MAX_RESPONSE_TOKENS = 4000  # Hard cap on tool response size (in characters as proxy)
+MAX_RETRIES = 3
+MAX_CONTEXT_ITERATIONS = 3  # Max times the Frontier LLM can request additional context
+
+TOOL_ENDPOINT_MAP = {
+    "query_context": ("POST", "http://127.0.0.1:8000/api/v1/context/query"),
+    "get_context":   ("GET",  "http://127.0.0.1:8000/api/v1/context"),
+    "search":        ("GET",  "http://127.0.0.1:8000/api/v1/search"),
+    "trace_calls":   ("GET",  "http://127.0.0.1:8000/api/v1/trace_calls"),
+}
 
 for tool_call in response.choices[0].message.tool_calls:
-    if tool_call.function.name == "query_context":
-        args = json.loads(tool_call.function.arguments)
+    func_name = tool_call.function.name
 
-        # Actually hit the KnowCode API
-        api_res = requests.post(
-            "http://127.0.0.1:8000/api/v1/context/query",
-            json={"query": args["query"], "task_type": args.get("task_type", "general")}
-        )
-
-        # Append the HTTP response back into standard LLM memory
+    # 1. Validate tool name against whitelist
+    if func_name not in ALLOWED_TOOLS:
         messages.append({
             "role": "tool",
             "tool_call_id": tool_call.id,
-            "content": api_res.text
+            "content": json.dumps({"error": f"Unknown tool '{func_name}'. Available: {list(ALLOWED_TOOLS)}"})
         })
+        continue
+
+    # 2. Parse arguments safely
+    try:
+        args = json.loads(tool_call.function.arguments)
+    except json.JSONDecodeError as e:
+        messages.append({
+            "role": "tool",
+            "tool_call_id": tool_call.id,
+            "content": json.dumps({"error": f"Malformed arguments: {str(e)}"})
+        })
+        continue
+
+    # 3. Execute with retry logic
+    method, url = TOOL_ENDPOINT_MAP[func_name]
+    api_res = None
+    for attempt in range(MAX_RETRIES):
+        try:
+            if method == "POST":
+                api_res = requests.post(url, json=args, timeout=30)
+            else:
+                api_res = requests.get(url, params=args, timeout=30)
+            api_res.raise_for_status()
+            break
+        except (requests.RequestException, requests.HTTPError) as e:
+            if attempt < MAX_RETRIES - 1:
+                time.sleep(2 ** attempt)  # Exponential backoff: 1s, 2s, 4s
+                continue
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tool_call.id,
+                "content": json.dumps({"error": f"KnowCode API failed after {MAX_RETRIES} retries: {str(e)}"})
+            })
+            break
+    else:
+        continue  # All retries exhausted, error already appended
+
+    if api_res is None:
+        continue
+
+    # 4. Cap response size to prevent context window overflow
+    response_text = api_res.text
+    if len(response_text) > MAX_RESPONSE_TOKENS:
+        response_text = response_text[:MAX_RESPONSE_TOKENS] + "\n... [TRUNCATED: Response exceeded token budget]"
+
+    # 5. Append the capped response back into the conversation
+    messages.append({
+        "role": "tool",
+        "tool_call_id": tool_call.id,
+        "content": response_text
+    })
 ```
 
 ### 7.3 Highest Value KnowCode Endpoints for Agents
@@ -321,3 +403,77 @@ When implementing this, you shouldn't expose every endpoint unconditionally to t
 2. **`search`** (`GET /api/v1/search`): _Exact Symbol Lookup._ When the agent wants to find the exact file/line of a known function or class name.
 3. **`get_context`** (`GET /api/v1/context`): _Deep Dive Tool._ Once the agent discovers an interesting Entity ID, it calls this to get a dense, token-capped context chunk tailored for LLM reasoning.
 4. **`trace_calls`** (`GET /api/v1/trace_calls/{entity_id}`): _Dependency Mapping._ When stepping through a debug process, the agent uses this to find callers and callees.
+
+## 8. Conversation History Management
+
+In a multi-step agentic loop, the `messages` array grows with every LLM turn and tool response. After 10-15 tool calls, the raw conversation history alone can consume tens of thousands of tokens, eating into the context window and negating the economic benefits of context caching. The architecture must define an explicit strategy for managing this growth.
+
+### 8.1 Strategies
+
+The orchestrator should implement one or more of the following approaches, selected based on task complexity:
+
+| Strategy                      | Description                                                                                                                                                                                                                                                              | Best For                                                                      | Trade-off                                                                       |
+| :---------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :---------------------------------------------------------------------------- | :------------------------------------------------------------------------------ |
+| **Sliding Window**            | Keep only the last N messages (e.g., N=10). Discard older messages from the array.                                                                                                                                                                                       | Short, iterative tasks with low dependency on early context.                  | Risk of losing critical early context (e.g., the original user intent).         |
+| **Summarization**             | After every K steps (e.g., K=5), dispatch a CheaperLLM call to compress the conversation history into a single compact "state summary" message. Replace the raw history with this summary.                                                                               | Long-running tasks where early context matters but verbatim history does not. | Adds one extra LLM call every K steps, but saves far more tokens than it costs. |
+| **Structured Working Memory** | Maintain a separate JSON "working memory" object that the orchestrator updates after each step (e.g., `{"discovered_entities": [...], "files_modified": [...], "pending_actions": [...]}`). Inject this object into the system prompt instead of relying on raw history. | Complex, multi-phase tasks like feature implementation.                       | Requires custom orchestrator logic to update the state object.                  |
+
+### 8.2 Implementation Recommendation
+
+For the Two-Tier architecture described in Section 7.1 (Example 2), the recommended approach is a **hybrid** of Sliding Window + Structured Working Memory:
+
+1. **Always retain** the system prompt, tool schemas, and the original user request (messages 0-2).
+2. **Maintain a `working_memory` JSON** that the orchestrator updates after each tool response (e.g., appending discovered entity IDs, file paths, or error states).
+3. **Slide the window** on raw tool call/response pairs: keep only the last 6 messages of raw tool interaction.
+4. **On every new LLM request**, inject the `working_memory` JSON as a system-level context message immediately after the tool schemas, so the LLM always has a compact, authoritative view of what has been accomplished.
+
+## 9. Security Model for Tool Execution
+
+The architecture allows the LLM to call KnowCode endpoints with LLM-generated arguments. Without safeguards, a hallucinating or adversarial LLM could exploit this surface. The orchestrator must enforce a security boundary between LLM-generated intent and actual API execution.
+
+### 9.1 Input Validation
+
+All LLM-generated tool arguments must be validated before the HTTP request is dispatched:
+
+- **Tool Name Whitelist:** Only tools registered in `ALLOWED_TOOLS` (see Section 7.2, Step 3) may be executed. Any unrecognized tool name must be rejected with a structured error message returned to the LLM.
+- **Argument Type Checking:** Validate that argument types match the expected JSON Schema (e.g., `max_tokens` must be an integer, `query` must be a non-empty string). Reject malformed payloads before they reach KnowCode.
+- **Argument Range Capping:** Enforce hard limits on argument values. For example, `max_tokens` should be capped at 8,000 to prevent a single tool call from returning a context-window-busting response. `limit` parameters on search endpoints should be capped at a sane maximum (e.g., 20 results).
+
+### 9.2 Rate Limiting on KnowCode
+
+The KnowCode FastAPI server should implement server-side rate limiting (e.g., via `slowapi` or a simple token-bucket middleware) to protect itself from runaway agent loops:
+
+- **Per-IP Request Limit:** Cap requests at, e.g., 60 RPM. If the orchestrator is in a tight retry loop due to a bug, the server should return `429 Too Many Requests` rather than being overwhelmed.
+- **Per-Endpoint Cost Weighting:** Expensive endpoints like `trace_calls` (which can trigger recursive graph traversals) should have stricter limits (e.g., 10 RPM) than lightweight endpoints like `search`.
+
+### 9.3 Sandboxing
+
+If the architecture is ever extended to allow the LLM to execute code (e.g., writing files, running shell commands), all execution must occur in a sandboxed environment (e.g., a Docker container or a `nsjail` sandbox). The current architecture explicitly avoids this by restricting LLM actions to read-only KnowCode API calls, and this constraint should be documented as a **hard architectural boundary**.
+
+## 10. Observability Beyond Token Economics
+
+The telemetry strategy in Sections 3, 4, and 5.3 focuses exclusively on token costs. For a production-grade agentic system, the orchestrator must track the full lifecycle of every agentic loop.
+
+### 10.1 End-to-End Task Metrics
+
+| Metric                     | Description                                                                                                          | Why It Matters                                                                                                                                      |
+| :------------------------- | :------------------------------------------------------------------------------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Task Latency**           | Wall-clock time from user request to final response.                                                                 | Identifies bottlenecks (e.g., slow KnowCode API, excessive sub-agent loops).                                                                        |
+| **LLM Round-Trips**        | Number of LLM inference calls per task.                                                                              | Detects runaway loops or inefficient context gathering.                                                                                             |
+| **Tool Call Success Rate** | % of LLM-generated `tool_calls` that result in a valid API response (vs. errors, timeouts, or whitelist rejections). | Reveals if the LLM is hallucinating tool names or generating bad arguments. A low success rate suggests the tool schemas need clearer descriptions. |
+| **Context Utilization**    | Ratio of tokens actually used by the LLM's reasoning vs. tokens injected as context.                                 | Identifies over-fetching from KnowCode (e.g., injecting 8,000 tokens of context when the LLM only references 500).                                  |
+
+### 10.2 KnowCode Response Quality
+
+The orchestrator should track whether the context returned by KnowCode actually helps the LLM produce correct output:
+
+- **Context Hit Rate:** After the LLM produces its final output, the orchestrator can heuristically check whether any of the entity IDs or file paths from the KnowCode response appear in the LLM's output. A low hit rate suggests the search queries are too broad or the wrong KnowCode endpoint is being used.
+- **Iteration Depth:** Track how often the Frontier LLM requests additional context (the `alt` block in Example 2). If the Frontier LLM consistently needs 2-3 extra context rounds, it suggests Phase 1 is not gathering sufficient context upfront.
+
+### 10.3 Recommended Tooling
+
+For production observability, integrate one of the following with LiteLLM:
+
+- **LangFuse (OSS):** Provides full trace visualization of agentic loops, including per-step latency, token usage, and cost breakdown. Integrates natively with LiteLLM via the `LANGFUSE_PUBLIC_KEY` environment variable.
+- **LangSmith:** LangChain's hosted observability platform, suitable if the orchestrator is built on LangChain/LangGraph.
+- **OpenTelemetry:** For teams that prefer a vendor-neutral approach, LiteLLM supports OTEL span export for integration with Jaeger, Grafana Tempo, or Datadog.

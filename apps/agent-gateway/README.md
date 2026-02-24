@@ -38,8 +38,53 @@ uv run --project apps/agent-gateway agent-gateway
 
 Gateway endpoints:
 - `GET /health`
+- `GET /ready`
 - `GET /api/v1/tools`
 - `POST /api/v1/chat`
+
+## Local Self-Hosted Mode (KnowCode + Gateway on your machine)
+
+You can run everything locally with one command:
+
+```bash
+# Required: export keys in your shell profile or current terminal
+export GOOGLE_API_KEY_1="..."
+export LITELLM_MASTER_KEY="sk-your-local-master-key"
+export LITELLM_API_KEY="$LITELLM_MASTER_KEY"
+
+# Optional override (default works for local Docker + local KnowCode)
+export KNOWCODE_API_BASE_URL="http://host.docker.internal:8000"
+
+apps/agent-gateway/scripts/local_up.sh
+```
+
+Stop all services:
+
+```bash
+apps/agent-gateway/scripts/local_down.sh
+```
+
+Notes:
+- `local_up.sh` starts KnowCode API on `0.0.0.0:8000` if it is not already running.
+- It then starts LiteLLM + gateway via Docker Compose and waits for `/ready`.
+- Ollama fallback remains configured. If Ollama is installed and running on your host (`:11434`), LiteLLM can route to it.
+
+## End-to-End Smoke Test
+
+With KnowCode API, LiteLLM, and this gateway running, execute:
+
+```bash
+uv run --project apps/agent-gateway python scripts/smoke_e2e.py
+```
+
+Optional strict tool set:
+
+```bash
+uv run --project apps/agent-gateway python scripts/smoke_e2e.py \
+  --tool-names query_context,get_context \
+  --min-tool-calls 1 \
+  --print-json
+```
 
 ## Docker Run
 
@@ -50,6 +95,21 @@ docker compose up --build
 
 This starts LiteLLM + the gateway. KnowCode is expected at
 `http://host.docker.internal:8000` by default.
+
+## Production Notes
+
+- Use `AGENT_STRICT_ENV_VALIDATION=true` for non-local environments.
+- Keep secrets in a secret manager, not checked-in files.
+- Use `.env.production.example` as a template only.
+- Read `OPERATIONS.md` for rollout, readiness probes, monitoring, and rollback.
+
+## CI Workflows
+
+- `.github/workflows/agent-gateway-ci.yml`
+  - Runs Ruff + pytest for `apps/agent-gateway`
+  - Validates Docker build
+- `.github/workflows/agent-gateway-smoke.yml`
+  - Manual post-deploy smoke test against a live gateway URL
 
 ## Extraction Checklist (To New Repo)
 

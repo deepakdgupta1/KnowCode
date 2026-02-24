@@ -24,6 +24,12 @@ _UNSUPPORTED_SCHEMA_KEYS = {
     "writeOnly",
 }
 _HTTP_METHODS: Tuple[str, ...] = ("get", "post", "put", "patch", "delete")
+_CANONICAL_TOOL_NAMES: Dict[Tuple[str, str], str] = {
+    ("post", "/api/v1/context/query"): "query_context",
+    ("get", "/api/v1/search"): "search",
+    ("get", "/api/v1/context"): "get_context",
+    ("get", "/api/v1/trace_calls/{entity_id}"): "trace_calls",
+}
 
 
 class OpenAPIFetchError(RuntimeError):
@@ -83,6 +89,7 @@ class OpenAPIToolTranslator:
 
         allowed_set = {operation_id for operation_id in allowed_operation_ids}
         tools: List[Dict[str, Any]] = []
+        emitted_names: set[str] = set()
 
         for path, path_item, method, operation in self._iter_operations(openapi_spec):
             operation_id_raw = operation.get("operationId")
@@ -92,7 +99,11 @@ class OpenAPIToolTranslator:
                 else f"{method}_{path}"
             )
             operation_id = self._sanitize_tool_name(operation_id)
-            if operation_id not in allowed_set:
+            canonical_name = self._canonical_tool_name(path=path, method=method)
+            if canonical_name not in allowed_set and operation_id not in allowed_set:
+                continue
+            tool_name = canonical_name if canonical_name in allowed_set else operation_id
+            if tool_name in emitted_names:
                 continue
 
             parameters = self._build_parameters_schema(
@@ -109,12 +120,13 @@ class OpenAPIToolTranslator:
                 {
                     "type": "function",
                     "function": {
-                        "name": operation_id,
+                        "name": tool_name,
                         "description": description,
                         "parameters": parameters,
                     },
                 }
             )
+            emitted_names.add(tool_name)
 
         return tools
 
@@ -329,6 +341,10 @@ class OpenAPIToolTranslator:
         sanitized = re.sub(r"_+", "_", sanitized)
         sanitized = sanitized.strip("_")
         return sanitized or "tool"
+
+    def _canonical_tool_name(self, *, path: str, method: str) -> str:
+        key = (method.lower(), path)
+        return _CANONICAL_TOOL_NAMES.get(key, self._sanitize_tool_name(f"{method}_{path}"))
 
 
 

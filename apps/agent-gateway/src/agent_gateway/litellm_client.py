@@ -29,6 +29,17 @@ class LiteLLMClient:
     api_key: str
     timeout_seconds: float
 
+    def check_health(self) -> Dict[str, Any]:
+        """Check whether LiteLLM is reachable and serving requests."""
+        try:
+            return self._get_json("/health")
+        except LiteLLMError as health_error:
+            # Some LiteLLM deployments may not expose /health, so fall back to /v1/models.
+            try:
+                return self._get_json("/v1/models")
+            except LiteLLMError:
+                raise health_error
+
     def create_chat_completion(
         self,
         *,
@@ -82,6 +93,38 @@ class LiteLLMClient:
 
         response_cost = response_cost or self._extract_response_cost(parsed)
         return LiteLLMResult(payload=parsed, response_cost=response_cost)
+
+    def _get_json(self, path: str) -> Dict[str, Any]:
+        url = f"{self.base_url.rstrip('/')}{path}"
+        request = urllib.request.Request(
+            url,
+            method="GET",
+            headers={
+                "Accept": "application/json",
+                "Authorization": f"Bearer {self.api_key}",
+            },
+        )
+
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
+                body = response.read().decode("utf-8")
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            raise LiteLLMError(f"LiteLLM health error {exc.code}: {detail}") from exc
+        except urllib.error.URLError as exc:
+            raise LiteLLMError(f"LiteLLM unreachable: {exc}") from exc
+
+        if not body.strip():
+            return {"status": "ok"}
+
+        try:
+            parsed = json.loads(body)
+        except json.JSONDecodeError:
+            return {"status": "ok"}
+
+        if isinstance(parsed, dict):
+            return parsed
+        return {"status": "ok"}
 
     def _extract_response_cost(self, source: Any) -> Optional[float]:
         if source is None:

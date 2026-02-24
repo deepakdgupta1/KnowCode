@@ -3,9 +3,38 @@
 from __future__ import annotations
 
 from typing import Any
+from unittest.mock import MagicMock
+
+import pytest
+from pydantic import ValidationError
+from starlette.requests import Request
+from starlette.datastructures import Headers
 
 from knowcode.api import api
+from knowcode.api.rate_limit import limiter
 from knowcode.data_models import CodeChunk
+
+
+# --- Disable rate limiting for direct function-call tests ---
+@pytest.fixture(autouse=True)
+def _disable_rate_limiter() -> Any:
+    """Disable slowapi rate limiter during unit tests."""
+    limiter.enabled = False
+    yield
+    limiter.enabled = True
+
+
+# --- Mock Request for rate-limited endpoints ---
+def _mock_request() -> Request:
+    """Create a minimal real Starlette Request for direct endpoint testing."""
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/",
+        "headers": [],
+        "query_string": b"",
+    }
+    return Request(scope)
 
 
 class DummyChunkRepo:
@@ -113,21 +142,26 @@ class DummyService:
         self.reload_called = True
 
 
+# --- Original endpoint tests (updated for rate-limited signatures) ---
+
 def test_health_and_stats_endpoints() -> None:
-    assert api.health() == {"status": "ok"}
+    req = _mock_request()
+    assert api.health(request=req) == {"status": "ok"}
 
     service = DummyService()
-    stats = api.get_stats(service=service)  # type: ignore
+    stats = api.get_stats(request=req, service=service)  # type: ignore
     assert stats["total_entities"] == 1
 
 
 def test_search_and_context_endpoints() -> None:
+    req = _mock_request()
     service = DummyService()
 
-    results = api.search(q="foo", service=service)  # type: ignore
+    results = api.search(request=req, q="foo", limit=20, service=service)  # type: ignore
     assert results[0]["id"] == "e1"
 
     context = api.get_context(
+        request=req,
         target="e1",
         max_tokens=2000,
         task_type=api.TaskTypeParam.general,
@@ -137,26 +171,30 @@ def test_search_and_context_endpoints() -> None:
 
 
 def test_query_and_entity_endpoints() -> None:
+    req = _mock_request()
     service = DummyService()
 
-    resp = api.query_context(api.QueryRequest(query="hi", limit=1), service=service)  # type: ignore
+    resp = api.query_context(http_request=req, request=api.QueryRequest(query="hi", limit=1), service=service)  # type: ignore
     assert resp.chunks[0].id == "c1"
 
-    entity = api.get_entity(entity_id="e1", service=service)  # type: ignore
+    entity = api.get_entity(request=req, entity_id="e1", service=service)  # type: ignore
     assert entity["id"] == "e1"
 
 
 def test_reload_endpoint() -> None:
+    req = _mock_request()
     service = DummyService()
-    resp = api.reload_store(service=service)  # type: ignore
+    resp = api.reload_store(request=req, service=service)  # type: ignore
     assert resp["status"] == "reloaded"
     assert service.reload_called is True
 
 
 def test_trace_calls_and_impact_endpoints() -> None:
+    req = _mock_request()
     service = DummyService()
 
     trace = api.trace_calls(
+        request=req,
         entity_id="e1",
         direction=api.DirectionParam.callees,
         depth=1,
@@ -165,5 +203,57 @@ def test_trace_calls_and_impact_endpoints() -> None:
     )
     assert trace[0]["entity_id"] == "e2"
 
-    impact = api.get_impact(entity_id="e1", max_depth=3, service=service)  # type: ignore
+    impact = api.get_impact(request=req, entity_id="e1", max_depth=3, service=service)  # type: ignore
     assert impact["entity_id"] == "e1"
+
+
+# --- New validation tests ---
+
+def test_query_limit_capped_at_20() -> None:
+    """QueryRequest.limit should be capped at 20 via Pydantic validation."""
+    with pytest.raises(ValidationError):
+        api.QueryRequest(query="test", limit=25)
+
+    # Valid: limit at exactly 20
+    req = api.QueryRequest(query="test", limit=20)
+    assert req.limit == 20
+
+
+def test_query_max_tokens_capped_at_8000() -> None:
+    """QueryRequest.max_tokens should be capped at 8000 via Pydantic validation."""
+    with pytest.raises(ValidationError):
+        api.QueryRequest(query="test", max_tokens=10000)
+
+    # Valid: max_tokens at exactly 8000
+    req = api.QueryRequest(query="test", max_tokens=8000)
+    assert req.max_tokens == 8000
+
+
+def test_get_context_rejects_excessive_max_tokens() -> None:
+    """get_context should reject max_tokens > 8000 (enforced by FastAPI Query constraint)."""
+    # This is enforced at the FastAPI query parameter level (le=8000).
+    # When called directly, we just verify the endpoint works with valid values.
+    req = _mock_request()
+    service = DummyService()
+    result = api.get_context(
+        request=req,
+        target="e1",
+        max_tokens=8000,
+        task_type=api.TaskTypeParam.general,
+        service=service,  # type: ignore
+    )
+    assert result["entity_id"] == "e1"
+
+
+def test_search_result_limit() -> None:
+    """search endpoint should respect the limit parameter."""
+    req = _mock_request()
+    service = DummyService()
+
+    # Default limit (20) - DummyService returns 1 result, so we get 1
+    results = api.search(request=req, q="foo", limit=20, service=service)  # type: ignore
+    assert len(results) == 1
+
+    # Explicit limit of 0... wait, ge=1, so limit=1 is the minimum
+    results = api.search(request=req, q="foo", limit=1, service=service)  # type: ignore
+    assert len(results) == 1

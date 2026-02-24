@@ -47,6 +47,10 @@ def create_app(store_path: str = ".", watch: bool = False) -> FastAPI:
 
     app.include_router(api.router)
 
+    # Attach rate limiting middleware (must be after router inclusion)
+    from knowcode.api.rate_limit import setup_rate_limiting
+    setup_rate_limiting(app)
+
     return app
 
 def start_server(host: str = "127.0.0.1", port: int = 8000, store_path: str = ".", watch: bool = False):  # type: ignore

@@ -47,6 +47,46 @@ class AgentOrchestrator:
             )
         return self._tools.get_tools(selected_names)
 
+    def readiness(self) -> Dict[str, Any]:
+        """Check dependency readiness for deployment probes."""
+        dependencies: Dict[str, Dict[str, Any]] = {}
+        status = "ok"
+
+        try:
+            knowcode_health = self._knowcode.check_health()
+            dependencies["knowcode_api"] = {"status": "ok", "details": knowcode_health}
+        except Exception as exc:
+            status = "error"
+            dependencies["knowcode_api"] = {"status": "error", "error": str(exc)}
+
+        try:
+            litellm_health = self._litellm.check_health()
+            dependencies["litellm"] = {"status": "ok", "details": litellm_health}
+        except Exception as exc:
+            status = "error"
+            dependencies["litellm"] = {"status": "error", "error": str(exc)}
+
+        try:
+            selected_names = list(dict.fromkeys(self.settings.allowed_tool_names))
+            translated_tools = self._tools.get_tools(selected_names)
+            tool_count = len(translated_tools)
+            if tool_count < 1:
+                status = "error"
+                dependencies["openapi_registry"] = {
+                    "status": "error",
+                    "error": "No tools translated from OpenAPI for allowed tool list",
+                }
+            else:
+                dependencies["openapi_registry"] = {
+                    "status": "ok",
+                    "tool_count": tool_count,
+                }
+        except Exception as exc:
+            status = "error"
+            dependencies["openapi_registry"] = {"status": "error", "error": str(exc)}
+
+        return {"status": status, "dependencies": dependencies}
+
     def run(self, request: ChatRequest) -> ChatResponse:
         model = request.model or self.settings.default_model
         tags = list(request.tags or self.settings.default_tags)
