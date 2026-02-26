@@ -105,6 +105,7 @@ class KnowCodeService:
         limit_entities: int = 3,
         per_entity_max_tokens: Optional[int] = None,
         expand_deps: bool = True,
+        verbosity: str = "minimal",
     ) -> dict[str, Any]:
         """Retrieve an evidence-backed context bundle for a natural-language query.
 
@@ -252,6 +253,7 @@ class KnowCodeService:
                     entity_id,
                     max_tokens=per_entity_max_tokens,
                     task_type=resolved_task_type,
+                    summarize=(verbosity == "minimal"),
                 )
             except Exception as e:
                 errors.append(f"Failed to synthesize context for {entity_id}: {e}")
@@ -282,7 +284,7 @@ class KnowCodeService:
             else 0.0
         )
 
-        return {
+        full_response = {
             "query": query,
             "task_type": resolved_task_type.value,
             "task_confidence": task_confidence,
@@ -296,6 +298,49 @@ class KnowCodeService:
             "evidence": evidence,
             "errors": errors,
         }
+        
+        if verbosity == "diagnostic":
+            return full_response
+            
+        filtered_response: dict[str, Any] = {
+            "context_text": context_text,
+            "sufficiency_score": sufficiency,
+            "total_tokens": total_tokens,
+        }
+        
+        if verbosity == "minimal":
+            filtered_response["reduction_summary"] = {
+                "omitted_raw_source_count": len(selected_entity_ids),
+                "omitted_evidence_count": len(evidence),
+                "hint": "Call again with verbosity='standard' to get raw source code, or 'verbose' to see evidence chunks."
+            }
+            if errors:
+                filtered_response["errors"] = errors
+        elif verbosity == "standard":
+            filtered_response.update({
+                "query": query,
+                "task_type": resolved_task_type.value,
+                "task_confidence": task_confidence,
+                "retrieval_mode": retrieval_mode,
+                "max_tokens": max_tokens,
+                "truncated": truncated,
+            })
+            if errors:
+                filtered_response["errors"] = errors
+        elif verbosity == "verbose":
+            filtered_response.update({
+                "query": query,
+                "task_type": resolved_task_type.value,
+                "task_confidence": task_confidence,
+                "retrieval_mode": retrieval_mode,
+                "max_tokens": max_tokens,
+                "truncated": truncated,
+                "evidence": evidence,
+            })
+            if errors:
+                filtered_response["errors"] = errors
+                
+        return filtered_response
 
     def _build_index(self, directory: str | Path, index_path: str | Path) -> int:
         """Build a semantic index for a directory and persist it."""
@@ -464,6 +509,7 @@ class KnowCodeService:
         target: str,
         max_tokens: int = 2000,
         task_type: Optional["TaskType"] = None,
+        summarize: bool = False,
     ) -> dict[str, Any]:
         """Get a context bundle for an entity.
 
@@ -493,9 +539,9 @@ class KnowCodeService:
         
         # Use task-specific synthesis if task_type provided
         if task_type is not None:
-            bundle = synthesizer.synthesize_with_task(entity.id, task_type)
+            bundle = synthesizer.synthesize_with_task(entity.id, task_type, summarize=summarize)
         else:
-            bundle = synthesizer.synthesize(entity.id)
+            bundle = synthesizer.synthesize(entity.id, summarize=summarize)
         
         if not bundle:
              raise ValueError(f"Failed to synthesize context for {entity.id}")

@@ -135,6 +135,12 @@ TOOL_DEFINITIONS = [
                     "type": "boolean",
                     "description": "Whether to expand dependency context (call graph) around retrieved entities",
                     "default": True
+                },
+                "verbosity": {
+                    "type": "string",
+                    "enum": ["minimal", "standard", "verbose", "diagnostic"],
+                    "description": "Level of detail in the response. Default is 'minimal'. Set to 'verbose' or 'diagnostic' if the minimal context was insufficient.",
+                    "default": "minimal"
                 }
             },
             "required": ["query"]
@@ -340,13 +346,14 @@ class KnowCodeMCPServer:
                     max_tokens=arguments.get("max_tokens", 6000),
                     limit_entities=arguments.get("limit_entities", 3),
                     expand_deps=arguments.get("expand_deps", True),
+                    verbosity=arguments.get("verbosity", "minimal"),
                 )
             else:
                 result = {"error": f"Unknown tool: {name}"}  # type: ignore
                 
-            return json.dumps(result, indent=2)
+            return json.dumps(result, separators=(',', ':'))
         except Exception as e:
-            return json.dumps({"error": str(e)})
+            return json.dumps({"error": str(e)}, separators=(',', ':'))
 
 
 def create_server(store_path: str | Path, config_path: Optional[str] = None) -> "Server":

@@ -31,7 +31,7 @@ echo ""
 
 # 2. Verify MCP configuration
 echo "2. Verifying MCP configuration..."
-MCP_CONFIG="/home/deeog/.gemini/mcp_servers.json"
+MCP_CONFIG="/home/deeog/.gemini/antigravity/mcp_config.json"
 if [ -f "$MCP_CONFIG" ]; then
     echo -e "   ${GREEN}✓${NC} Config file exists: $MCP_CONFIG"
     

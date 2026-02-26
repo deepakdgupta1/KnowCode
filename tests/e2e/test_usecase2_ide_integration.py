@@ -129,7 +129,7 @@ def test_usecase2_mcp_tool_returns_sufficiency_score(tmp_path: Path) -> None:
     result = json.loads(
         server.handle_tool_call(
             "retrieve_context_for_query",
-            {"query": "How does auth work?", "task_type": "auto", "max_tokens": 4000},
+            {"query": "How does auth work?", "task_type": "auto", "max_tokens": 4000, "verbosity": "diagnostic"},
         )
     )
     

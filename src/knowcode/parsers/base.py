@@ -7,6 +7,7 @@ from typing import Optional
 
 from tree_sitter import Parser
 import tree_sitter_languages
+import warnings
 
 from knowcode.data_models import (
     Entity,
@@ -27,7 +28,9 @@ class TreeSitterParser:
             language_name: Name of the language (e.g., 'python', 'javascript', 'java').
         """
         self.language_name = language_name
-        self.language = tree_sitter_languages.get_language(language_name)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=FutureWarning)
+            self.language = tree_sitter_languages.get_language(language_name)
         self.parser = Parser()
         self.parser.set_language(self.language)
 

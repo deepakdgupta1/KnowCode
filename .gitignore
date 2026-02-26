@@ -210,4 +210,5 @@ CHANGELOG.md
 docs_test/
 #aimodels.yaml
 .knowcode/
+knowcode_index/
 

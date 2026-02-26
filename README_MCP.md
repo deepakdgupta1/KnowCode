@@ -5,11 +5,12 @@
 1. **MCP Configuration Path Issue**
    - **Problem**: Used `"command": "knowcode"` (not in PATH)
    - **Solution**: Changed to `"/home/deeog/Desktop/KnowCode/.venv/bin/knowcode"`
-   - **File**: `/home/deeog/.gemini/mcp_servers.json`
+   - **File**: `/home/deeog/.gemini/antigravity/mcp_config.json`
 
 ## 📋 Current Status
 
 ### ✅ Ready
+
 - [x] MCP configuration file updated with absolute path
 - [x] Knowledge store exists (1.1M, 1 day old)
 - [x] KnowCode CLI working (v0.2.1)
@@ -17,10 +18,12 @@
 - [x] Agent rules defined in `.agent/context.md`
 
 ### ⚠️ Needs Attention
+
 - [ ] **Semantic index missing** - Will use lexical search only
 - [ ] **Knowledge store is 1 day old** - Consider re-analyzing
 
 ### 🔄 Next Actions Required
+
 1. **Stop the manual MCP server** (Ctrl+C in terminal)
 2. **Restart Antigravity IDE**
 3. **Test the workflow** (see test_mcp_workflow.md)
@@ -62,21 +65,25 @@ NO  → Use external LLM (Claude Sonnet 4.5)
 ## 🚀 Quick Commands
 
 ### Check MCP Status
+
 ```bash
 ./verify_mcp_connection.sh
 ```
 
 ### Check MCP Server Process
+
 ```bash
 ps aux | grep "knowcode mcp-server"
 ```
 
 ### View MCP Configuration
+
 ```bash
-cat ~/.gemini/mcp_servers.json
+cat ~/.gemini/antigravity/mcp_config.json
 ```
 
 ### Rebuild Knowledge Store (if needed)
+
 ```bash
 source .venv/bin/activate
 knowcode analyze . -o .
@@ -89,13 +96,15 @@ knowcode analyze . -o .
 ### MCP Tool Not Available After Restart?
 
 1. Check server is running:
+
    ```bash
    ps aux | grep "knowcode mcp-server"
    ```
 
 2. Check configuration:
+
    ```bash
-   cat ~/.gemini/mcp_servers.json
+   cat ~/.gemini/antigravity/mcp_config.json
    ```
 
 3. Restart IDE again
@@ -103,11 +112,13 @@ knowcode analyze . -o .
 ### Low Sufficiency Scores?
 
 1. Verify index exists (should be created by analyze):
+
    ```bash
    ls -la knowcode_index/
    ```
 
 2. If missing, run a dedicated index build:
+
    ```bash
    knowcode index . --output knowcode_index
    ```
@@ -120,6 +131,7 @@ knowcode analyze . -o .
 ## 📊 Success Metrics
 
 After setup, you should see:
+
 - ✅ 70%+ queries with `sufficiency_score >= 0.8`
 - ✅ Faster responses for codebase questions
 - ✅ 50%+ reduction in external LLM token usage
@@ -134,10 +146,12 @@ After setup, you should see:
 ## 🎓 Key Concepts
 
 **Sufficiency Score**: Confidence that retrieved context is enough to answer the query
+
 - `>= 0.8` → Answer locally
 - `< 0.8` → Use external LLM
 
 **Retrieval Modes**:
+
 - **Semantic**: Uses embeddings + vector search (better)
 - **Lexical**: Uses keyword matching (fallback)
 
@@ -160,6 +174,7 @@ After setup, you should see:
 ## 🎉 You're Almost There!
 
 Just need to:
+
 1. Stop the manual MCP server (Ctrl+C)
 2. Restart Antigravity IDE
 3. Ask a test question
@@ -168,4 +183,4 @@ Good luck! 🚀
 
 ---
 
-*Last updated: 2026-01-13*
+_Last updated: 2026-01-13_

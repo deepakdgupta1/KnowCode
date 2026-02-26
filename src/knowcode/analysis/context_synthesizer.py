@@ -86,7 +86,7 @@ class ContextSynthesizer:
         self.max_tokens = max_tokens
         self.tokenizer = TokenCounter(model)
 
-    def synthesize(self, entity_id: str) -> Optional[ContextBundle]:
+    def synthesize(self, entity_id: str, summarize: bool = False) -> Optional[ContextBundle]:
         """Synthesize context bundle for an entity.
 
         Args:
@@ -139,7 +139,7 @@ class ContextSynthesizer:
                 current_tokens += t
 
         # Priority 2: Source Code (Huge consumer, often truncated)
-        if entity.source_code:
+        if entity.source_code and not summarize:
             code_header = "## Source Code\n\n```python\n"
             code_footer = "\n```"
             overhead = self.tokenizer.count_tokens(code_header + code_footer)
@@ -306,6 +306,7 @@ class ContextSynthesizer:
         self,
         entity_id: str,
         task_type: TaskType = TaskType.GENERAL,
+        summarize: bool = False,
     ) -> Optional[ContextBundle]:
         """Synthesize context bundle with task-specific prioritization.
 
@@ -355,7 +356,7 @@ class ContextSynthesizer:
         if entity.docstring:
             content_sections["docstring"] = f"## Description\n\n{entity.docstring}"
             
-        if entity.source_code:
+        if entity.source_code and not summarize:
             code_header = "## Source Code\n\n```python\n"
             code_footer = "\n```"
             code_body = entity.source_code

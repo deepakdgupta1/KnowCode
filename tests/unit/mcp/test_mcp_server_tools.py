@@ -111,6 +111,7 @@ def test_handle_tool_call_retrieve_context_for_query(tmp_path: Path) -> None:
                 "max_tokens": 123,
                 "limit_entities": 2,
                 "expand_deps": True,
+                "verbosity": "diagnostic",
             },
         )
     )
