@@ -100,28 +100,37 @@ flowchart TB
 13. **[x] Markdown Export (MVP)**: CLI `export` produces an index-style Markdown doc.
 14. **[ ] Multi-Level Doc Synthesis (Layer 7)**: Architecture/module/function narratives, change summaries, and freshness tracking.
 
+### **Phase 4.5: Architectural Hardening (PARTIAL)**
+15. **[x] Dependency Modularisation (AD-1)**: Optional extras (`server`, `search`, `llm`, `watch`, `all`) with lightweight core install.
+16. **[x] Side-Effect-Free Query Paths (AD-2)**: Retrieval and MCP read tools fail fast on missing prerequisites; no auto analyze/index side effects.
+17. **[ ] Schema Versioning (AD-3)**: Persisted artifact schema versioning + migration shim.
+18. **[ ] Data Model Fixes (AD-4)**: Metadata fields move from `dict[str, str]` to `dict[str, Any]`.
+19. **[ ] Configuration Hardening (AD-5)**: Logging-based config warnings + strict server validation.
+20. **[ ] Service Layer Decomposition (AD-6)**: Retrieval orchestrator + protocol interfaces.
+21. **[ ] Entity Identity Resilience (AD-7)**: Add `content_hash` for rename-resilient correlation.
+
 ### **Phase 5: Deep Analysis (NEXT)**
-15. **[ ] Static Behavioral Analysis (Layer 4)**: Data flow, state transitions, side-effect classification.
-16. **[ ] Intent Extraction (Layer 6)**: ADR/PR/commit intent linking beyond commit metadata.
-17. **[ ] Confidence Scoring (Layer 3)**: Weighted edges/entities by evidence source.
+22. **[ ] Static Behavioral Analysis (Layer 4)**: Data flow, state transitions, side-effect classification.
+23. **[ ] Intent Extraction (Layer 6)**: ADR/PR/commit intent linking beyond commit metadata.
+24. **[ ] Confidence Scoring (Layer 3)**: Weighted edges/entities by evidence source.
 
 ### **Phase 6: Enterprise (FUTURE)**
-18. **[ ] Security & RBAC**: Permissioned access and audit trails.
-19. **[ ] Scalability**: Large monorepo support and distributed processing.
-20. **[ ] Team Sharing**: Remote knowledge store sync and collaboration.
+25. **[ ] Security & RBAC**: Permissioned access and audit trails.
+26. **[ ] Scalability**: Large monorepo support and distributed processing.
+27. **[ ] Team Sharing**: Remote knowledge store sync and collaboration.
 
 ### **Phase 7: Agentic Capabilities (COMPLETED v2.2)**
-21. **[x] Agent Architecture**: `Agent` class with configuration-driven model selection.
-22. **[x] Multi-Provider Support**: Google Gemini and OpenRouter/OpenAI integration.
-23. **[x] Rate Limiting**: Persistent RPM/RPD tracking and enforcement.
-24. **[x] Query Classification**: 6 task types (explain, debug, extend, review, locate, general).
-25. **[x] Smart Answer**: Local-first answering with configurable sufficiency threshold.
-26. **[x] VoyageAI Reranking**: Cross-encoder reranking with signal-based fallback.
+28. **[x] Agent Architecture**: `Agent` class with configuration-driven model selection.
+29. **[x] Multi-Provider Support**: Google Gemini and OpenRouter/OpenAI integration.
+30. **[x] Rate Limiting**: Persistent RPM/RPD tracking and enforcement.
+31. **[x] Query Classification**: 6 task types (explain, debug, extend, review, locate, general).
+32. **[x] Smart Answer**: Local-first answering with configurable sufficiency threshold.
+33. **[x] VoyageAI Reranking**: Cross-encoder reranking with signal-based fallback.
 
 ### **Phase 8: IDE Integration (COMPLETED v2.2)**
-27. **[x] MCP Server (Layer 10b)**: Tool exposure via STDIO for IDE agents.
-28. **[x] Core Tools**: `search_codebase`, `get_entity_context`, `trace_calls`.
-29. **[x] Sufficiency Scoring**: Context confidence metrics for local-first answering.
-30. **[x] Task-Specific Templates**: Debug/extend/review/explain/locate prioritization.
-31. **[x] Multi-hop Queries**: `trace_calls(depth=N)` and `get_impact()` analysis.
-32. **[x] Structured Responses**: JSON with `task_type` and `sufficiency_score`.
+34. **[x] MCP Server (Layer 10b)**: Tool exposure via STDIO for IDE agents.
+35. **[x] Core Tools**: `search_codebase`, `get_entity_context`, `trace_calls`.
+36. **[x] Sufficiency Scoring**: Context confidence metrics for local-first answering.
+37. **[x] Task-Specific Templates**: Debug/extend/review/explain/locate prioritization.
+38. **[x] Multi-hop Queries**: `trace_calls(depth=N)` and `get_impact()` analysis.
+39. **[x] Structured Responses**: JSON with `task_type` and `sufficiency_score`.

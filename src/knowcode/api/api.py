@@ -10,6 +10,7 @@ from starlette.requests import Request
 from knowcode.service import KnowCodeService
 from knowcode.data_models import TaskType
 from knowcode.api.rate_limit import limiter, STANDARD_LIMIT, EXPENSIVE_LIMIT
+from knowcode.errors import KnowCodePrerequisiteError
 
 router = APIRouter(prefix="/api/v1")
 
@@ -98,12 +99,18 @@ def query_context(
     expand_deps = request.expand_deps if request.expand_deps is not None else True
     task_override = TaskType(request.task_type.value) if request.task_type else None
 
-    retrieval = service.retrieve_context_for_query(
-        query=request.query,
-        task_type=task_override,
-        limit_entities=limit,
-        expand_deps=expand_deps,
-    )
+    try:
+        retrieval = service.retrieve_context_for_query(
+            query=request.query,
+            task_type=task_override,
+            limit_entities=limit,
+            expand_deps=expand_deps,
+        )
+    except KnowCodePrerequisiteError as e:
+        raise HTTPException(
+            status_code=412,
+            detail={"message": str(e), "code": e.code, "hint": e.hint},
+        )
 
     engine = service.get_search_engine()
     results: list[ChunkResult] = []

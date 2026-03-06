@@ -816,6 +816,84 @@ You've essentially defined a **code intelligence system**, not a chatbot with em
 
 ---
 
+## **Known Architectural Debt & Target State**
+
+This section documents known architectural issues identified during review and the target state for each. Items are prioritised by impact.
+
+### **AD-1: Monolithic Dependency Footprint** *(Priority: Critical)*
+
+**Current state:** `pyproject.toml` requires FastAPI, FAISS, OpenAI, Gemini, numpy, uvicorn, and watchdog for *every* install — even users who only need `knowcode analyze` + `knowcode query`.
+
+**Impact:** Slow installs, platform-specific failures (FAISS wheels, numpy ABI), increased vulnerability surface, and import-time latency for CLI-only users.
+
+**Target state:** Core install (`pip install knowcode`) includes only: `click`, `networkx`, `pyyaml`, `pathspec`, `tree-sitter`, `tree-sitter-languages`, `GitPython`, `tiktoken`. Heavy dependencies move behind extras:
+
+| Extra | Dependencies | Unlocks |
+|-------|-------------|---------|
+| `knowcode[server]` | `fastapi`, `uvicorn` | `knowcode server` |
+| `knowcode[search]` | `faiss-cpu`, `numpy` | `knowcode index`, `knowcode semantic-search` |
+| `knowcode[llm]` | `openai`, `google-genai`, `google-api-core` | `knowcode ask` |
+| `knowcode[watch]` | `watchdog` | `knowcode server --watch` |
+| `knowcode[all]` | All of the above | Batteries-included (preserves backward compatibility) |
+
+Commands invoked without the required extra should fail fast with: *"Install knowcode[server] to use `knowcode server`"*.
+
+### **AD-2: Hidden Side Effects in Query Paths** *(Priority: Critical)*
+
+**Current state:** `KnowCodeService.retrieve_context_for_query()` auto-triggers `analyze()` and `_build_index()` if artifacts are missing. A read operation silently performs expensive writes.
+
+**Impact:** Unpredictable latency in API/MCP server calls; surprises in CI/CD pipelines; makes the system non-deterministic from the caller's perspective.
+
+**Target state:** Query methods fail fast with actionable errors when prerequisites are missing (e.g., *"Knowledge store not found. Run `knowcode analyze <dir>` first."*). Opt-in helpers `ensure_store()` and `ensure_index()` are available for callers who want the auto-build behavior.
+
+### **AD-3: No Schema Versioning on Persisted Artifacts** *(Priority: High)*
+
+**Current state:** The JSON knowledge store and FAISS index contain no `schema_version` field. Data model changes silently corrupt existing stores.
+
+**Impact:** No safe migration path; users must manually delete and rebuild after upgrades.
+
+**Target state:** Top-level `schema_version` field in both the knowledge store JSON and the index metadata. A minimal migration shim validates version on load and either migrates or emits a clear error.
+
+### **AD-4: Metadata Type Restriction** *(Priority: High)*
+
+**Current state:** `Entity.metadata`, `Relationship.metadata`, and `CodeChunk.metadata` are typed as `dict[str, str]`, forcing stringification of booleans, integers, and lists.
+
+**Target state:** Change to `dict[str, Any]` across all data models. Serialization/deserialization handles mixed types natively.
+
+### **AD-5: Configuration Error Handling** *(Priority: Medium)*
+
+**Current state:** `AppConfig._load_from_yaml()` catches all exceptions, prints to stdout, and silently falls back to defaults. No schema validation on YAML keys.
+
+**Target state:** Use `logging.warning()` instead of `print()`. In server/MCP contexts, raise on invalid configuration. Validate known config keys and warn on unrecognised ones.
+
+### **AD-6: Service Layer Cohesion** *(Priority: Medium)*
+
+**Current state:** `KnowCodeService` handles orchestration, caching, persistence, query classification, retrieval strategy selection, index validation, and auto-building — too many reasons to change.
+
+**Target state:** Extract retrieval orchestration into a dedicated `RetrievalOrchestrator` class. `KnowCodeService` delegates to specialised components. Define `Protocol` interfaces for `EmbeddingProvider`, `VectorStore`, and `KnowledgeStoreProtocol` to decouple layers.
+
+### **AD-7: Brittle Entity Identity** *(Priority: Medium)*
+
+**Current state:** Entity IDs use `file_path::qualified_name`. File renames or moves break identity, poisoning temporal history and cached indexes.
+
+**Target state:** Retain `file_path::qualified_name` as the primary ID but add a `content_hash` (SHA-256 of canonical source snippet) to entity metadata for rename-resilient correlation.
+
+### **AD-8: Scalability Ceiling** *(Priority: Low — future concern)*
+
+**Current state:** NetworkX in-memory graph + full JSON serialization. Adequate for small/medium repos but will hit memory and load-time walls on large monorepos (>100k entities).
+
+**Target state:** Evaluate SQLite-backed storage for entities/edges/chunks with FTS, enabling incremental loads and partial queries. This is a Phase 6 concern.
+
+### **AD-9: `[HARDENED]` Tag Clarity** *(Priority: Low)*
+
+**Current state:** Layer descriptions throughout this document include `[HARDENED]` items that represent aspirational capabilities, not shipped features. This can mislead readers about the system's current state.
+
+**Target state:** All `[HARDENED]` items are clearly labelled as *"ASPIRATIONAL — not yet implemented"* where they first appear (Section 1 preamble), and individual items are not removed — they remain as the north-star design.
+
+---
+
+> **Note on `[HARDENED]` tags:** Throughout the layer descriptions above, items marked `[HARDENED]` represent the *target design* for a production-grade system. They are **not yet implemented** in the current codebase. See the roadmap below for the phased plan to address them.
+
 ## **Implementation Status & Roadmap**
 
 ### **Phase 1: Foundation (COMPLETED)**
@@ -840,31 +918,41 @@ You've essentially defined a **code intelligence system**, not a chatbot with em
 13. **[x] Markdown Export (MVP)**: CLI `export` produces an index-style Markdown doc (see `docs_test/index.md`).
 14. **[ ] Multi-Level Doc Synthesis (Layer 7)**: Architecture/module/function narratives, change summaries, and freshness tracking.
 
-### **Phase 5: Deep Analysis (NEXT)**
-15. **[ ] Static Behavioral Analysis (Layer 4)**: Data flow, state transitions, side-effect classification.
-16. **[ ] Intent Extraction (Layer 6)**: ADR/PR/commit intent linking beyond commit metadata.
-17. **[ ] Confidence Scoring (Layer 3)**: Weighted edges/entities by evidence source.
+### **Phase 4.5: Architectural Hardening (NEXT)** *(addresses AD-1 through AD-7)*
+15. **[x] Dependency Modularisation (AD-1)**: Move heavy dependencies behind optional extras (`server`, `search`, `llm`, `watch`, `all`). Core install stays lightweight.
+16. **[x] Side-Effect-Free Query Paths (AD-2)**: Remove auto-analyze/index from `retrieve_context_for_query()`. Fail fast with actionable errors. Add explicit `ensure_store()` / `ensure_index()` helpers.
+17. **[ ] Schema Versioning (AD-3)**: Add `schema_version` to knowledge store JSON and index metadata. Write migration shim for version validation on load.
+18. **[ ] Data Model Fixes (AD-4)**: Change `metadata: dict[str, str]` to `dict[str, Any]` across `Entity`, `Relationship`, and `CodeChunk`.
+19. **[ ] Configuration Hardening (AD-5)**: Replace `print()` with `logging`; raise on invalid config in server contexts; validate YAML schema.
+20. **[ ] Service Layer Decomposition (AD-6)**: Extract `RetrievalOrchestrator` from `KnowCodeService`. Define `Protocol` interfaces for `EmbeddingProvider`, `VectorStore`, `KnowledgeStoreProtocol`.
+21. **[ ] Entity Identity Resilience (AD-7)**: Add `content_hash` to entity metadata for rename-resilient correlation.
+22. **[ ] Layer Contract Tests**: Parser → `ParseResult` contract tests; store save/load roundtrip with schema version; retrieval golden-query tests; CLI smoke tests (Click runner); API endpoint contract tests (conditional on `server` extra).
+
+### **Phase 5: Deep Analysis**
+23. **[ ] Static Behavioral Analysis (Layer 4)**: Data flow, state transitions, side-effect classification.
+24. **[ ] Intent Extraction (Layer 6)**: ADR/PR/commit intent linking beyond commit metadata.
+25. **[ ] Confidence Scoring (Layer 3)**: Weighted edges/entities by evidence source.
 
 ### **Phase 6: Enterprise (FUTURE)**
-18. **[ ] Security & RBAC**: Permissioned access and audit trails.
-19. **[ ] Scalability**: Large monorepo support and distributed processing.
-20. **[ ] Team Sharing**: Remote knowledge store sync and collaboration.
+26. **[ ] Security & RBAC**: Permissioned access and audit trails.
+27. **[ ] Scalability (AD-8)**: SQLite-backed storage for large monorepos; incremental graph loading; sharded indexes.
+28. **[ ] Team Sharing**: Remote knowledge store sync and collaboration.
 
 ### **Phase 7: Agentic Capabilities (COMPLETED v2.2)**
-21. **[x] Agent Architecture**: `Agent` class with configuration-driven model selection.
-22. **[x] Multi-Provider Support**: Google Gemini and OpenRouter/OpenAI integration.
-23. **[x] Rate Limiting**: Persistent RPM/RPD tracking and enforcement.
-24. **[x] Query Classification**: 6 task types (explain, debug, extend, review, locate, general).
-25. **[x] Smart Answer**: Local-first answering with configurable sufficiency threshold.
-26. **[x] VoyageAI Reranking**: Cross-encoder reranking with signal-based fallback.
+29. **[x] Agent Architecture**: `Agent` class with configuration-driven model selection.
+30. **[x] Multi-Provider Support**: Google Gemini and OpenRouter/OpenAI integration.
+31. **[x] Rate Limiting**: Persistent RPM/RPD tracking and enforcement.
+32. **[x] Query Classification**: 6 task types (explain, debug, extend, review, locate, general).
+33. **[x] Smart Answer**: Local-first answering with configurable sufficiency threshold.
+34. **[x] VoyageAI Reranking**: Cross-encoder reranking with signal-based fallback.
 
 ### **Phase 8: IDE Integration (COMPLETED v2.2)**
-27. **[x] MCP Server (Layer 10b)**: Tool exposure via STDIO for IDE agents.
-28. **[x] Core 4 Tools**: `search_codebase`, `get_entity_context`, `trace_calls`, `retrieve_context_for_query`.
-29. **[x] Sufficiency Scoring**: Context confidence metrics for local-first answering.
-30. **[x] Task-Specific Templates**: Debug/extend/review/explain/locate prioritization.
-31. **[x] Multi-hop Queries**: `trace_calls(depth=N)` and `get_impact()` analysis.
-32. **[x] Structured Responses**: JSON with `task_type` and `sufficiency_score`.
+35. **[x] MCP Server (Layer 10b)**: Tool exposure via STDIO for IDE agents.
+36. **[x] Core 4 Tools**: `search_codebase`, `get_entity_context`, `trace_calls`, `retrieve_context_for_query`.
+37. **[x] Sufficiency Scoring**: Context confidence metrics for local-first answering.
+38. **[x] Task-Specific Templates**: Debug/extend/review/explain/locate prioritization.
+39. **[x] Multi-hop Queries**: `trace_calls(depth=N)` and `get_impact()` analysis.
+40. **[x] Structured Responses**: JSON with `task_type` and `sufficiency_score`.
 
 ### **Supporting Tooling & QA (COMPLETED)**
 - **[x] Tests**: Unit/integration/e2e coverage for parsing, indexing, retrieval, API, CLI, storage, and analysis.

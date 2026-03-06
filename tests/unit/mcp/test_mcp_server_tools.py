@@ -81,7 +81,7 @@ class MockServiceWithStore:
 
     def __init__(self, tmp_path: Path) -> None:
         self.store = MockStore()
-        self.store_path = tmp_path  # Required by _ensure_store_ready
+        self.store_path = tmp_path
         self.context_calls: list[tuple] = []  # type: ignore
 
     def get_context(self, target: str, max_tokens: int = 2000, task_type: Any=None) -> Any:  # noqa: ANN001  # type: ignore
@@ -118,11 +118,11 @@ def test_handle_tool_call_retrieve_context_for_query(tmp_path: Path) -> None:
 
     assert payload["query"] == "Explain Foo"
     assert dummy.calls and dummy.calls[0][0] == "retrieve_context_for_query"
+    assert dummy.calls[0][1]["verbosity"] == "diagnostic"
 
 
 def test_handle_tool_call_search_codebase(tmp_path: Path) -> None:
     """Test search_codebase tool routing (UC2-001)."""
-    # Create the store file to skip _ensure_store_ready analyze call
     (tmp_path / "knowcode_knowledge.json").write_text("{}")
     
     server = KnowCodeMCPServer(store_path=tmp_path)
@@ -144,7 +144,6 @@ def test_handle_tool_call_search_codebase(tmp_path: Path) -> None:
 
 def test_handle_tool_call_get_entity_context(tmp_path: Path) -> None:
     """Test get_entity_context tool routing (UC2-002)."""
-    # Create the store file to skip _ensure_store_ready analyze call
     (tmp_path / "knowcode_knowledge.json").write_text("{}")
     
     server = KnowCodeMCPServer(store_path=tmp_path)
@@ -167,7 +166,6 @@ def test_handle_tool_call_get_entity_context(tmp_path: Path) -> None:
 
 def test_handle_tool_call_trace_calls(tmp_path: Path) -> None:
     """Test trace_calls tool routing (UC2-003)."""
-    # Create the store file to skip _ensure_store_ready analyze call
     (tmp_path / "knowcode_knowledge.json").write_text("{}")
     
     server = KnowCodeMCPServer(store_path=tmp_path)
@@ -197,3 +195,12 @@ def test_handle_tool_call_unknown_tool_returns_error(tmp_path: Path) -> None:
 
     assert "error" in result
     assert "Unknown tool" in result["error"]
+
+
+def test_handle_tool_call_reports_missing_prerequisites(tmp_path: Path) -> None:
+    """Read tools should fail deterministically when store prerequisites are missing."""
+    server = KnowCodeMCPServer(store_path=tmp_path)
+    result = json.loads(server.handle_tool_call("search_codebase", {"query": "Foo"}))
+
+    assert result["code"] == "missing_knowledge_store"
+    assert "knowcode analyze" in result["hint"]

@@ -9,8 +9,10 @@ import click
 
 from knowcode import __version__
 from knowcode.data_models import EntityKind, RelationshipKind
+from knowcode.errors import KnowCodePrerequisiteError
 from knowcode.service import KnowCodeService
 from knowcode.storage.knowledge_store import KnowledgeStore
+from knowcode.utils.dependency_guard import require_extra
 
 
 @click.group()
@@ -99,13 +101,14 @@ def index(directory: str, output: str, config: Optional[str]) -> None:
 
     DIRECTORY: Path to the codebase to index.
     """
-    from knowcode.config import AppConfig
-    from knowcode.llm.embedding import create_embedding_provider
-    from knowcode.indexing.indexer import Indexer
-
     click.echo(f"Indexing: {directory}")
 
     try:
+        require_extra("search", "knowcode index", ("faiss", "numpy"))
+        from knowcode.config import AppConfig
+        from knowcode.llm.embedding import create_embedding_provider
+        from knowcode.indexing.indexer import Indexer
+
         app_config = AppConfig.load(config)
         provider = create_embedding_provider(app_config=app_config)
         indexer = Indexer(provider)
@@ -222,12 +225,13 @@ def semantic_search(
 
     QUERY_TEXT: The search query.
     """
-    from knowcode.config import AppConfig
-
     question = " ".join(query_text)
     click.echo(f"Searching for: '{question}'...")
 
     try:
+        require_extra("search", "knowcode semantic-search", ("faiss", "numpy"))
+        from knowcode.config import AppConfig
+
         app_config = AppConfig.load(config)
         service = KnowCodeService(store_path=store, app_config=app_config)
         engine = service.get_search_engine(index_path=index)
@@ -393,14 +397,21 @@ def stats(store: str) -> None:
 )
 def server(store: str, host: str, port: int, watch: bool) -> None:
     """Start the KnowCode intelligence server."""
-    from knowcode.api.main import start_server
-    
-    click.echo(f"Starting KnowCode server on {host}:{port}")
-    click.echo(f"Using knowledge store: {store}")
-    if watch:
-        click.echo("Watch mode enabled.")
-    
-    start_server(host=host, port=port, store_path=store, watch=watch)
+    try:
+        require_extra("server", "knowcode server", ("fastapi", "uvicorn", "slowapi"))
+        if watch:
+            require_extra("watch", "knowcode server --watch", ("watchdog",))
+        from knowcode.api.main import start_server
+
+        click.echo(f"Starting KnowCode server on {host}:{port}")
+        click.echo(f"Using knowledge store: {store}")
+        if watch:
+            click.echo("Watch mode enabled.")
+
+        start_server(host=host, port=port, store_path=store, watch=watch)
+    except ImportError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
 
 
 @cli.command()
@@ -508,12 +519,13 @@ def ask(query_text: tuple[str], store: str, config: Optional[str]) -> None:
     
     QUERY_TEXT: The question to ask.
     """
-    from knowcode.llm.agent import Agent
-    from knowcode.config import AppConfig
-    
     question = " ".join(query_text)
     
     try:
+        require_extra("llm", "knowcode ask", ("openai", "google.genai", "google.api_core"))
+        from knowcode.llm.agent import Agent
+        from knowcode.config import AppConfig
+
         app_config = AppConfig.load(config)
         service = KnowCodeService(store_path=store, app_config=app_config)
         agent = Agent(service, config=app_config)
@@ -521,6 +533,10 @@ def ask(query_text: tuple[str], store: str, config: Optional[str]) -> None:
         click.echo(f"🤔 Asking KnowCode: '{question}'...")
         answer = agent.answer(question)
         click.echo("\n" + answer)
+    except KnowCodePrerequisiteError as e:
+        click.echo(f"Error: {e}", err=True)
+        click.echo(f"Hint: {e.hint}", err=True)
+        sys.exit(1)
     except ValueError as e:
         click.echo(f"Error: {e}", err=True)
         sys.exit(1)
@@ -568,9 +584,10 @@ def mcp_server(store: str, config: Optional[str]) -> None:
     store_file = store_path / KnowledgeStore.DEFAULT_FILENAME if store_path.is_dir() else store_path
     if not store_file.exists():
         click.echo(
-            "⚠️ Knowledge store not found. It will be built on first query.",
+            "Error: Knowledge store not found. Run `knowcode analyze <dir>` first.",
             err=True,
         )
+        sys.exit(1)
     
     try:
         from knowcode.mcp.server import run_server

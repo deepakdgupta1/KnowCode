@@ -18,14 +18,28 @@ KnowCode analyzes your codebase and builds a semantic graph of entities (functio
 uv venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
-# Install KnowCode (with dev dependencies)
-uv sync --dev
+# Install KnowCode for development (batteries included)
+uv sync --dev --extra all --extra mcp --extra voyageai
 
 # Set API keys (only needed for the features you use; see aimodels.yaml)
 export VOYAGE_API_KEY_1="..."   # embeddings + reranking (semantic search)
 export OPENAI_API_KEY="..."     # embeddings (alternative to VoyageAI)
 export GOOGLE_API_KEY_1="..."   # LLM (Gemini) for `knowcode ask`
 ```
+
+### Optional Dependency Extras
+
+KnowCode now ships with a lightweight core install plus feature extras:
+
+- `knowcode[server]` → `knowcode server`
+- `knowcode[search]` → `knowcode index`, `knowcode semantic-search`
+- `knowcode[llm]` → `knowcode ask`
+- `knowcode[watch]` → `knowcode server --watch`
+- `knowcode[all]` → union of `server`, `search`, `llm`, `watch`
+- `knowcode[mcp]` and `knowcode[voyageai]` remain available as before
+
+Commands fail fast with actionable hints, e.g.:
+`Install knowcode[server] to use 'knowcode server'.`
 
 ## Quick Start
 
@@ -184,6 +198,11 @@ knowcode history "KnowledgeStore"
 ### `ask`
 Ask questions about the codebase using an LLM agent. Requires an API key for at least one configured model in `aimodels.yaml`.
 
+Prerequisites:
+- Knowledge store exists (`knowcode analyze <dir>`)
+- Semantic index exists (`knowcode index <dir>`)
+- LLM dependencies installed (`knowcode[llm]`)
+
 ```bash
 knowcode ask <question> [--config <path>]
 ```
@@ -213,6 +232,9 @@ Start an MCP (Model Context Protocol) server for IDE agent integration.
 ```bash
 knowcode mcp-server [--store <path>] [--config <path>]
 ```
+
+Prerequisite: knowledge store must already exist (`knowcode analyze <dir>`).  
+MCP read tools are deterministic and do not auto-run analysis.
 
 **Tools Exposed:**
 - `search_codebase` - Search for code entities by name
@@ -389,8 +411,9 @@ ruff format src/
 
 ## Roadmap
 
-See [KnowCode.md](KnowCode.md) for the full vision. The MVP focuses on:
+See [KnowCode.md](KnowCode.md) for the full vision and detailed architectural debt register.
 
+**MVP (completed):**
 - ✅ Single monorepo support
 - ✅ Python, Markdown, YAML parsing
 - ✅ Snapshot-only analysis (no temporal tracking)
@@ -410,8 +433,19 @@ See [KnowCode.md](KnowCode.md) for the full vision. The MVP focuses on:
   - MCP server for IDE integration
   - VoyageAI cross-encoder reranking
 
+**Next: v2.3 — Architectural Hardening:**
+- Modularise dependencies into optional extras (core install stays lightweight)
+- Remove hidden side effects from query paths (fail fast, not auto-build)
+- Add schema versioning to knowledge store and index artifacts
+- Fix `metadata` type restriction (`dict[str, str]` → `dict[str, Any]`)
+- Harden configuration loading (logging, validation, strict server mode)
+- Decompose `KnowCodeService` and introduce `Protocol` interfaces
+- Add layer contract tests (parser, store roundtrip, retrieval golden queries)
+
 **Future releases:**
-- v3.0: Team sharing & Enterprise features (RBAC, SSO, etc.)
+- v2.4: Multi-level documentation synthesis
+- v3.0: Deep analysis (data flow, intent extraction, confidence scoring)
+- v4.0: Enterprise features (RBAC, scalability, team sharing)
 
 ## License
 

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from knowcode.analysis.context_synthesizer import ContextSynthesizer
 from knowcode.config import AppConfig
+from knowcode.errors import MissingKnowledgeStoreError, MissingSemanticIndexError
 from knowcode.indexing.graph_builder import GraphBuilder
 from knowcode.storage.knowledge_store import KnowledgeStore
 
@@ -43,8 +44,75 @@ class KnowCodeService:
     def store(self) -> KnowledgeStore:
         """Get or load the knowledge store."""
         if self._store is None:
+            self._assert_store_exists()
             self._store = KnowledgeStore.load(self.store_path)
         return self._store
+
+    def _store_root(self) -> Path:
+        """Resolve the root directory where store/index artifacts live."""
+        return self.store_path if self.store_path.is_dir() else self.store_path.parent
+
+    def _store_file(self) -> Path:
+        """Resolve the knowledge store file path."""
+        if self.store_path.is_dir():
+            return self.store_path / KnowledgeStore.DEFAULT_FILENAME
+        return self.store_path
+
+    def _index_path(self) -> Path:
+        """Resolve the semantic index directory path."""
+        return self._store_root() / "knowcode_index"
+
+    def _assert_store_exists(self) -> Path:
+        """Validate that the persisted knowledge store exists."""
+        store_file = self._store_file()
+        if not store_file.exists():
+            raise MissingKnowledgeStoreError(store_file)
+        return store_file
+
+    def _assert_index_exists(self) -> Path:
+        """Validate that the persisted semantic index exists."""
+        index_path = self._index_path()
+        if not index_path.exists():
+            raise MissingSemanticIndexError(index_path)
+        return index_path
+
+    def ensure_store(
+        self,
+        directory: Optional[str | Path] = None,
+        output: Optional[str | Path] = None,
+        ignore: list[str] | None = None,
+        temporal: bool = False,
+        coverage: str | Path | None = None,
+    ) -> Path:
+        """Ensure the knowledge store exists, building it only if missing."""
+        store_file = self._store_file()
+        if store_file.exists():
+            return store_file
+
+        source_dir = Path(directory) if directory is not None else self._store_root()
+        output_path = Path(output) if output is not None else self._store_root()
+        self.analyze(
+            directory=source_dir,
+            output=output_path,
+            ignore=ignore,
+            temporal=temporal,
+            coverage=coverage,
+        )
+        return output_path / KnowledgeStore.DEFAULT_FILENAME if output_path.is_dir() else output_path
+
+    def ensure_index(
+        self,
+        directory: Optional[str | Path] = None,
+        index_path: Optional[str | Path] = None,
+    ) -> Path:
+        """Ensure the semantic index exists, building it only if missing."""
+        resolved_index_path = Path(index_path) if index_path is not None else self._index_path()
+        if resolved_index_path.exists():
+            return resolved_index_path
+
+        source_dir = Path(directory) if directory is not None else self._store_root()
+        self._build_index(source_dir, resolved_index_path)
+        return resolved_index_path
 
     def get_indexer(self, index_path: Optional[str | Path] = None) -> "Indexer":
         """Get or create the indexer.
@@ -65,8 +133,7 @@ class KnowCodeService:
             if index_path:
                 self._indexer.load(Path(index_path))
             else:
-                store_root = self.store_path if self.store_path.is_dir() else self.store_path.parent
-                default_index = store_root / "knowcode_index"
+                default_index = self._index_path()
                 if default_index.exists():
                     self._indexer.load(default_index)
                 
@@ -126,34 +193,8 @@ class KnowCodeService:
         from knowcode.llm.query_classifier import classify_query
 
         errors: list[str] = []
-        store_root = self.store_path if self.store_path.is_dir() else self.store_path.parent
-        store_file = store_root / KnowledgeStore.DEFAULT_FILENAME
-        index_path = store_root / "knowcode_index"
-
-        if not store_file.exists():
-            try:
-                self.analyze(directory=store_root, output=store_root)
-            except Exception as e:
-                return {
-                    "query": query,
-                    "task_type": task_type.value if task_type else "general",
-                    "task_confidence": 0.0,
-                    "retrieval_mode": "none",
-                    "context_text": "",
-                    "total_tokens": 0,
-                    "max_tokens": max_tokens,
-                    "truncated": False,
-                    "sufficiency_score": 0.0,
-                    "selected_entities": [],
-                    "evidence": [],
-                    "errors": [f"Auto-analyze failed: {e}"],
-                }
-
-        if not index_path.exists():
-            try:
-                self._build_index(store_root, index_path)
-            except Exception as e:
-                errors.append(f"Auto-index failed; falling back to lexical: {e}")
+        self._assert_store_exists()
+        index_path = self._assert_index_exists()
 
         detected_task_type, confidence = classify_query(query)
         resolved_task_type = task_type or detected_task_type
@@ -182,41 +223,40 @@ class KnowCodeService:
         evidence: list[dict[str, Any]] = []
         retrieval_mode = "lexical"
 
-        if index_path.exists():
-            try:
-                engine = self.get_search_engine()
-                self._validate_index_compatibility(index_path)
-                scored = engine.search_scored(
-                    query,
-                    limit=max(10, limit_entities * 5),
-                    expand_deps=expand_deps,
+        try:
+            engine = self.get_search_engine(index_path)
+            self._validate_index_compatibility(index_path)
+            scored = engine.search_scored(
+                query,
+                limit=max(10, limit_entities * 5),
+                expand_deps=expand_deps,
+            )
+            retrieval_mode = "semantic"
+
+            primary = [s for s in scored if s.source == "retrieved"]
+            seen_entities: set[str] = set()
+            for s in primary:
+                if s.chunk.entity_id in seen_entities:
+                    continue
+                seen_entities.add(s.chunk.entity_id)
+                selected_entity_ids.append(s.chunk.entity_id)
+                if len(selected_entity_ids) >= limit_entities:
+                    break
+
+            for rank, s in enumerate(scored, start=1):
+                evidence.append(
+                    {
+                        "rank": rank,
+                        "chunk_id": s.chunk.id,
+                        "entity_id": s.chunk.entity_id,
+                        "score": s.score,
+                        "source": s.source,
+                    }
                 )
-                retrieval_mode = "semantic"
 
-                primary = [s for s in scored if s.source == "retrieved"]
-                seen_entities: set[str] = set()
-                for s in primary:
-                    if s.chunk.entity_id in seen_entities:
-                        continue
-                    seen_entities.add(s.chunk.entity_id)
-                    selected_entity_ids.append(s.chunk.entity_id)
-                    if len(selected_entity_ids) >= limit_entities:
-                        break
-
-                for rank, s in enumerate(scored, start=1):
-                    evidence.append(
-                        {
-                            "rank": rank,
-                            "chunk_id": s.chunk.id,
-                            "entity_id": s.chunk.entity_id,
-                            "score": s.score,
-                            "source": s.source,
-                        }
-                    )
-
-            except Exception as e:
-                errors.append(f"Semantic retrieval failed; falling back to lexical: {e}")
-                retrieval_mode = "lexical"
+        except Exception as e:
+            errors.append(f"Semantic retrieval failed; falling back to lexical: {e}")
+            retrieval_mode = "lexical"
 
         if retrieval_mode == "lexical":
             candidates: list[str] = []

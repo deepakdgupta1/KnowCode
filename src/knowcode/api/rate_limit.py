@@ -10,7 +10,6 @@ Uses slowapi with client IP-based keying.
 from slowapi import Limiter, _rate_limit_exceeded_handler  # type: ignore[import-untyped]
 from slowapi.errors import RateLimitExceeded  # type: ignore[import-untyped]
 from slowapi.util import get_remote_address  # type: ignore[import-untyped]
-from starlette.requests import Request
 from fastapi import FastAPI
 
 # --- Rate Limit Tiers ---

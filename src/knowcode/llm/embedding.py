@@ -4,8 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 import os
-
-from openai import OpenAI
+from typing import Any
 
 from knowcode.config import AppConfig
 from knowcode.data_models import EmbeddingConfig
@@ -20,6 +19,15 @@ _VOYAGE_EMBED_DIMENSIONS: dict[str, int] = {
     "voyage-3": 1024,
     "voyage-code-3": 1024,
 }
+
+
+def _create_openai_client(api_key: str, base_url: str | None) -> Any:
+    """Create an OpenAI client with an actionable dependency hint."""
+    try:
+        from openai import OpenAI
+    except ImportError as exc:  # pragma: no cover - depends on environment extras
+        raise ImportError("Install knowcode[llm] to use 'knowcode index'.") from exc
+    return OpenAI(api_key=api_key, base_url=base_url)
 
 
 class EmbeddingProvider(ABC):
@@ -65,15 +73,15 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
             # We allow init without key, but embed() will fail if not provided later
             self.client = None
         else:
-            self.client = OpenAI(api_key=api_key, base_url=base_url)
+            self.client = _create_openai_client(api_key=api_key, base_url=base_url)
 
-    def _get_client(self) -> OpenAI:
+    def _get_client(self) -> Any:
         """Return an initialized OpenAI client, loading credentials if needed."""
         if not self.client:
             api_key = os.environ.get(self.api_key_env)
             if not api_key:
                 raise ValueError(f"{self.api_key_env} environment variable is not set.")
-            self.client = OpenAI(api_key=api_key, base_url=self.base_url)
+            self.client = _create_openai_client(api_key=api_key, base_url=self.base_url)
         return self.client
 
     def embed(self, texts: list[str]) -> list[list[float]]:

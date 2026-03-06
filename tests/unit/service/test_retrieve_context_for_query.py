@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+
+import pytest
 
 from knowcode.config import AppConfig
 from knowcode.data_models import CodeChunk, TaskType
+from knowcode.errors import MissingKnowledgeStoreError, MissingSemanticIndexError
 from knowcode.retrieval.search_engine import ScoredChunk
 from knowcode.service import KnowCodeService
 
@@ -51,7 +55,38 @@ class DummyService(KnowCodeService):
         return
 
 
+class BuilderTrackingService(KnowCodeService):
+    def __init__(self, store_path: Path) -> None:
+        super().__init__(store_path=store_path, app_config=AppConfig.default())
+        self.analyze_calls = 0
+        self.build_index_calls = 0
+
+    def analyze(self, directory, output, ignore=None, temporal=False, coverage=None):  # type: ignore[override]
+        self.analyze_calls += 1
+        output_path = Path(output)
+        output_path.mkdir(parents=True, exist_ok=True)
+        store_file = output_path / "knowcode_knowledge.json"
+        store_file.write_text(
+            json.dumps({"metadata": {}, "entities": {}, "relationships": []}),
+            encoding="utf-8",
+        )
+        return {}
+
+    def _build_index(self, directory, index_path):  # type: ignore[override]
+        self.build_index_calls += 1
+        Path(index_path).mkdir(parents=True, exist_ok=True)
+        return 0
+
+
+def _write_store_file(path: Path) -> None:
+    (path / "knowcode_knowledge.json").write_text(
+        json.dumps({"metadata": {}, "entities": {}, "relationships": []}),
+        encoding="utf-8",
+    )
+
+
 def test_retrieve_context_uses_semantic_when_index_exists(tmp_path: Path) -> None:
+    _write_store_file(tmp_path)
     (tmp_path / "knowcode_index").mkdir()
 
     chunk_a = CodeChunk(id="c1", entity_id="e1", content="one", tokens=["one"])
@@ -73,6 +108,7 @@ def test_retrieve_context_uses_semantic_when_index_exists(tmp_path: Path) -> Non
 
 
 def test_retrieve_context_falls_back_to_lexical_on_semantic_error(tmp_path: Path) -> None:
+    _write_store_file(tmp_path)
     (tmp_path / "knowcode_index").mkdir()
 
     service = DummyService(
@@ -84,3 +120,44 @@ def test_retrieve_context_falls_back_to_lexical_on_semantic_error(tmp_path: Path
     assert result["retrieval_mode"] == "lexical"
     assert service.search_calls
     assert result["selected_entities"][0]["entity_id"] == "e1"
+
+
+def test_retrieve_context_raises_when_store_missing(tmp_path: Path) -> None:
+    service = DummyService(tmp_path, engine=DummySearchEngine([]))
+
+    with pytest.raises(MissingKnowledgeStoreError) as exc:
+        service.retrieve_context_for_query("Explain e1", verbosity="diagnostic")
+    assert exc.value.code == "missing_knowledge_store"
+    assert "knowcode analyze" in exc.value.hint
+
+
+def test_retrieve_context_raises_when_index_missing(tmp_path: Path) -> None:
+    _write_store_file(tmp_path)
+    service = DummyService(tmp_path, engine=DummySearchEngine([]))
+
+    with pytest.raises(MissingSemanticIndexError) as exc:
+        service.retrieve_context_for_query("Explain e1", verbosity="diagnostic")
+    assert exc.value.code == "missing_semantic_index"
+    assert "knowcode index" in exc.value.hint
+
+
+def test_ensure_store_builds_only_when_missing(tmp_path: Path) -> None:
+    service = BuilderTrackingService(tmp_path)
+
+    store_path = service.ensure_store()
+    assert store_path.exists()
+    assert service.analyze_calls == 1
+
+    service.ensure_store()
+    assert service.analyze_calls == 1
+
+
+def test_ensure_index_builds_only_when_missing(tmp_path: Path) -> None:
+    service = BuilderTrackingService(tmp_path)
+
+    index_path = service.ensure_index()
+    assert index_path.exists()
+    assert service.build_index_calls == 1
+
+    service.ensure_index()
+    assert service.build_index_calls == 1

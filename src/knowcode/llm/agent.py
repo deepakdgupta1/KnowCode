@@ -1,18 +1,31 @@
 """Agent module for KnowCode."""
 
-from typing import Any
 import os
-from typing import Optional
-
-from google import genai
-from google.api_core.exceptions import ResourceExhausted
-import openai
+from typing import Any, Optional
 
 from knowcode.service import KnowCodeService
 from knowcode.config import AppConfig, ModelConfig
 from knowcode.llm.rate_limiter import RateLimiter
 from knowcode.llm.query_classifier import get_prompt_template
 from knowcode.data_models import TaskType
+
+
+def _create_google_client(api_key: str) -> Any:
+    """Create a Google GenAI client with an actionable dependency hint."""
+    try:
+        from google import genai
+    except ImportError as exc:  # pragma: no cover - depends on environment extras
+        raise ImportError("Install knowcode[llm] to use 'knowcode ask'.") from exc
+    return genai.Client(api_key=api_key)
+
+
+def _create_openai_client(api_key: str, base_url: str | None) -> Any:
+    """Create an OpenAI-compatible client with an actionable dependency hint."""
+    try:
+        from openai import OpenAI
+    except ImportError as exc:  # pragma: no cover - depends on environment extras
+        raise ImportError("Install knowcode[llm] to use 'knowcode ask'.") from exc
+    return OpenAI(api_key=api_key, base_url=base_url)
 
 
 class Agent:
@@ -41,17 +54,14 @@ class Agent:
             return None
             
         if config.provider == "google":
-            client = genai.Client(api_key=api_key)
+            client = _create_google_client(api_key)
         else:
             # Assume OpenAI-compatible (OpenAI, OpenRouter, Mistral, etc.)
             base_url = None
             if config.provider == "mistralai" or "openrouter" in config.provider:
                 base_url = "https://openrouter.ai/api/v1"
             
-            client = openai.OpenAI(  # type: ignore
-                api_key=api_key,
-                base_url=base_url
-            )
+            client = _create_openai_client(api_key=api_key, base_url=base_url)
             
         self.clients[client_key] = client
         return client
@@ -133,14 +143,14 @@ class Agent:
                 self.rate_limiter.record_usage(model_config.name)
                 return response_text
             
-            except ResourceExhausted as e:
-                 print(f"  ⚠️ Rate limit exceeded (Server) for {model_config.name}. Switching...")
-                 last_error = e
-                 continue
             except Exception as e:
-                 print(f"  ❌ Error with {model_config.name}: {e}")
-                 last_error = e  # type: ignore
-                 continue
+                if e.__class__.__name__ == "ResourceExhausted":
+                    print(f"  ⚠️ Rate limit exceeded (Server) for {model_config.name}. Switching...")
+                    last_error = e
+                    continue
+                print(f"  ❌ Error with {model_config.name}: {e}")
+                last_error = e
+                continue
 
         if last_error:
             raise last_error

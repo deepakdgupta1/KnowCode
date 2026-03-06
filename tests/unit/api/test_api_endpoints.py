@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
 
 import pytest
 from pydantic import ValidationError
 from starlette.requests import Request
-from starlette.datastructures import Headers
 
 from knowcode.api import api
 from knowcode.api.rate_limit import limiter
 from knowcode.data_models import CodeChunk
+from knowcode.errors import MissingSemanticIndexError
 
 
 # --- Disable rate limiting for direct function-call tests ---
@@ -179,6 +179,21 @@ def test_query_and_entity_endpoints() -> None:
 
     entity = api.get_entity(request=req, entity_id="e1", service=service)  # type: ignore
     assert entity["id"] == "e1"
+
+
+def test_query_context_returns_412_for_missing_index() -> None:
+    req = _mock_request()
+    service = DummyService()
+
+    def _raise(*_args: Any, **_kwargs: Any) -> Any:
+        raise MissingSemanticIndexError(Path("knowcode_index"))
+
+    service.retrieve_context_for_query = _raise  # type: ignore[method-assign]
+
+    with pytest.raises(api.HTTPException) as exc:
+        api.query_context(http_request=req, request=api.QueryRequest(query="hi", limit=1), service=service)  # type: ignore
+
+    assert exc.value.status_code == 412
 
 
 def test_reload_endpoint() -> None:
