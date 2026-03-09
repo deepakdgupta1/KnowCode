@@ -14,6 +14,7 @@ from knowcode.parsers.vue_parser import VueParser
 from knowcode.indexing.scanner import FileInfo, Scanner
 from knowcode.analysis.signals import CoverageProcessor
 from knowcode.analysis.temporal import TemporalAnalyzer
+from knowcode.utils.entity_identity import ensure_entity_content_hash
 
 
 class GraphBuilder:
@@ -122,6 +123,7 @@ class GraphBuilder:
     def _merge_result(self, result: ParseResult) -> None:
         """Merge parse result into the graph."""
         for entity in result.entities:
+            ensure_entity_content_hash(entity)
             self.entities[entity.id] = entity
 
         self.relationships.extend(result.relationships)

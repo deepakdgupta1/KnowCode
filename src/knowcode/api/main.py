@@ -25,7 +25,7 @@ def create_app(store_path: str = ".", watch: bool = False) -> FastAPI:
     )
 
     # Initialize service
-    service = KnowCodeService(store_path=store_path)
+    service = KnowCodeService(store_path=store_path, strict_config=True)
     api._service = service
     
     if watch:

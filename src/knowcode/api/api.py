@@ -94,6 +94,8 @@ def query_context(
     service: KnowCodeService = Depends(get_service)
 ) -> QueryResponse:
     """Execute task-aware retrieval and return relevant code chunks with scores."""
+    # Required by slowapi's decorator; keep explicit to preserve endpoint contract.
+    _ = http_request
     limit = min(max(1, request.limit or 5), 20)
     max_tokens_budget = min(request.max_tokens or 4000, 8000)
     expand_deps = request.expand_deps if request.expand_deps is not None else True

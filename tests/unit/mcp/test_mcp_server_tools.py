@@ -6,6 +6,9 @@ from typing import Any
 import json
 from pathlib import Path
 
+import pytest
+
+import knowcode.mcp.server as mcp_server_module
 from knowcode.mcp.server import KnowCodeMCPServer
 from knowcode.data_models import Entity, EntityKind, Location
 
@@ -204,3 +207,21 @@ def test_handle_tool_call_reports_missing_prerequisites(tmp_path: Path) -> None:
 
     assert result["code"] == "missing_knowledge_store"
     assert "knowcode analyze" in result["hint"]
+
+
+def test_mcp_server_initializes_service_with_strict_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """MCP server should construct KnowCodeService with strict config validation."""
+    (tmp_path / "knowcode_knowledge.json").write_text("{}")
+    captured: dict[str, Any] = {}
+
+    class DummyService:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            captured.update(kwargs)
+
+    monkeypatch.setattr(mcp_server_module, "KnowCodeService", DummyService)
+    server = KnowCodeMCPServer(store_path=tmp_path)
+    _ = server._ensure_service()
+
+    assert captured.get("strict_config") is True

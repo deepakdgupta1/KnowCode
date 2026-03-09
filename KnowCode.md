@@ -903,6 +903,14 @@ Commands invoked without the required extra should fail fast with: *"Install kno
 4. **[x] Token-Budgeted Context Synthesis (Layer 9)**: Priority-ordered sections with truncation handling.
 5. **[x] Service Layer**: Shared business logic for CLI and API.
 
+> **Questions you can now answer:**
+> - *"What files and folders make up this project?"*
+> - *"What are the main classes and functions in this codebase?"*
+> - *"Which function calls which other function?"*
+> - *"What does this module import, and who imports it?"*
+> - *"Which class inherits from which other class?"*
+> - *"Give me a summary of this codebase that fits within a size limit."*
+
 ### **Phase 2: Intelligence Server & RAG (COMPLETED)**
 6. **[x] FastAPI Server (Layer 10)**: Health, stats, search, context, semantic query, reload, entity details, callers/callees.
 7. **[x] Semantic Search & Indexing (Layer 4a)**: Chunker (module header/imports/entities), config-driven embeddings (OpenAI or VoyageAI), FAISS vector store, hybrid BM25+vector retrieval (RRF), reranking, dependency expansion.
@@ -910,33 +918,75 @@ Commands invoked without the required extra should fail fast with: *"Install kno
 9. **[x] Watch Mode**: Background indexer + filesystem monitor for incremental re-indexing.
 10. **[x] CLI Workflows**: `analyze`, `query`, `context`, `export`, `stats`, `server`, `history`, `ask`.
 
+> **Questions you can now answer:**
+> - *"Where in the code do we handle user authentication?"* (semantic search, not just keyword match)
+> - *"Find everything related to payment processing."*
+> - *"What code is most relevant to how we send emails?"*
+> - *"How big is this codebase — how many files, functions, and classes does it have?"*
+> - *"Show me the code that's related to this error message."*
+> - *"I just changed a file — is the search index still up to date?"* (watch mode keeps it fresh)
+
 ### **Phase 3: Temporal & Runtime Signals (COMPLETED)**
 11. **[x] Git History Ingestion (Temporal)**: Commit/author entities, authored/modified/changed_by relationships; surfaced via `--temporal` and `history`.
 12. **[x] Coverage Signals (Layer 5)**: Cobertura ingestion with coverage report entities and covers/executed_by relationships.
+
+> **Questions you can now answer:**
+> - *"Who last changed this file, and when?"*
+> - *"How often has this module been modified in the last six months?"*
+> - *"Which parts of the code have no test coverage?"*
+> - *"Is the code I'm about to change covered by tests?"*
+> - *"Who are the main contributors to this area of the codebase?"*
+> - *"Which files change together most often?"*
 
 ### **Phase 4: Documentation Synthesis (PARTIAL)**
 13. **[x] Markdown Export (MVP)**: CLI `export` produces an index-style Markdown doc (see `docs_test/index.md`).
 14. **[ ] Multi-Level Doc Synthesis (Layer 7)**: Architecture/module/function narratives, change summaries, and freshness tracking.
 
+> **Questions you can now answer:**
+> - *"Can I get a written overview of this codebase I can share with a new team member?"*
+>
+> **Questions the remaining work will unlock:**
+> - *"Give me a high-level architecture narrative for the whole system."*
+> - *"Write a summary of what changed in this module since last release."*
+> - *"Which parts of the documentation are stale and need updating?"*
+
 ### **Phase 4.5: Architectural Hardening (NEXT)** *(addresses AD-1 through AD-7)*
 15. **[x] Dependency Modularisation (AD-1)**: Move heavy dependencies behind optional extras (`server`, `search`, `llm`, `watch`, `all`). Core install stays lightweight.
 16. **[x] Side-Effect-Free Query Paths (AD-2)**: Remove auto-analyze/index from `retrieve_context_for_query()`. Fail fast with actionable errors. Add explicit `ensure_store()` / `ensure_index()` helpers.
-17. **[ ] Schema Versioning (AD-3)**: Add `schema_version` to knowledge store JSON and index metadata. Write migration shim for version validation on load.
-18. **[ ] Data Model Fixes (AD-4)**: Change `metadata: dict[str, str]` to `dict[str, Any]` across `Entity`, `Relationship`, and `CodeChunk`.
-19. **[ ] Configuration Hardening (AD-5)**: Replace `print()` with `logging`; raise on invalid config in server contexts; validate YAML schema.
-20. **[ ] Service Layer Decomposition (AD-6)**: Extract `RetrievalOrchestrator` from `KnowCodeService`. Define `Protocol` interfaces for `EmbeddingProvider`, `VectorStore`, `KnowledgeStoreProtocol`.
-21. **[ ] Entity Identity Resilience (AD-7)**: Add `content_hash` to entity metadata for rename-resilient correlation.
+17. **[x] Schema Versioning (AD-3)**: Add `schema_version` to knowledge store JSON, index manifest, chunks metadata, and vector metadata. Include migration/validation shims on load.
+18. **[x] Data Model Fixes (AD-4)**: Change `metadata: dict[str, str]` to `dict[str, Any]` across `Entity`, `Relationship`, and `CodeChunk` with mixed-type roundtrip coverage.
+19. **[x] Configuration Hardening (AD-5)**: Replace `print()` with `logging`; raise on invalid config in server/MCP contexts via strict mode; validate known YAML keys and warn on unknown keys.
+20. **[x] Service Layer Decomposition (AD-6)**: Extracted `RetrievalOrchestrator` from `KnowCodeService`. Added `Protocol` interfaces for `EmbeddingProvider`, `VectorStore`, and `KnowledgeStoreProtocol`.
+21. **[x] Entity Identity Resilience (AD-7)**: Add `content_hash` to entity metadata for rename-resilient correlation.
 22. **[ ] Layer Contract Tests**: Parser → `ParseResult` contract tests; store save/load roundtrip with schema version; retrieval golden-query tests; CLI smoke tests (Click runner); API endpoint contract tests (conditional on `server` extra).
+
+> *This phase does not unlock new user-facing questions — it makes the existing answers more reliable, portable, and predictable. For example:*
+> - *"I upgraded KnowCode — will my existing analysis still work?"* (schema versioning)
+> - *"I renamed a file — does KnowCode still recognise the same functions?"* (entity identity resilience)
+> - *"Can I install KnowCode without all the heavy AI dependencies?"* (dependency modularisation)
 
 ### **Phase 5: Deep Analysis**
 23. **[ ] Static Behavioral Analysis (Layer 4)**: Data flow, state transitions, side-effect classification.
 24. **[ ] Intent Extraction (Layer 6)**: ADR/PR/commit intent linking beyond commit metadata.
 25. **[ ] Confidence Scoring (Layer 3)**: Weighted edges/entities by evidence source.
 
+> **Questions this will unlock:**
+> - *"Where does user input end up — does it ever reach the database unsanitised?"* (data flow)
+> - *"Does this function have side effects, or is it safe to call multiple times?"*
+> - *"What was the original reason this module was built this way?"* (intent from ADRs/PRs)
+> - *"How confident should I be in this answer — is it based on solid evidence or inference?"*
+> - *"If I change this variable, what downstream behaviour could break?"*
+
 ### **Phase 6: Enterprise (FUTURE)**
 26. **[ ] Security & RBAC**: Permissioned access and audit trails.
 27. **[ ] Scalability (AD-8)**: SQLite-backed storage for large monorepos; incremental graph loading; sharded indexes.
 28. **[ ] Team Sharing**: Remote knowledge store sync and collaboration.
+
+> **Questions this will unlock:**
+> - *"Can I share my codebase analysis with the rest of the team without everyone re-running it?"*
+> - *"Can I restrict who on the team can see the analysis of sensitive modules?"*
+> - *"Will this work on our monorepo with 500,000 files?"*
+> - *"Who on my team queried the knowledge store, and what did they ask?"*
 
 ### **Phase 7: Agentic Capabilities (COMPLETED v2.2)**
 29. **[x] Agent Architecture**: `Agent` class with configuration-driven model selection.
@@ -946,6 +996,14 @@ Commands invoked without the required extra should fail fast with: *"Install kno
 33. **[x] Smart Answer**: Local-first answering with configurable sufficiency threshold.
 34. **[x] VoyageAI Reranking**: Cross-encoder reranking with signal-based fallback.
 
+> **Questions you can now answer:**
+> - *"Explain how the login flow works, step by step."*
+> - *"I'm getting this error — what's likely causing it and where should I look?"*
+> - *"How would I add a new API endpoint to this project?"*
+> - *"Review this function — anything look wrong or risky?"*
+> - *"Where exactly in the code does the app validate email addresses?"*
+> - *"Answer this from what you already know locally — don't call an external AI unless you have to."*
+
 ### **Phase 8: IDE Integration (COMPLETED v2.2)**
 35. **[x] MCP Server (Layer 10b)**: Tool exposure via STDIO for IDE agents.
 36. **[x] Core 4 Tools**: `search_codebase`, `get_entity_context`, `trace_calls`, `retrieve_context_for_query`.
@@ -954,10 +1012,22 @@ Commands invoked without the required extra should fail fast with: *"Install kno
 39. **[x] Multi-hop Queries**: `trace_calls(depth=N)` and `get_impact()` analysis.
 40. **[x] Structured Responses**: JSON with `task_type` and `sufficiency_score`.
 
+> **Questions you can now answer (directly from your IDE):**
+> - *"What does this function do and what calls it?"* (without leaving your editor)
+> - *"If I change this class, what else in the codebase might break?"*
+> - *"Trace the full call chain from this API endpoint down to the database."*
+> - *"Give my IDE agent the context it needs so it doesn't have to send everything to an expensive cloud model."*
+> - *"How confident is the system that it has enough local context to answer my question?"*
+
 ### **Supporting Tooling & QA (COMPLETED)**
 - **[x] Tests**: Unit/integration/e2e coverage for parsing, indexing, retrieval, API, CLI, storage, and analysis.
 - **[x] CI/CD**: Ruff linting, pytest + coverage, MkDocs build, and automated changelog generation (last-tag range + optional human summary input).
 - **[x] Evaluation Utilities**: Retrieval-quality evaluation script (`scripts/evaluate.py`).
+
+> **Questions you can now answer:**
+> - *"Are the tests passing, and how much of the code do they cover?"*
+> - *"Is the code style consistent and free of lint warnings?"*
+> - *"How good is KnowCode's own search quality — is it returning relevant results?"*
 
 ---
 

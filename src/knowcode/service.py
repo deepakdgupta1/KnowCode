@@ -10,6 +10,7 @@ from knowcode.analysis.context_synthesizer import ContextSynthesizer
 from knowcode.config import AppConfig
 from knowcode.errors import MissingKnowledgeStoreError, MissingSemanticIndexError
 from knowcode.indexing.graph_builder import GraphBuilder
+from knowcode.retrieval.orchestrator import RetrievalOrchestrator
 from knowcode.storage.knowledge_store import KnowledgeStore
 
 if TYPE_CHECKING:
@@ -26,6 +27,7 @@ class KnowCodeService:
         store_path: str | Path = ".",
         config_path: Optional[str] = None,
         app_config: Optional[AppConfig] = None,
+        strict_config: bool = False,
     ) -> None:
         """Initialize service.
 
@@ -33,12 +35,15 @@ class KnowCodeService:
             store_path: Path to load the knowledge store from.
             config_path: Optional config file path (aimodels.yaml).
             app_config: Optional pre-loaded AppConfig.
+            strict_config: If True, invalid config files raise instead of
+                silently falling back to defaults.
         """
         self.store_path = Path(store_path)
-        self.app_config = app_config or AppConfig.load(config_path)
+        self.app_config = app_config or AppConfig.load(config_path, strict=strict_config)
         self._store: Optional[KnowledgeStore] = None
         self._search_engine: Optional["SearchEngine"] = None
         self._indexer: Optional["Indexer"] = None
+        self._retrieval_orchestrator = RetrievalOrchestrator(self)
 
     @property
     def store(self) -> KnowledgeStore:
@@ -190,197 +195,15 @@ class KnowCodeService:
         Returns:
             Dictionary with context_text, sufficiency_score, evidence, and metadata.
         """
-        from knowcode.llm.query_classifier import classify_query
-
-        errors: list[str] = []
-        self._assert_store_exists()
-        index_path = self._assert_index_exists()
-
-        detected_task_type, confidence = classify_query(query)
-        resolved_task_type = task_type or detected_task_type
-        task_confidence = 1.0 if task_type is not None else confidence
-
-        if limit_entities <= 0 or max_tokens <= 0:
-            return {
-                "query": query,
-                "task_type": resolved_task_type.value,
-                "task_confidence": task_confidence,
-                "retrieval_mode": "none",
-                "context_text": "",
-                "total_tokens": 0,
-                "max_tokens": max_tokens,
-                "truncated": False,
-                "sufficiency_score": 0.0,
-                "selected_entities": [],
-                "evidence": [],
-                "errors": ["Invalid token or entity limits."],
-            }
-
-        if per_entity_max_tokens is None:
-            per_entity_max_tokens = max(200, min(2000, max_tokens // limit_entities))
-
-        selected_entity_ids: list[str] = []
-        evidence: list[dict[str, Any]] = []
-        retrieval_mode = "lexical"
-
-        try:
-            engine = self.get_search_engine(index_path)
-            self._validate_index_compatibility(index_path)
-            scored = engine.search_scored(
-                query,
-                limit=max(10, limit_entities * 5),
-                expand_deps=expand_deps,
-            )
-            retrieval_mode = "semantic"
-
-            primary = [s for s in scored if s.source == "retrieved"]
-            seen_entities: set[str] = set()
-            for s in primary:
-                if s.chunk.entity_id in seen_entities:
-                    continue
-                seen_entities.add(s.chunk.entity_id)
-                selected_entity_ids.append(s.chunk.entity_id)
-                if len(selected_entity_ids) >= limit_entities:
-                    break
-
-            for rank, s in enumerate(scored, start=1):
-                evidence.append(
-                    {
-                        "rank": rank,
-                        "chunk_id": s.chunk.id,
-                        "entity_id": s.chunk.entity_id,
-                        "score": s.score,
-                        "source": s.source,
-                    }
-                )
-
-        except Exception as e:
-            errors.append(f"Semantic retrieval failed; falling back to lexical: {e}")
-            retrieval_mode = "lexical"
-
-        if retrieval_mode == "lexical":
-            candidates: list[str] = []
-            seen: set[str] = set()
-
-            def add_entity_ids(items: list[dict[str, Any]]) -> None:
-                for item in items:
-                    entity_id = item.get("id")
-                    if not entity_id or entity_id in seen:
-                        continue
-                    seen.add(entity_id)
-                    candidates.append(entity_id)
-
-            add_entity_ids(self.search(query))
-            if len(candidates) < limit_entities:
-                for kw in self._extract_query_keywords(query):
-                    add_entity_ids(self.search(kw))
-                    if len(candidates) >= limit_entities:
-                        break
-
-            selected_entity_ids = candidates[:limit_entities]
-            for rank, entity_id in enumerate(selected_entity_ids, start=1):
-                evidence.append({"rank": rank, "entity_id": entity_id, "source": "lexical"})
-
-        selected_entities: list[dict[str, Any]] = []
-        context_parts: list[str] = []
-        sufficiency_scores: list[float] = []
-        total_tokens = 0
-        truncated = False
-
-        for entity_id in selected_entity_ids:
-            try:
-                bundle = self.get_context(
-                    entity_id,
-                    max_tokens=per_entity_max_tokens,
-                    task_type=resolved_task_type,
-                    summarize=(verbosity == "minimal"),
-                )
-            except Exception as e:
-                errors.append(f"Failed to synthesize context for {entity_id}: {e}")
-                continue
-
-            context_parts.append(bundle.get("context_text", ""))
-            total_tokens += int(bundle.get("total_tokens", 0))
-            truncated = truncated or bool(bundle.get("truncated", False))
-
-            s = bundle.get("sufficiency_score")  # type: ignore
-            if isinstance(s, (int, float)):
-                sufficiency_scores.append(float(s))
-
-            selected_entities.append(
-                {
-                    "entity_id": bundle.get("entity_id", entity_id),
-                    "task_type": bundle.get("task_type", resolved_task_type.value),
-                    "total_tokens": bundle.get("total_tokens", 0),
-                    "truncated": bundle.get("truncated", False),
-                    "sufficiency_score": bundle.get("sufficiency_score", 0.0),
-                }
-            )
-
-        context_text = "\n\n---\n\n".join([p for p in context_parts if p])
-        sufficiency = (
-            round(sum(sufficiency_scores) / len(sufficiency_scores), 2)
-            if sufficiency_scores
-            else 0.0
+        return self._retrieval_orchestrator.retrieve_context_for_query(
+            query=query,
+            max_tokens=max_tokens,
+            task_type=task_type,
+            limit_entities=limit_entities,
+            per_entity_max_tokens=per_entity_max_tokens,
+            expand_deps=expand_deps,
+            verbosity=verbosity,
         )
-
-        full_response = {
-            "query": query,
-            "task_type": resolved_task_type.value,
-            "task_confidence": task_confidence,
-            "retrieval_mode": retrieval_mode,
-            "context_text": context_text,
-            "total_tokens": total_tokens,
-            "max_tokens": max_tokens,
-            "truncated": truncated,
-            "sufficiency_score": sufficiency,
-            "selected_entities": selected_entities,
-            "evidence": evidence,
-            "errors": errors,
-        }
-        
-        if verbosity == "diagnostic":
-            return full_response
-            
-        filtered_response: dict[str, Any] = {
-            "context_text": context_text,
-            "sufficiency_score": sufficiency,
-            "total_tokens": total_tokens,
-        }
-        
-        if verbosity == "minimal":
-            filtered_response["reduction_summary"] = {
-                "omitted_raw_source_count": len(selected_entity_ids),
-                "omitted_evidence_count": len(evidence),
-                "hint": "Call again with verbosity='standard' to get raw source code, or 'verbose' to see evidence chunks."
-            }
-            if errors:
-                filtered_response["errors"] = errors
-        elif verbosity == "standard":
-            filtered_response.update({
-                "query": query,
-                "task_type": resolved_task_type.value,
-                "task_confidence": task_confidence,
-                "retrieval_mode": retrieval_mode,
-                "max_tokens": max_tokens,
-                "truncated": truncated,
-            })
-            if errors:
-                filtered_response["errors"] = errors
-        elif verbosity == "verbose":
-            filtered_response.update({
-                "query": query,
-                "task_type": resolved_task_type.value,
-                "task_confidence": task_confidence,
-                "retrieval_mode": retrieval_mode,
-                "max_tokens": max_tokens,
-                "truncated": truncated,
-                "evidence": evidence,
-            })
-            if errors:
-                filtered_response["errors"] = errors
-                
-        return filtered_response
 
     def _build_index(self, directory: str | Path, index_path: str | Path) -> int:
         """Build a semantic index for a directory and persist it."""

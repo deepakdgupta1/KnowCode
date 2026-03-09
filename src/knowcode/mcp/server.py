@@ -177,6 +177,7 @@ class KnowCodeMCPServer:
             self._service = KnowCodeService(
                 store_path=self.store_path,
                 config_path=self.config_path,
+                strict_config=True,
             )
         return self._service
     
@@ -373,9 +374,9 @@ def create_server(store_path: str | Path, config_path: Optional[str] = None) -> 
         """List available KnowCode tools."""
         return [
             Tool(
-                name=t["name"],  # type: ignore
-                description=t["description"],  # type: ignore
-                inputSchema=t["inputSchema"],  # type: ignore
+                name=t["name"],
+                description=t["description"],
+                inputSchema=t["inputSchema"],
             )
             for t in TOOL_DEFINITIONS
         ]

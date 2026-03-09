@@ -103,11 +103,11 @@ flowchart TB
 ### **Phase 4.5: Architectural Hardening (PARTIAL)**
 15. **[x] Dependency Modularisation (AD-1)**: Optional extras (`server`, `search`, `llm`, `watch`, `all`) with lightweight core install.
 16. **[x] Side-Effect-Free Query Paths (AD-2)**: Retrieval and MCP read tools fail fast on missing prerequisites; no auto analyze/index side effects.
-17. **[ ] Schema Versioning (AD-3)**: Persisted artifact schema versioning + migration shim.
-18. **[ ] Data Model Fixes (AD-4)**: Metadata fields move from `dict[str, str]` to `dict[str, Any]`.
-19. **[ ] Configuration Hardening (AD-5)**: Logging-based config warnings + strict server validation.
-20. **[ ] Service Layer Decomposition (AD-6)**: Retrieval orchestrator + protocol interfaces.
-21. **[ ] Entity Identity Resilience (AD-7)**: Add `content_hash` for rename-resilient correlation.
+17. **[x] Schema Versioning (AD-3)**: Persisted artifact schema versioning + migration shim across store/index/vector metadata.
+18. **[x] Data Model Fixes (AD-4)**: Metadata fields move from `dict[str, str]` to `dict[str, Any]`.
+19. **[x] Configuration Hardening (AD-5)**: Logging-based config warnings + strict server/MCP validation + YAML key validation.
+20. **[x] Service Layer Decomposition (AD-6)**: Retrieval orchestrator + protocol interfaces.
+21. **[x] Entity Identity Resilience (AD-7)**: Add `content_hash` for rename-resilient correlation.
 
 ### **Phase 5: Deep Analysis (NEXT)**
 22. **[ ] Static Behavioral Analysis (Layer 4)**: Data flow, state transitions, side-effect classification.

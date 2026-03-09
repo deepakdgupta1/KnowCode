@@ -5,14 +5,14 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from knowcode.storage.chunk_repository import ChunkRepository
-    from knowcode.storage.knowledge_store import KnowledgeStore
+    from knowcode.protocols import KnowledgeStoreProtocol
     from knowcode.models import CodeChunk  # type: ignore
 
 
 def expand_dependencies(
     chunk: CodeChunk,
     chunk_repo: ChunkRepository,
-    knowledge_store: KnowledgeStore,
+    knowledge_store: KnowledgeStoreProtocol,
     max_depth: int = 1
 ) -> list[CodeChunk]:
     """Expand a chunk to include dependency context.

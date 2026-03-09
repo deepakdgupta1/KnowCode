@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
 
 class EntityKind(str, Enum):
@@ -87,8 +87,9 @@ class Entity:
     # Flexible metadata storage. Common keys:
     # - "language": "python", "javascript", etc.
     # - "complexity": Cyclomatic complexity score
-    # - "is_async": "true" if async function
-    metadata: dict[str, str] = field(default_factory=dict)
+    # - "is_async": True if async function
+    # - "content_hash": SHA-256 of canonical source snippet
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def __hash__(self) -> int:
         return hash(self.id)
@@ -106,7 +107,7 @@ class Relationship:
     source_id: str
     target_id: str
     kind: RelationshipKind
-    metadata: dict[str, str] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def __hash__(self) -> int:
         return hash((self.source_id, self.target_id, self.kind))
@@ -150,7 +151,7 @@ class CodeChunk:
     content: str  # Raw text content
     tokens: list[str] = field(default_factory=list)  # BM25 tokens
     embedding: Optional[list[float]] = None  # Dense vector
-    metadata: dict[str, str] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

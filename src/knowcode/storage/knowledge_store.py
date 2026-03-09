@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any
 import json
 from dataclasses import asdict
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from knowcode.indexing.graph_builder import GraphBuilder
 from knowcode.data_models import (
@@ -16,12 +15,17 @@ from knowcode.data_models import (
     Relationship,
     RelationshipKind,
 )
+from knowcode.utils.entity_identity import ensure_entity_content_hash
 
 
 class KnowledgeStore:
     """In-memory knowledge store with JSON persistence."""
 
     DEFAULT_FILENAME = "knowcode_knowledge.json"
+    SCHEMA_VERSION = 2
+    LEGACY_SCHEMA_VERSION = 1
+    LEGACY_VERSION = "1.0"
+    SUPPORTED_SCHEMA_VERSIONS = {SCHEMA_VERSION}
 
     def __init__(self) -> None:
         """Initialize empty knowledge store."""
@@ -52,7 +56,7 @@ class KnowledgeStore:
         """Save knowledge store to JSON file.
         
         The format includes:
-        - version: Schema version for compatibility.
+        - schema_version: Store schema version for compatibility.
         - metadata: Global scan stats and errors.
         - entities: Dictionary mapping Entity IDs to their full data.
         - relationships: List of all edges in the graph.
@@ -65,7 +69,9 @@ class KnowledgeStore:
             path = path / self.DEFAULT_FILENAME
 
         data = {
-            "version": "1.0",
+            "schema_version": self.SCHEMA_VERSION,
+            # Keep legacy field for backwards compatibility with older readers.
+            "version": self.LEGACY_VERSION,
             "metadata": self.metadata,
             "entities": {
                 eid: self._entity_to_dict(e)
@@ -96,21 +102,79 @@ class KnowledgeStore:
             path = path / cls.DEFAULT_FILENAME
 
         with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
+            loaded_data = json.load(f)
+        if not isinstance(loaded_data, dict):
+            raise ValueError(
+                f"Invalid knowledge store format in {path}. "
+                "Expected a JSON object."
+            )
+        raw_data: dict[str, Any] = loaded_data
+        data = cls._migrate_schema(raw_data)
 
         store = cls()
-        store.metadata = data.get("metadata", {})
+        metadata = data.get("metadata", {})
+        store.metadata = metadata if isinstance(metadata, dict) else {}
 
-        for eid, edata in data.get("entities", {}).items():
-            store.entities[eid] = cls._dict_to_entity(edata)
+        entities_data = data.get("entities", {})
+        if isinstance(entities_data, dict):
+            for eid, edata in entities_data.items():
+                if not isinstance(edata, dict):
+                    continue
+                store.entities[eid] = cls._dict_to_entity(edata)
 
-        for rdata in data.get("relationships", []):
-            store.relationships.append(cls._dict_to_relationship(rdata))
+        relationships_data = data.get("relationships", [])
+        if isinstance(relationships_data, list):
+            for rdata in relationships_data:
+                if not isinstance(rdata, dict):
+                    continue
+                store.relationships.append(cls._dict_to_relationship(rdata))
 
         return store
 
+    @classmethod
+    def _migrate_schema(cls, data: dict[str, Any]) -> dict[str, Any]:
+        """Validate and migrate persisted store payloads across schema versions."""
+        schema_version = data.get("schema_version")
+        if schema_version is None:
+            legacy_version = data.get("version")
+            if legacy_version in (None, cls.LEGACY_VERSION, 1, "1"):
+                migrated = dict(data)
+                migrated["schema_version"] = cls.SCHEMA_VERSION
+                return migrated
+            raise ValueError(
+                "Unsupported legacy knowledge store format. "
+                f"Found version={legacy_version!r}. Re-run `knowcode analyze`."
+            )
+
+        normalized = cls._normalize_schema_version(schema_version)
+        if normalized == cls.LEGACY_SCHEMA_VERSION:
+            migrated = dict(data)
+            migrated["schema_version"] = cls.SCHEMA_VERSION
+            return migrated
+        if normalized in cls.SUPPORTED_SCHEMA_VERSIONS:
+            migrated = dict(data)
+            migrated["schema_version"] = normalized
+            return migrated
+
+        raise ValueError(
+            "Unsupported knowledge store schema version "
+            f"{schema_version!r}. Supported versions: "
+            f"{sorted(cls.SUPPORTED_SCHEMA_VERSIONS)}. "
+            "Re-run `knowcode analyze` to rebuild persisted artifacts."
+        )
+
+    @staticmethod
+    def _normalize_schema_version(value: Any) -> int:
+        """Normalize schema versions represented as int/str."""
+        if isinstance(value, int) and not isinstance(value, bool):
+            return value
+        if isinstance(value, str) and value.isdigit():
+            return int(value)
+        raise ValueError(f"Invalid schema version value: {value!r}")
+
     def _entity_to_dict(self, entity: Entity) -> dict[str, Any]:
         """Convert entity to dictionary."""
+        ensure_entity_content_hash(entity)
         return {
             "id": entity.id,
             "kind": entity.kind.value,
@@ -126,7 +190,10 @@ class KnowledgeStore:
     @staticmethod
     def _dict_to_entity(data: dict[str, Any]) -> Entity:
         """Convert dictionary to entity."""
-        return Entity(
+        metadata = data.get("metadata", {})
+        if not isinstance(metadata, dict):
+            metadata = {}
+        entity = Entity(
             id=data["id"],
             kind=EntityKind(data["kind"]),
             name=data["name"],
@@ -135,8 +202,10 @@ class KnowledgeStore:
             docstring=data.get("docstring"),
             signature=data.get("signature"),
             source_code=data.get("source_code"),
-            metadata=data.get("metadata", {}),
+            metadata=metadata,
         )
+        ensure_entity_content_hash(entity)
+        return entity
 
     def _relationship_to_dict(self, rel: Relationship) -> dict[str, Any]:
         """Convert relationship to dictionary."""
@@ -150,11 +219,14 @@ class KnowledgeStore:
     @staticmethod
     def _dict_to_relationship(data: dict[str, Any]) -> Relationship:
         """Convert dictionary to relationship."""
+        metadata = data.get("metadata", {})
+        if not isinstance(metadata, dict):
+            metadata = {}
         return Relationship(
             source_id=data["source_id"],
             target_id=data["target_id"],
             kind=RelationshipKind(data["kind"]),
-            metadata=data.get("metadata", {}),
+            metadata=metadata,
         )
 
     # Query methods
@@ -409,4 +481,3 @@ class KnowledgeStore:
             "affected_files": list(affected_files),
             "risk_score": min(1.0, risk_score),
         }
-

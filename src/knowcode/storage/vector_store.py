@@ -2,7 +2,7 @@
 
 import json
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import numpy as np
 
@@ -15,6 +15,10 @@ except ImportError:
 
 class VectorStore:
     """FAISS-based vector store for code embeddings."""
+
+    SCHEMA_VERSION = 2
+    LEGACY_SCHEMA_VERSION = 1
+    SUPPORTED_SCHEMA_VERSIONS = {SCHEMA_VERSION}
 
     def __init__(self, dimension: int = 1536, index_path: Optional[Path] = None) -> None:
         """Initialize the vector index.
@@ -86,7 +90,14 @@ class VectorStore:
         
         # Save ID map
         with open(path.with_suffix(".json"), "w") as f:
-            json.dump({"id_map": {str(k): v for k, v in self.id_map.items()}, "dimension": self.dimension}, f)
+            json.dump(
+                {
+                    "schema_version": self.SCHEMA_VERSION,
+                    "id_map": {str(k): v for k, v in self.id_map.items()},
+                    "dimension": self.dimension,
+                },
+                f,
+            )
 
     def load(self, path: Path) -> None:
         """Load index and ID map from disk.
@@ -106,12 +117,59 @@ class VectorStore:
         if json_file.exists():
             with open(json_file) as f:
                 data = json.load(f)
-                # Task 3.3: Fix persistence bug (ensure we don't reset after loading)
-                self.id_map = {int(k): v for k, v in data["id_map"].items()}
-                self.dimension = data.get("dimension", self.dimension)
-                
+            if not isinstance(data, dict):
+                raise ValueError(
+                    f"Invalid vector metadata format in {json_file}. "
+                    "Expected a JSON object."
+                )
+            validated = self._validate_and_migrate_metadata(data)
+            id_map_data = validated.get("id_map", {})
+            if not isinstance(id_map_data, dict):
+                raise ValueError(
+                    f"Invalid vector metadata format in {json_file}. "
+                    "Expected 'id_map' to be an object."
+                )
+            # Task 3.3: Fix persistence bug (ensure we don't reset after loading)
+            self.id_map = {int(k): str(v) for k, v in id_map_data.items()}
+            self.dimension = int(validated.get("dimension", self.dimension))
+
     def clear(self) -> None:
         """Clear the index and reset the ID map."""
         if faiss:
             self.index = faiss.IndexFlatIP(self.dimension)
         self.id_map = {}
+
+    @classmethod
+    def _validate_and_migrate_metadata(cls, data: dict[str, Any]) -> dict[str, Any]:
+        """Validate vector metadata schema and migrate legacy payloads."""
+        schema_version = data.get("schema_version")
+        if schema_version is None:
+            migrated = dict(data)
+            migrated["schema_version"] = cls.SCHEMA_VERSION
+            return migrated
+
+        normalized = cls._normalize_schema_version(schema_version)
+        if normalized == cls.LEGACY_SCHEMA_VERSION:
+            migrated = dict(data)
+            migrated["schema_version"] = cls.SCHEMA_VERSION
+            return migrated
+        if normalized in cls.SUPPORTED_SCHEMA_VERSIONS:
+            migrated = dict(data)
+            migrated["schema_version"] = normalized
+            return migrated
+
+        raise ValueError(
+            "Unsupported vector index schema version "
+            f"{schema_version!r}. Supported versions: "
+            f"{sorted(cls.SUPPORTED_SCHEMA_VERSIONS)}. "
+            "Rebuild with `knowcode index`."
+        )
+
+    @staticmethod
+    def _normalize_schema_version(value: Any) -> int:
+        """Normalize schema version values represented as int/str."""
+        if isinstance(value, int) and not isinstance(value, bool):
+            return value
+        if isinstance(value, str) and value.isdigit():
+            return int(value)
+        raise ValueError(f"Invalid vector schema version value: {value!r}")

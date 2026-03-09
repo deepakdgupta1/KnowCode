@@ -2,8 +2,8 @@
 
 from knowcode.storage.chunk_repository import ChunkRepository
 from knowcode.data_models import CodeChunk
+from knowcode.protocols import VectorStoreProtocol
 from knowcode.utils.tokenizer import tokenize_code
-from knowcode.storage.vector_store import VectorStore
 
 
 class HybridIndex:
@@ -12,7 +12,7 @@ class HybridIndex:
     def __init__(
         self,
         chunk_repo: ChunkRepository,
-        vector_store: VectorStore,
+        vector_store: VectorStoreProtocol,
         alpha: float = 0.5  # Weight for dense vs sparse (0.5 = equal weight)
     ) -> None:
         """Initialize the hybrid index.

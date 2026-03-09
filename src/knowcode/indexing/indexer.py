@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Any
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from knowcode.storage.chunk_repository import InMemoryChunkRepository
 from knowcode.indexing.chunker import Chunker
-from knowcode.llm.embedding import EmbeddingProvider
 from knowcode.indexing.graph_builder import GraphBuilder
 from knowcode.indexing.scanner import Scanner
+from knowcode.protocols import EmbeddingProviderProtocol, VectorStoreProtocol
 from knowcode.storage.vector_store import VectorStore
 from knowcode.utils.logger import get_logger
 
@@ -20,11 +19,15 @@ logger = get_logger(__name__)
 class Indexer:
     """Orchestrates scan -> chunk -> embed -> index pipeline."""
 
+    SCHEMA_VERSION = 2
+    LEGACY_MANIFEST_VERSION = 1
+    SUPPORTED_SCHEMA_VERSIONS = {SCHEMA_VERSION}
+
     def __init__(
         self,
-        embedding_provider: EmbeddingProvider,
+        embedding_provider: EmbeddingProviderProtocol,
         chunk_repo: Optional[InMemoryChunkRepository] = None,
-        vector_store: Optional[VectorStore] = None,
+        vector_store: Optional[VectorStoreProtocol] = None,
     ) -> None:
         """Initialize an indexer with optional storage backends.
 
@@ -99,6 +102,7 @@ class Indexer:
         # Save chunk metadata (BM25 tokens and content)
         import json
         metadata = {
+            "schema_version": self.SCHEMA_VERSION,
             "chunks": [
                 {
                     "id": c.id,
@@ -118,6 +122,7 @@ class Indexer:
         import time
 
         self.manifest = {
+            "schema_version": self.SCHEMA_VERSION,
             "version": 1,
             "created_at": int(time.time()),
             "embedding": asdict(self.embedding_provider.config),
@@ -142,7 +147,18 @@ class Indexer:
         manifest_file = path / "index_manifest.json"
         if manifest_file.exists():
             with open(manifest_file, "r", encoding="utf-8") as f:
-                self.manifest = json.load(f)
+                loaded_manifest = json.load(f)
+            if not isinstance(loaded_manifest, dict):
+                raise ValueError(
+                    f"Invalid index manifest format in {manifest_file}. "
+                    "Expected a JSON object."
+                )
+            self.manifest = self._validate_and_migrate_manifest(loaded_manifest)
+        else:
+            self.manifest = {
+                "schema_version": self.SCHEMA_VERSION,
+                "version": self.LEGACY_MANIFEST_VERSION,
+            }
 
         # Load chunks
         from knowcode.models import CodeChunk  # type: ignore
@@ -151,9 +167,89 @@ class Indexer:
         if chunks_file.exists():
             with open(chunks_file) as f:
                 data = json.load(f)
-                for c_data in data["chunks"]:
-                    chunk = CodeChunk(**c_data)
-                    self.chunk_repo.add(chunk)
+            if isinstance(data, dict):
+                validated_chunks = self._validate_and_migrate_chunks_payload(data)
+                chunk_entries = validated_chunks.get("chunks", [])
+                if isinstance(chunk_entries, list):
+                    for c_data in chunk_entries:
+                        if not isinstance(c_data, dict):
+                            continue
+                        chunk = CodeChunk(**c_data)
+                        self.chunk_repo.add(chunk)
+
+    @classmethod
+    def _validate_and_migrate_manifest(cls, manifest: dict[str, Any]) -> dict[str, Any]:
+        """Validate manifest schema and migrate legacy payloads."""
+        return cls._validate_and_migrate_payload_schema(
+            manifest,
+            payload_name="index manifest",
+            legacy_version_field="version",
+            legacy_version=cls.LEGACY_MANIFEST_VERSION,
+        )
+
+    @classmethod
+    def _validate_and_migrate_chunks_payload(
+        cls, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Validate chunks payload schema and migrate legacy payloads."""
+        return cls._validate_and_migrate_payload_schema(
+            payload,
+            payload_name="chunks metadata",
+            legacy_version=cls.LEGACY_MANIFEST_VERSION,
+        )
+
+    @classmethod
+    def _validate_and_migrate_payload_schema(
+        cls,
+        payload: dict[str, Any],
+        *,
+        payload_name: str,
+        legacy_version_field: Optional[str] = None,
+        legacy_version: Optional[int] = None,
+    ) -> dict[str, Any]:
+        """Validate schema metadata for an index payload and migrate when safe."""
+        schema_version = payload.get("schema_version")
+        if schema_version is None:
+            if legacy_version_field is not None:
+                legacy_value = payload.get(legacy_version_field)
+                allowed_legacy_values: set[Any] = {None}
+                if legacy_version is not None:
+                    allowed_legacy_values.add(legacy_version)
+                    allowed_legacy_values.add(str(legacy_version))
+                if legacy_value not in allowed_legacy_values:
+                    raise ValueError(
+                        f"Unsupported legacy {payload_name} version "
+                        f"{legacy_value!r}. Rebuild with `knowcode index`."
+                    )
+            migrated = dict(payload)
+            migrated["schema_version"] = cls.SCHEMA_VERSION
+            return migrated
+
+        normalized = cls._normalize_schema_version(schema_version)
+        if legacy_version is not None and normalized == legacy_version:
+            migrated = dict(payload)
+            migrated["schema_version"] = cls.SCHEMA_VERSION
+            return migrated
+        if normalized in cls.SUPPORTED_SCHEMA_VERSIONS:
+            migrated = dict(payload)
+            migrated["schema_version"] = normalized
+            return migrated
+
+        raise ValueError(
+            f"Unsupported {payload_name} schema version "
+            f"{schema_version!r}. Supported versions: "
+            f"{sorted(cls.SUPPORTED_SCHEMA_VERSIONS)}. "
+            "Rebuild with `knowcode index`."
+        )
+
+    @staticmethod
+    def _normalize_schema_version(value: Any) -> int:
+        """Normalize schema version values represented as int/str."""
+        if isinstance(value, int) and not isinstance(value, bool):
+            return value
+        if isinstance(value, str) and value.isdigit():
+            return int(value)
+        raise ValueError(f"Invalid index schema version value: {value!r}")
                     
     def index_file(self, file_path: str | Path) -> int:
         """Index a single file for incremental updates.
@@ -165,7 +261,6 @@ class Indexer:
             Number of chunks created for the file.
         """
         file_path = Path(file_path)
-        # Simplified for Task 3.6
         builder = GraphBuilder()
         from knowcode.indexing.scanner import FileInfo
         file_info = FileInfo(file_path, str(file_path), file_path.suffix, file_path.stat().st_size)

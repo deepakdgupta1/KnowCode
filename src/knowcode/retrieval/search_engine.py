@@ -7,9 +7,8 @@ from typing import Optional
 
 from knowcode.storage.chunk_repository import ChunkRepository
 from knowcode.retrieval.completeness import expand_dependencies
-from knowcode.llm.embedding import EmbeddingProvider
+from knowcode.protocols import EmbeddingProviderProtocol, KnowledgeStoreProtocol
 from knowcode.retrieval.hybrid_index import HybridIndex
-from knowcode.storage.knowledge_store import KnowledgeStore
 from knowcode.data_models import CodeChunk
 from knowcode.retrieval.reranker import Reranker
 from knowcode.config import AppConfig
@@ -30,9 +29,9 @@ class SearchEngine:
     def __init__(
         self,
         chunk_repo: ChunkRepository,
-        embedding_provider: EmbeddingProvider,
+        embedding_provider: EmbeddingProviderProtocol,
         hybrid_index: HybridIndex,
-        knowledge_store: KnowledgeStore,
+        knowledge_store: KnowledgeStoreProtocol,
         config: Optional[AppConfig] = None,
         use_voyageai_reranking: bool = True,
     ) -> None:
@@ -124,23 +123,3 @@ class SearchEngine:
         """
         scored = self.search_scored(query, limit=limit, expand_deps=expand_deps)
         return [s.chunk for s in scored]
-
-    def _expand_dependencies(self, chunks: list[CodeChunk]) -> list[CodeChunk]:
-        """Add dependency context to the results using the knowledge graph."""
-        expanded = []
-        seen_ids = set()
-        
-        for chunk in chunks:
-            # Expand using graph
-            deps = expand_dependencies(
-                chunk,
-                self.chunk_repo,
-                self.knowledge_store,
-                max_depth=1
-            )
-            for d in deps:
-                if d.id not in seen_ids:
-                    expanded.append(d)
-                    seen_ids.add(d.id)
-                    
-        return expanded
