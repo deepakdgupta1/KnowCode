@@ -1,0 +1,188 @@
+<mxfile host="app.diagrams.net" modified="2026-04-19T00:00:00.000Z" agent="Claude" version="21.0.0">
+  <diagram name="Seq – Indexing Workflow" id="seq-indexing">
+    <mxGraphModel dx="1654" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1900" pageHeight="1400" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- TITLE -->
+        <mxCell id="title" value="Sequence Diagram — Indexing / Analysis Workflow&#xa;Triggered by: knowcode analyze &lt;dir&gt;  (also triggers index build automatically)" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=16;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="200" y="10" width="1400" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- ══ PARTICIPANT HEADERS ══ -->
+        <mxCell id="p-user"   value="&lt;b&gt;User / CI&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1"><mxGeometry x="30"   y="80" width="110" height="50" as="geometry" /></mxCell>
+        <mxCell id="p-cli"    value="&lt;b&gt;CLI&lt;/b&gt;&#xa;cli.py" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1"><mxGeometry x="180"  y="80" width="110" height="50" as="geometry" /></mxCell>
+        <mxCell id="p-svc"    value="&lt;b&gt;KnowCode&lt;/b&gt;&#xa;&lt;b&gt;Service&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1"><mxGeometry x="340"  y="80" width="110" height="50" as="geometry" /></mxCell>
+        <mxCell id="p-gb"     value="&lt;b&gt;Graph&lt;/b&gt;&#xa;&lt;b&gt;Builder&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1"><mxGeometry x="500"  y="80" width="110" height="50" as="geometry" /></mxCell>
+        <mxCell id="p-scan"   value="&lt;b&gt;Scanner&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1"><mxGeometry x="660"  y="80" width="110" height="50" as="geometry" /></mxCell>
+        <mxCell id="p-parse"  value="&lt;b&gt;Parser&lt;/b&gt;&#xa;(×9 langs)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1"><mxGeometry x="820"  y="80" width="110" height="50" as="geometry" /></mxCell>
+        <mxCell id="p-ks"     value="&lt;b&gt;Knowledge&lt;/b&gt;&#xa;&lt;b&gt;Store&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" vertex="1" parent="1"><mxGeometry x="980"  y="80" width="110" height="50" as="geometry" /></mxCell>
+        <mxCell id="p-idx"    value="&lt;b&gt;Indexer&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1"><mxGeometry x="1140" y="80" width="110" height="50" as="geometry" /></mxCell>
+        <mxCell id="p-chunk"  value="&lt;b&gt;Chunker&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1"><mxGeometry x="1300" y="80" width="110" height="50" as="geometry" /></mxCell>
+        <mxCell id="p-emb"    value="&lt;b&gt;Embedding&lt;/b&gt;&#xa;&lt;b&gt;Provider&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;" vertex="1" parent="1"><mxGeometry x="1460" y="80" width="120" height="50" as="geometry" /></mxCell>
+        <mxCell id="p-vs"     value="&lt;b&gt;VectorStore&lt;/b&gt;&#xa;&lt;b&gt;+ ChunkRepo&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" vertex="1" parent="1"><mxGeometry x="1630" y="80" width="120" height="50" as="geometry" /></mxCell>
+
+        <!-- ══ LIFELINES ══ -->
+        <mxCell id="ll-user"  value="" style="dashed=1;endArrow=none;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="85"   y="130"/><mxPoint x="85"   y="1350"/></Array></mxGeometry></mxCell>
+        <mxCell id="ll-cli"   value="" style="dashed=1;endArrow=none;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="235"  y="130"/><mxPoint x="235"  y="1350"/></Array></mxGeometry></mxCell>
+        <mxCell id="ll-svc"   value="" style="dashed=1;endArrow=none;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="395"  y="130"/><mxPoint x="395"  y="1350"/></Array></mxGeometry></mxCell>
+        <mxCell id="ll-gb"    value="" style="dashed=1;endArrow=none;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="555"  y="130"/><mxPoint x="555"  y="1350"/></Array></mxGeometry></mxCell>
+        <mxCell id="ll-scan"  value="" style="dashed=1;endArrow=none;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="715"  y="130"/><mxPoint x="715"  y="1350"/></Array></mxGeometry></mxCell>
+        <mxCell id="ll-parse" value="" style="dashed=1;endArrow=none;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="875"  y="130"/><mxPoint x="875"  y="1350"/></Array></mxGeometry></mxCell>
+        <mxCell id="ll-ks"    value="" style="dashed=1;endArrow=none;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1035" y="130"/><mxPoint x="1035" y="1350"/></Array></mxGeometry></mxCell>
+        <mxCell id="ll-idx"   value="" style="dashed=1;endArrow=none;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1195" y="130"/><mxPoint x="1195" y="1350"/></Array></mxGeometry></mxCell>
+        <mxCell id="ll-chunk" value="" style="dashed=1;endArrow=none;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1355" y="130"/><mxPoint x="1355" y="1350"/></Array></mxGeometry></mxCell>
+        <mxCell id="ll-emb"   value="" style="dashed=1;endArrow=none;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1520" y="130"/><mxPoint x="1520" y="1350"/></Array></mxGeometry></mxCell>
+        <mxCell id="ll-vs"    value="" style="dashed=1;endArrow=none;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1690" y="130"/><mxPoint x="1690" y="1350"/></Array></mxGeometry></mxCell>
+
+        <!-- ══ PHASE 1: GRAPH BUILDING ══ -->
+        <mxCell id="ph1" value="PHASE 1 — Knowledge Graph Construction" style="text;html=1;fontSize=11;fontStyle=1;align=left;" vertex="1" parent="1"><mxGeometry x="30" y="155" width="400" height="18" as="geometry" /></mxCell>
+
+        <!-- 1 -->
+        <mxCell id="m1" value="1 · knowcode analyze ./src [--temporal] [--coverage=report.xml]" style="html=1;endArrow=block;endFill=1;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="85" y="180"/><mxPoint x="235" y="180"/></Array></mxGeometry>
+        </mxCell>
+        <!-- 2 -->
+        <mxCell id="m2" value="2 · service.analyze(directory, output, ignore, temporal, coverage)" style="html=1;endArrow=block;endFill=1;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="235" y="210"/><mxPoint x="395" y="210"/></Array></mxGeometry>
+        </mxCell>
+        <!-- 3 -->
+        <mxCell id="m3" value="3 · GraphBuilder()  →  builder.build_from_directory(root_dir, ignore, temporal, coverage)" style="html=1;endArrow=block;endFill=1;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="395" y="240"/><mxPoint x="555" y="240"/></Array></mxGeometry>
+        </mxCell>
+        <!-- 4 -->
+        <mxCell id="m4" value="4 · Scanner.scan(root_dir)  [apply gitignore / pathspec rules]" style="html=1;endArrow=block;endFill=1;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="555" y="270"/><mxPoint x="715" y="270"/></Array></mxGeometry>
+        </mxCell>
+        <!-- 4 ret -->
+        <mxCell id="m4r" value="list[FileInfo]  {path, size, modified, language}" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="715" y="295"/><mxPoint x="555" y="295"/></Array></mxGeometry>
+        </mxCell>
+
+        <!-- loop label -->
+        <mxCell id="loop1" value="[ loop ]  for each FileInfo" style="text;html=1;fontSize=10;fontStyle=2;align=left;" vertex="1" parent="1"><mxGeometry x="30" y="315" width="250" height="16" as="geometry" /></mxCell>
+
+        <!-- 5 -->
+        <mxCell id="m5" value="5 · _parse_file(file_info)  →  select parser by language" style="html=1;endArrow=block;endFill=1;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="555" y="335"/><mxPoint x="875" y="335"/></Array></mxGeometry>
+        </mxCell>
+        <!-- 6 -->
+        <mxCell id="m6" value="6 · parse_file(file_path, source)  →  AST traversal" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="875" y="360"/><mxPoint x="875" y="360"/></Array></mxGeometry>
+        </mxCell>
+        <!-- 6 ret -->
+        <mxCell id="m6r" value="ParseResult  {entities[], relationships[], errors[]}" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="875" y="385"/><mxPoint x="555" y="385"/></Array></mxGeometry>
+        </mxCell>
+        <!-- 7 -->
+        <mxCell id="m7" value="7 · _merge_result(parse_result)  →  accumulate entities + relationships" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="555" y="410"/><mxPoint x="555" y="410"/></Array></mxGeometry>
+        </mxCell>
+        <!-- [ end loop ] -->
+        <mxCell id="loop1e" value="[ end loop ]" style="text;html=1;fontSize=10;fontStyle=2;align=left;" vertex="1" parent="1"><mxGeometry x="30" y="428" width="150" height="16" as="geometry" /></mxCell>
+
+        <!-- 8 -->
+        <mxCell id="m8" value="8 · _resolve_references()  →  cross-file CALLS / IMPORTS / INHERITS resolution" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="555" y="450"/><mxPoint x="555" y="450"/></Array></mxGeometry>
+        </mxCell>
+        <!-- 9 -->
+        <mxCell id="m9" value="9 · [opt] TemporalAnalyzer.analyze_history(limit=100)  →  COMMIT/AUTHOR entities + MODIFIED/CHANGED_BY rels" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="555" y="475"/><mxPoint x="555" y="475"/></Array></mxGeometry>
+        </mxCell>
+        <!-- 10 -->
+        <mxCell id="m10" value="10 · [opt] CoverageProcessor.process_cobertura(xml_path)  →  COVERAGE_REPORT entity + COVERS rels" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="555" y="500"/><mxPoint x="555" y="500"/></Array></mxGeometry>
+        </mxCell>
+
+        <!-- 11 -->
+        <mxCell id="m11" value="11 · KnowledgeStore.from_graph_builder(builder)" style="html=1;endArrow=block;endFill=1;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="395" y="525"/><mxPoint x="1035" y="525"/></Array></mxGeometry>
+        </mxCell>
+        <!-- 12 -->
+        <mxCell id="m12" value="12 · store.save(output_path)  →  writes knowcode_knowledge.json  (schema v2)" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1035" y="550"/><mxPoint x="1035" y="550"/></Array></mxGeometry>
+        </mxCell>
+        <!-- 12 ret -->
+        <mxCell id="m12r" value="KnowledgeStore  (stored in service._store)" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1035" y="570"/><mxPoint x="395" y="570"/></Array></mxGeometry>
+        </mxCell>
+
+        <!-- ══ PHASE 2: SEMANTIC INDEX ══ -->
+        <mxCell id="ph2" value="PHASE 2 — Semantic Index Build  (called automatically by analyze(), or manually via knowcode index)" style="text;html=1;fontSize=11;fontStyle=1;align=left;" vertex="1" parent="1"><mxGeometry x="30" y="595" width="800" height="18" as="geometry" /></mxCell>
+
+        <!-- 13 -->
+        <mxCell id="m13" value="13 · service._build_index(directory, index_path)" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="395" y="615"/><mxPoint x="395" y="615"/></Array></mxGeometry>
+        </mxCell>
+        <!-- 14 -->
+        <mxCell id="m14" value="14 · create_embedding_provider(app_config)  →  VoyageAIEmbeddingProvider (voyage-code-3, dim=1024)" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="395" y="640"/><mxPoint x="1520" y="640"/></Array></mxGeometry>
+        </mxCell>
+        <!-- 15 -->
+        <mxCell id="m15" value="15 · Indexer(embedding_provider)  →  indexer.index_directory(directory)" style="html=1;endArrow=block;endFill=1;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="395" y="670"/><mxPoint x="1195" y="670"/></Array></mxGeometry>
+        </mxCell>
+        <!-- 16 - Indexer does its own scan -->
+        <mxCell id="m16" value="16 · [Indexer internally] Scanner.scan(directory) + GraphBuilder parse each file" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1195" y="700"/><mxPoint x="1195" y="700"/></Array></mxGeometry>
+        </mxCell>
+        <!-- 17 -->
+        <mxCell id="m17" value="17 · Chunker.process_parse_result(result)  →  module headers, import blocks, entity chunks + BM25 tokens" style="html=1;endArrow=block;endFill=1;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1195" y="730"/><mxPoint x="1355" y="730"/></Array></mxGeometry>
+        </mxCell>
+        <!-- 17 ret -->
+        <mxCell id="m17r" value="CodeChunk[]  {id, entity_id, content, tokens[], metadata}" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1355" y="755"/><mxPoint x="1195" y="755"/></Array></mxGeometry>
+        </mxCell>
+
+        <!-- loop2 -->
+        <mxCell id="loop2" value="[ loop ]  embed in batches (batch_size=100)" style="text;html=1;fontSize=10;fontStyle=2;align=left;" vertex="1" parent="1"><mxGeometry x="30" y="775" width="350" height="16" as="geometry" /></mxCell>
+
+        <!-- 18 -->
+        <mxCell id="m18" value="18 · EmbeddingProvider.embed(texts[])  →  VoyageAI/OpenAI Embeddings API" style="html=1;endArrow=block;endFill=1;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1195" y="795"/><mxPoint x="1520" y="795"/></Array></mxGeometry>
+        </mxCell>
+        <!-- 18 ret -->
+        <mxCell id="m18r" value="list[list[float]]  (dim=1024, L2-normalized)" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1520" y="820"/><mxPoint x="1195" y="820"/></Array></mxGeometry>
+        </mxCell>
+        <!-- end loop2 -->
+        <mxCell id="loop2e" value="[ end loop ]" style="text;html=1;fontSize=10;fontStyle=2;align=left;" vertex="1" parent="1"><mxGeometry x="30" y="838" width="150" height="16" as="geometry" /></mxCell>
+
+        <!-- 19 -->
+        <mxCell id="m19" value="19 · ChunkRepository.add(chunks)  +  VectorStore.add(chunks, embeddings)" style="html=1;endArrow=block;endFill=1;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1195" y="858"/><mxPoint x="1690" y="858"/></Array></mxGeometry>
+        </mxCell>
+        <!-- 20 -->
+        <mxCell id="m20" value="20 · VectorStore builds FAISS IndexFlatIP  (cosine similarity)" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1690" y="883"/><mxPoint x="1690" y="883"/></Array></mxGeometry>
+        </mxCell>
+        <!-- 21 -->
+        <mxCell id="m21" value="21 · indexer.save(index_path)  →  chunks.json + vectors.index + vectors.json" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1195" y="908"/><mxPoint x="1195" y="908"/></Array></mxGeometry>
+        </mxCell>
+        <!-- 21 ret -->
+        <mxCell id="m21r" value="indexed_chunks count" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1195" y="933"/><mxPoint x="395" y="933"/></Array></mxGeometry>
+        </mxCell>
+
+        <!-- ══ PHASE 3: RESPONSE ══ -->
+        <!-- 22 -->
+        <mxCell id="m22" value="22 · return stats  {entities, relationships, indexed_chunks, index_path, [index_error]}" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="395" y="965"/><mxPoint x="235" y="965"/></Array></mxGeometry>
+        </mxCell>
+        <!-- 23 -->
+        <mxCell id="m23" value="23 · print summary  (entity counts, relationship types, index size)" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="235" y="990"/><mxPoint x="85" y="990"/></Array></mxGeometry>
+        </mxCell>
+
+        <!-- ══ OPTIONAL: FILE WATCH ══ -->
+        <mxCell id="note-watch" value="[ opt ]  --watch mode  (knowcode server --watch):&#xa;FileMonitor.start() + BackgroundIndexer.start()&#xa;On file change → index_file(path) [incremental, re-runs steps 16→21 for changed file only]&#xa;POST /api/v1/reload → service.reload() → re-reads KnowledgeStore from disk" style="text;html=1;fontSize=10;fontStyle=2;align=left;strokeColor=#d79b00;fillColor=#ffe6cc;rounded=1;" vertex="1" parent="1">
+          <mxGeometry x="30" y="1030" width="900" height="60" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

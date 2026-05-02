@@ -1,0 +1,132 @@
+<mxfile host="app.diagrams.net" modified="2026-04-19T00:00:00.000Z" agent="Claude" version="21.0.0">
+  <diagram name="Seq – Query Retrieval" id="seq-query">
+    <mxGraphModel dx="1654" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1900" pageHeight="1500" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="title" value="Sequence Diagram — Query / Retrieval Workflow&#xa;Triggered by: CLI context · CLI ask · REST POST /api/v1/context/query · MCP retrieve_context_for_query" style="text;html=1;strokeColor=none;fillColor=none;align=center;fontSize=16;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="200" y="10" width="1500" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- PARTICIPANTS -->
+        <mxCell id="p-user"  value="&lt;b&gt;User / Agent&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1"><mxGeometry x="20"   y="80" width="110" height="50" as="geometry" /></mxCell>
+        <mxCell id="p-entry" value="&lt;b&gt;CLI / REST&lt;/b&gt;&#xa;&lt;b&gt;/ MCP&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1"><mxGeometry x="160"  y="80" width="110" height="50" as="geometry" /></mxCell>
+        <mxCell id="p-svc"  value="&lt;b&gt;KnowCode&lt;/b&gt;&#xa;&lt;b&gt;Service&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1"><mxGeometry x="310"  y="80" width="110" height="50" as="geometry" /></mxCell>
+        <mxCell id="p-orch" value="&lt;b&gt;Retrieval&lt;/b&gt;&#xa;&lt;b&gt;Orchestrator&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1"><mxGeometry x="460"  y="80" width="120" height="50" as="geometry" /></mxCell>
+        <mxCell id="p-cls"  value="&lt;b&gt;Query&lt;/b&gt;&#xa;&lt;b&gt;Classifier&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1"><mxGeometry x="620"  y="80" width="110" height="50" as="geometry" /></mxCell>
+        <mxCell id="p-se"   value="&lt;b&gt;Search&lt;/b&gt;&#xa;&lt;b&gt;Engine&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1"><mxGeometry x="770"  y="80" width="110" height="50" as="geometry" /></mxCell>
+        <mxCell id="p-hidx" value="&lt;b&gt;Hybrid&lt;/b&gt;&#xa;&lt;b&gt;Index&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1"><mxGeometry x="920"  y="80" width="110" height="50" as="geometry" /></mxCell>
+        <mxCell id="p-rr"   value="&lt;b&gt;Reranker&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1"><mxGeometry x="1070" y="80" width="110" height="50" as="geometry" /></mxCell>
+        <mxCell id="p-compl" value="&lt;b&gt;expand_&lt;/b&gt;&#xa;&lt;b&gt;dependencies&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1"><mxGeometry x="1220" y="80" width="120" height="50" as="geometry" /></mxCell>
+        <mxCell id="p-ctx"  value="&lt;b&gt;Context&lt;/b&gt;&#xa;&lt;b&gt;Synthesizer&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1"><mxGeometry x="1390" y="80" width="120" height="50" as="geometry" /></mxCell>
+        <mxCell id="p-llm"  value="&lt;b&gt;Agent / LLM&lt;/b&gt;&#xa;&lt;b&gt;(ask cmd)&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;" vertex="1" parent="1"><mxGeometry x="1560" y="80" width="120" height="50" as="geometry" /></mxCell>
+
+        <!-- LIFELINES -->
+        <mxCell id="ll-user"  value="" style="dashed=1;endArrow=none;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="75"   y="130"/><mxPoint x="75"   y="1450"/></Array></mxGeometry></mxCell>
+        <mxCell id="ll-entry" value="" style="dashed=1;endArrow=none;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="215"  y="130"/><mxPoint x="215"  y="1450"/></Array></mxGeometry></mxCell>
+        <mxCell id="ll-svc"   value="" style="dashed=1;endArrow=none;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="365"  y="130"/><mxPoint x="365"  y="1450"/></Array></mxGeometry></mxCell>
+        <mxCell id="ll-orch"  value="" style="dashed=1;endArrow=none;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="520"  y="130"/><mxPoint x="520"  y="1450"/></Array></mxGeometry></mxCell>
+        <mxCell id="ll-cls"   value="" style="dashed=1;endArrow=none;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="675"  y="130"/><mxPoint x="675"  y="1450"/></Array></mxGeometry></mxCell>
+        <mxCell id="ll-se"    value="" style="dashed=1;endArrow=none;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="825"  y="130"/><mxPoint x="825"  y="1450"/></Array></mxGeometry></mxCell>
+        <mxCell id="ll-hidx"  value="" style="dashed=1;endArrow=none;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="975"  y="130"/><mxPoint x="975"  y="1450"/></Array></mxGeometry></mxCell>
+        <mxCell id="ll-rr"    value="" style="dashed=1;endArrow=none;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1125" y="130"/><mxPoint x="1125" y="1450"/></Array></mxGeometry></mxCell>
+        <mxCell id="ll-compl" value="" style="dashed=1;endArrow=none;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1280" y="130"/><mxPoint x="1280" y="1450"/></Array></mxGeometry></mxCell>
+        <mxCell id="ll-ctx"   value="" style="dashed=1;endArrow=none;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1450" y="130"/><mxPoint x="1450" y="1450"/></Array></mxGeometry></mxCell>
+        <mxCell id="ll-llm"   value="" style="dashed=1;endArrow=none;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1620" y="130"/><mxPoint x="1620" y="1450"/></Array></mxGeometry></mxCell>
+
+        <!-- ══ ENTRY ══ -->
+        <mxCell id="m1" value="1 · query / question / entity_id" style="html=1;endArrow=block;endFill=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="75" y="175"/><mxPoint x="215" y="175"/></Array></mxGeometry></mxCell>
+        <mxCell id="m2" value="2 · service.retrieve_context_for_query(query, max_tokens=6000, task_type, limit_entities=3, expand_deps, verbosity)" style="html=1;endArrow=block;endFill=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="215" y="205"/><mxPoint x="365" y="205"/></Array></mxGeometry></mxCell>
+        <mxCell id="m3" value="3 · orchestrator.retrieve_context_for_query(…)" style="html=1;endArrow=block;endFill=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="365" y="235"/><mxPoint x="520" y="235"/></Array></mxGeometry></mxCell>
+
+        <!-- VALIDATE -->
+        <mxCell id="m4" value="4 · _assert_store_exists()  +  _assert_index_exists()  [raise 412 on missing]" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="520" y="260"/><mxPoint x="520" y="260"/></Array></mxGeometry></mxCell>
+
+        <!-- CLASSIFY -->
+        <mxCell id="m5" value="5 · classify_query(query)  [regex pattern matching, 5 task types]" style="html=1;endArrow=block;endFill=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="520" y="285"/><mxPoint x="675" y="285"/></Array></mxGeometry></mxCell>
+        <mxCell id="m5r" value="(TaskType, confidence)  →  resolved_task_type = override OR detected" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="675" y="310"/><mxPoint x="520" y="310"/></Array></mxGeometry></mxCell>
+
+        <!-- GET SEARCH ENGINE -->
+        <mxCell id="m6" value="6 · service.get_search_engine()  [lazy-init: HybridIndex(chunk_repo, vector_store)]" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="520" y="335"/><mxPoint x="520" y="335"/></Array></mxGeometry></mxCell>
+
+        <!-- VALIDATE INDEX -->
+        <mxCell id="m7" value="7 · _validate_index_compatibility(index_path)  [dimension + model mismatch check]" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="520" y="360"/><mxPoint x="520" y="360"/></Array></mxGeometry></mxCell>
+
+        <!-- SEARCH_SCORED -->
+        <mxCell id="m8" value="8 · engine.search_scored(query, limit=max(10, limit_entities×5), expand_deps)" style="html=1;endArrow=block;endFill=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="520" y="385"/><mxPoint x="825" y="385"/></Array></mxGeometry></mxCell>
+
+        <!-- EMBED -->
+        <mxCell id="m9" value="9 · embedding_provider.embed_single(query)  →  query_vector (dim=1024)" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="825" y="410"/><mxPoint x="825" y="410"/></Array></mxGeometry></mxCell>
+
+        <!-- HYBRID SEARCH -->
+        <mxCell id="m10" value="10 · hybrid_index.search(query, query_vec, limit=limit×2)" style="html=1;endArrow=block;endFill=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="825" y="435"/><mxPoint x="975" y="435"/></Array></mxGeometry></mxCell>
+        <mxCell id="m10a" value="10a · BM25 search on ChunkRepository tokens" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="975" y="460"/><mxPoint x="975" y="460"/></Array></mxGeometry></mxCell>
+        <mxCell id="m10b" value="10b · FAISS similarity search on VectorStore  (IndexFlatIP, cosine)" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="975" y="485"/><mxPoint x="975" y="485"/></Array></mxGeometry></mxCell>
+        <mxCell id="m10c" value="10c · merge + normalize scores  →  list[(CodeChunk, score)]" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="975" y="510"/><mxPoint x="975" y="510"/></Array></mxGeometry></mxCell>
+        <mxCell id="m10r" value="list[(CodeChunk, score)]  top limit×2 candidates" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="975" y="535"/><mxPoint x="825" y="535"/></Array></mxGeometry></mxCell>
+
+        <!-- RERANK -->
+        <mxCell id="m11" value="11 · reranker.rerank(query, results, top_k=limit)" style="html=1;endArrow=block;endFill=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="825" y="560"/><mxPoint x="1125" y="560"/></Array></mxGeometry></mxCell>
+        <mxCell id="m11a" value="Primary: VoyageAI rerank-2.5 cross-encoder" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1125" y="585"/><mxPoint x="1125" y="585"/></Array></mxGeometry></mxCell>
+        <mxCell id="m11b" value="Fallback (if VoyageAI unavailable): signal-based  {boost_documented×1.2, boost_recent×1.1, query-in-content×1.5, exact kind×2.0}" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1125" y="610"/><mxPoint x="1125" y="610"/></Array></mxGeometry></mxCell>
+        <mxCell id="m11r" value="list[(CodeChunk, score)]  top_k reranked" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1125" y="635"/><mxPoint x="825" y="635"/></Array></mxGeometry></mxCell>
+
+        <!-- EXPAND DEPS -->
+        <mxCell id="m12" value="12 · [if expand_deps] expand_dependencies(chunk, chunk_repo, store, max_depth=1)" style="html=1;endArrow=block;endFill=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="825" y="660"/><mxPoint x="1280" y="660"/></Array></mxGeometry></mxCell>
+        <mxCell id="m12a" value="chunk_repo.get_by_entity(entity_id)  +  store.get_callees(entity_id)" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1280" y="685"/><mxPoint x="1280" y="685"/></Array></mxGeometry></mxCell>
+        <mxCell id="m12r" value="list[ScoredChunk]  {chunk, score, source=retrieved|dependency}" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1280" y="710"/><mxPoint x="825" y="710"/></Array></mxGeometry></mxCell>
+        <mxCell id="m12rr" value="List[ScoredChunk] returned to orchestrator" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="825" y="735"/><mxPoint x="520" y="735"/></Array></mxGeometry></mxCell>
+
+        <!-- NOTE: semantic fallback -->
+        <mxCell id="note-fallback" value="[ on exception ]  semantic retrieval failed  →  fall back to lexical: store.search(query) + keyword expansion" style="text;html=1;fontSize=10;fontStyle=2;align=left;fillColor=#fff2cc;strokeColor=#d6b656;rounded=1;" vertex="1" parent="1"><mxGeometry x="30" y="755" width="700" height="24" as="geometry" /></mxCell>
+
+        <!-- LOOP ENTITIES -->
+        <mxCell id="loop-e" value="[ loop ]  for each selected entity_id  (top limit_entities unique entities from evidence)" style="text;html=1;fontSize=10;fontStyle=2;align=left;" vertex="1" parent="1"><mxGeometry x="30" y="790" width="600" height="16" as="geometry" /></mxCell>
+
+        <!-- 13 -->
+        <mxCell id="m13" value="13 · service.get_context(entity_id, task_type, per_entity_max_tokens, summarize=(verbosity=='minimal'))" style="html=1;endArrow=block;endFill=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="520" y="810"/><mxPoint x="1450" y="810"/></Array></mxGeometry></mxCell>
+        <mxCell id="m13a" value="synthesize_with_task(entity_id, task_type)  →  apply TASK_TEMPLATES priority + boost" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1450" y="835"/><mxPoint x="1450" y="835"/></Array></mxGeometry></mxCell>
+        <mxCell id="m13b" value="_calculate_sufficiency(task_type, content_included, entity, text)  →  score 0.0–1.0" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1450" y="860"/><mxPoint x="1450" y="860"/></Array></mxGeometry></mxCell>
+        <mxCell id="m13r" value="{context_text, total_tokens, truncated, included_entities, task_type, sufficiency_score}" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1450" y="885"/><mxPoint x="520" y="885"/></Array></mxGeometry></mxCell>
+
+        <!-- end loop entities -->
+        <mxCell id="loop-ee" value="[ end loop ]" style="text;html=1;fontSize=10;fontStyle=2;align=left;" vertex="1" parent="1"><mxGeometry x="30" y="903" width="150" height="16" as="geometry" /></mxCell>
+
+        <!-- 14 - assemble response -->
+        <mxCell id="m14" value="14 · Assemble: context_text = join(context_parts, '---')  |  sufficiency = avg(scores)  |  filter by verbosity" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="520" y="925"/><mxPoint x="520" y="925"/></Array></mxGeometry></mxCell>
+
+        <!-- VERBOSITY BOX -->
+        <mxCell id="vbox" value="Verbosity filter:&#xa;minimal    →  {context_text, sufficiency_score, total_tokens, reduction_summary}&#xa;standard   →  + query, task_type, task_confidence, retrieval_mode, max_tokens, truncated&#xa;verbose    →  + evidence[]  (rank, chunk_id, entity_id, score, source)&#xa;diagnostic →  full dict (all fields + errors[])" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666;fontSize=10;align=left;" vertex="1" parent="1"><mxGeometry x="310" y="945" width="660" height="75" as="geometry" /></mxCell>
+
+        <!-- ══ ALT A: context / REST ══ -->
+        <mxCell id="altA" value="[ alt A ]  CLI context  |  REST /context/query  |  MCP retrieve_context_for_query  →  return dict to caller" style="text;html=1;fontSize=10;fontStyle=2;align=left;" vertex="1" parent="1"><mxGeometry x="30" y="1035" width="800" height="16" as="geometry" /></mxCell>
+        <mxCell id="mA1" value="15a · QueryResponse / ContextResponse → User" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="365" y="1055"/><mxPoint x="215" y="1055"/></Array></mxGeometry></mxCell>
+        <mxCell id="mA2" value="" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="215" y="1080"/><mxPoint x="75" y="1080"/></Array></mxGeometry></mxCell>
+
+        <!-- ══ ALT B: ask → Agent ══ -->
+        <mxCell id="altB" value="[ alt B ]  CLI ask  →  pass context to Agent (LLM call)" style="text;html=1;fontSize=10;fontStyle=2;align=left;" vertex="1" parent="1"><mxGeometry x="30" y="1105" width="500" height="16" as="geometry" /></mxCell>
+        <mxCell id="mB1" value="15b · agent.answer(query)  or  smart_answer(query, force_llm)" style="html=1;endArrow=block;endFill=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="215" y="1125"/><mxPoint x="1620" y="1125"/></Array></mxGeometry></mxCell>
+
+        <!-- SMART ANSWER CHECK -->
+        <mxCell id="mB-check" value="smart_answer: check sufficiency_score ≥ threshold (default 0.8)" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1620" y="1150"/><mxPoint x="1620" y="1150"/></Array></mxGeometry></mxCell>
+        <mxCell id="local-note" value="[ if sufficient ]  _format_local_answer()  →  return context-only answer  (no LLM tokens used)" style="text;html=1;fontSize=10;fontStyle=2;align=left;fillColor=#d5e8d4;strokeColor=#82b366;rounded=1;" vertex="1" parent="1"><mxGeometry x="30" y="1165" width="680" height="20" as="geometry" /></mxCell>
+        <mxCell id="llm-note" value="[ if insufficient or force_llm ]  call LLM with failover" style="text;html=1;fontSize=10;fontStyle=2;align=left;" vertex="1" parent="1"><mxGeometry x="30" y="1192" width="450" height="16" as="geometry" /></mxCell>
+
+        <mxCell id="mB2" value="16 · build prompt: get_prompt_template(task_type) + context_text + question" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1620" y="1210"/><mxPoint x="1620" y="1210"/></Array></mxGeometry></mxCell>
+
+        <!-- LLM FAILOVER LOOP -->
+        <mxCell id="loop-llm" value="[ loop ]  for each model in config.models order  (RPM+RPD rate-limit check per model)" style="text;html=1;fontSize=10;fontStyle=2;align=left;" vertex="1" parent="1"><mxGeometry x="30" y="1230" width="700" height="16" as="geometry" /></mxCell>
+        <mxCell id="mB3a" value="17a · Google: client.models.generate_content(model, prompt)" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1620" y="1250"/><mxPoint x="1620" y="1250"/></Array></mxGeometry></mxCell>
+        <mxCell id="mB3b" value="17b · OpenAI-compat: client.chat.completions.create(model, messages)  [OpenRouter / Mistral]" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1620" y="1275"/><mxPoint x="1620" y="1275"/></Array></mxGeometry></mxCell>
+        <mxCell id="mB3c" value="rate_limiter.record_usage(model.name)  →  ~/.knowcode/usage_stats.json" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1620" y="1300"/><mxPoint x="1620" y="1300"/></Array></mxGeometry></mxCell>
+        <mxCell id="mB3d" value="on ResourceExhausted / error  →  try next model" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1620" y="1325"/><mxPoint x="1620" y="1325"/></Array></mxGeometry></mxCell>
+        <mxCell id="loop-llme" value="[ end loop ]" style="text;html=1;fontSize=10;fontStyle=2;align=left;" vertex="1" parent="1"><mxGeometry x="30" y="1343" width="150" height="16" as="geometry" /></mxCell>
+
+        <mxCell id="mBr" value="18 · answer text" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1620" y="1365"/><mxPoint x="215" y="1365"/></Array></mxGeometry></mxCell>
+        <mxCell id="mBfin" value="19 · {answer, source=llm|local, task_type, sufficiency_score} → User" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="215" y="1395"/><mxPoint x="75" y="1395"/></Array></mxGeometry></mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
