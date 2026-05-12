@@ -1,0 +1,83 @@
+<mxfile host="app.diagrams.net" modified="2026-04-19T00:00:00.000Z" agent="Claude" version="21.0.0">
+  <diagram name="Seq – File Watch Hot-Reload" id="seq-watch">
+    <mxGraphModel dx="1654" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1900" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="title" value="Sequence Diagram — File Watch / Hot-Reload Workflow&#xa;Triggered by: knowcode server --watch  (incremental re-index on every file save)" style="text;html=1;strokeColor=none;fillColor=none;align=center;fontSize=16;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="200" y="10" width="1300" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- PARTICIPANTS -->
+        <mxCell id="p-dev"  value="&lt;b&gt;Developer&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1"><mxGeometry x="30"   y="80" width="120" height="50" as="geometry" /></mxCell>
+        <mxCell id="p-cli"  value="&lt;b&gt;CLI&lt;/b&gt;&#xa;cli.py" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1"><mxGeometry x="200"  y="80" width="120" height="50" as="geometry" /></mxCell>
+        <mxCell id="p-svc"  value="&lt;b&gt;KnowCode&lt;/b&gt;&#xa;&lt;b&gt;Service&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1"><mxGeometry x="370"  y="80" width="130" height="50" as="geometry" /></mxCell>
+        <mxCell id="p-mon"  value="&lt;b&gt;FileMonitor&lt;/b&gt;&#xa;&lt;b&gt;(watchdog)&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666;fontSize=11;" vertex="1" parent="1"><mxGeometry x="550"  y="80" width="140" height="50" as="geometry" /></mxCell>
+        <mxCell id="p-hand" value="&lt;b&gt;Indexing&lt;/b&gt;&#xa;&lt;b&gt;Handler&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666;fontSize=11;" vertex="1" parent="1"><mxGeometry x="740"  y="80" width="130" height="50" as="geometry" /></mxCell>
+        <mxCell id="p-bg"   value="&lt;b&gt;Background&lt;/b&gt;&#xa;&lt;b&gt;Indexer&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1"><mxGeometry x="920"  y="80" width="130" height="50" as="geometry" /></mxCell>
+        <mxCell id="p-idx"  value="&lt;b&gt;Indexer&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1"><mxGeometry x="1100" y="80" width="130" height="50" as="geometry" /></mxCell>
+        <mxCell id="p-emb"  value="&lt;b&gt;Embedding&lt;/b&gt;&#xa;&lt;b&gt;Provider&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;" vertex="1" parent="1"><mxGeometry x="1280" y="80" width="130" height="50" as="geometry" /></mxCell>
+        <mxCell id="p-store" value="&lt;b&gt;KnowledgeStore&lt;/b&gt;&#xa;&lt;b&gt;+ VectorStore&lt;/b&gt;&#xa;&lt;b&gt;+ ChunkRepo&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" vertex="1" parent="1"><mxGeometry x="1460" y="80" width="140" height="50" as="geometry" /></mxCell>
+
+        <!-- LIFELINES -->
+        <mxCell id="ll-dev"  value="" style="dashed=1;endArrow=none;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="90"   y="130"/><mxPoint x="90"   y="1070"/></Array></mxGeometry></mxCell>
+        <mxCell id="ll-cli"  value="" style="dashed=1;endArrow=none;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="260"  y="130"/><mxPoint x="260"  y="1070"/></Array></mxGeometry></mxCell>
+        <mxCell id="ll-svc"  value="" style="dashed=1;endArrow=none;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="435"  y="130"/><mxPoint x="435"  y="1070"/></Array></mxGeometry></mxCell>
+        <mxCell id="ll-mon"  value="" style="dashed=1;endArrow=none;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="620"  y="130"/><mxPoint x="620"  y="1070"/></Array></mxGeometry></mxCell>
+        <mxCell id="ll-hand" value="" style="dashed=1;endArrow=none;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="805"  y="130"/><mxPoint x="805"  y="1070"/></Array></mxGeometry></mxCell>
+        <mxCell id="ll-bg"   value="" style="dashed=1;endArrow=none;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="985"  y="130"/><mxPoint x="985"  y="1070"/></Array></mxGeometry></mxCell>
+        <mxCell id="ll-idx"  value="" style="dashed=1;endArrow=none;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1165" y="130"/><mxPoint x="1165" y="1070"/></Array></mxGeometry></mxCell>
+        <mxCell id="ll-emb"  value="" style="dashed=1;endArrow=none;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1345" y="130"/><mxPoint x="1345" y="1070"/></Array></mxGeometry></mxCell>
+        <mxCell id="ll-store" value="" style="dashed=1;endArrow=none;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1530" y="130"/><mxPoint x="1530" y="1070"/></Array></mxGeometry></mxCell>
+
+        <!-- ══ STARTUP ══ -->
+        <mxCell id="ph-s" value="STARTUP" style="text;html=1;fontSize=11;fontStyle=1;align=left;" vertex="1" parent="1"><mxGeometry x="30" y="155" width="150" height="18" as="geometry" /></mxCell>
+
+        <mxCell id="s1" value="1 · knowcode server --watch" style="html=1;endArrow=block;endFill=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="90" y="178"/><mxPoint x="260" y="178"/></Array></mxGeometry></mxCell>
+        <mxCell id="s2" value="2 · KnowCodeService(store_path, strict_config=True)" style="html=1;endArrow=block;endFill=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="260" y="203"/><mxPoint x="435" y="203"/></Array></mxGeometry></mxCell>
+        <mxCell id="s3" value="3 · service.get_indexer()  →  Indexer(embedding_provider)  +  load(knowcode_index/) if exists" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="435" y="228"/><mxPoint x="435" y="228"/></Array></mxGeometry></mxCell>
+        <mxCell id="s4" value="4 · BackgroundIndexer(indexer).start()  →  daemon thread  +  Queue()" style="html=1;endArrow=block;endFill=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="435" y="253"/><mxPoint x="985" y="253"/></Array></mxGeometry></mxCell>
+        <mxCell id="s5" value="5 · FileMonitor(watch_root, bg_indexer).start()  →  watchdog Observer.start()" style="html=1;endArrow=block;endFill=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="435" y="278"/><mxPoint x="620" y="278"/></Array></mxGeometry></mxCell>
+        <mxCell id="s6" value="6 · FastAPI + Uvicorn listening on :8000" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="435" y="303"/><mxPoint x="435" y="303"/></Array></mxGeometry></mxCell>
+
+        <!-- ══ FILE CHANGE ══ -->
+        <mxCell id="ph-fc" value="FILE CHANGE EVENT  (inotify / FSEvents / kqueue → watchdog)" style="text;html=1;fontSize=11;fontStyle=1;align=left;" vertex="1" parent="1"><mxGeometry x="30" y="328" width="500" height="18" as="geometry" /></mxCell>
+
+        <mxCell id="fc1" value="7 · developer saves  src/foo.py  (write to filesystem)" style="html=1;endArrow=block;endFill=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="90" y="350"/><mxPoint x="620" y="350"/></Array></mxGeometry></mxCell>
+        <mxCell id="fc2" value="8 · watchdog OS event  →  IndexingHandler.on_modified(FileModifiedEvent)" style="html=1;endArrow=block;endFill=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="620" y="375"/><mxPoint x="805" y="375"/></Array></mxGeometry></mxCell>
+        <mxCell id="fc3" value="9 · _handle_change(event.src_path)" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="805" y="400"/><mxPoint x="805" y="400"/></Array></mxGeometry></mxCell>
+        <mxCell id="fc4" value="10 · filter: file extension in SUPPORTED_EXTENSIONS  +  not gitignored" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="805" y="425"/><mxPoint x="805" y="425"/></Array></mxGeometry></mxCell>
+        <mxCell id="fc5" value="11 · bg_indexer.queue_file(file_path)  →  Queue.put(file_path)" style="html=1;endArrow=block;endFill=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="805" y="450"/><mxPoint x="985" y="450"/></Array></mxGeometry></mxCell>
+        <mxCell id="fc-create" value="[on_created fires the same path: IndexingHandler.on_created → _handle_change]" style="text;html=1;fontSize=10;fontStyle=2;align=left;" vertex="1" parent="1"><mxGeometry x="30" y="468" width="600" height="14" as="geometry" /></mxCell>
+
+        <!-- ══ BACKGROUND RE-INDEX ══ -->
+        <mxCell id="ph-bg" value="BACKGROUND RE-INDEXING  (_worker daemon thread)" style="text;html=1;fontSize=11;fontStyle=1;align=left;" vertex="1" parent="1"><mxGeometry x="30" y="493" width="500" height="18" as="geometry" /></mxCell>
+
+        <mxCell id="bg1" value="12 · Queue.get(file_path)  [blocking dequeue]" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="985" y="515"/><mxPoint x="985" y="515"/></Array></mxGeometry></mxCell>
+        <mxCell id="bg2" value="13 · indexer.index_file(file_path)" style="html=1;endArrow=block;endFill=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="985" y="540"/><mxPoint x="1165" y="540"/></Array></mxGeometry></mxCell>
+        <mxCell id="bg3" value="14 · parse file with appropriate parser  →  ParseResult{entities, relationships}" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1165" y="565"/><mxPoint x="1165" y="565"/></Array></mxGeometry></mxCell>
+        <mxCell id="bg4" value="15 · Chunker.process_parse_result()  →  CodeChunks[] with BM25 tokens" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1165" y="590"/><mxPoint x="1165" y="590"/></Array></mxGeometry></mxCell>
+        <mxCell id="bg5" value="16 · embedding_provider.embed(chunk_texts[])  →  VoyageAI/OpenAI Embeddings API" style="html=1;endArrow=block;endFill=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1165" y="615"/><mxPoint x="1345" y="615"/></Array></mxGeometry></mxCell>
+        <mxCell id="bg5r" value="vectors  (list[list[float]], L2-normalized)" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1345" y="640"/><mxPoint x="1165" y="640"/></Array></mxGeometry></mxCell>
+        <mxCell id="bg6" value="17 · ChunkRepository: remove old chunks for entity  +  add new chunks" style="html=1;endArrow=block;endFill=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1165" y="665"/><mxPoint x="1530" y="665"/></Array></mxGeometry></mxCell>
+        <mxCell id="bg7" value="18 · VectorStore: remove old vectors for entity  +  add new vectors  →  rebuild FAISS index" style="html=1;endArrow=block;endFill=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1165" y="690"/><mxPoint x="1530" y="690"/></Array></mxGeometry></mxCell>
+        <mxCell id="bg8" value="19 · KnowledgeStore: update entities + relationships for changed file" style="html=1;endArrow=block;endFill=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1165" y="715"/><mxPoint x="1530" y="715"/></Array></mxGeometry></mxCell>
+        <mxCell id="bg9" value="20 · indexer.save(index_path)  →  atomic write:  chunks.json + vectors.index + vectors.json" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1165" y="740"/><mxPoint x="1165" y="740"/></Array></mxGeometry></mxCell>
+        <mxCell id="bg10" value="21 · ✓ re-index complete  —  next API request sees fresh data" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="985" y="765"/><mxPoint x="985" y="765"/></Array></mxGeometry></mxCell>
+
+        <!-- ══ MANUAL RELOAD ══ -->
+        <mxCell id="ph-rel" value="MANUAL RELOAD  (POST /api/v1/reload  — full re-scan from disk)" style="text;html=1;fontSize=11;fontStyle=1;align=left;" vertex="1" parent="1"><mxGeometry x="30" y="793" width="600" height="18" as="geometry" /></mxCell>
+
+        <mxCell id="r1" value="22 · POST /api/v1/reload" style="html=1;endArrow=block;endFill=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="90" y="815"/><mxPoint x="435" y="815"/></Array></mxGeometry></mxCell>
+        <mxCell id="r2" value="23 · service.reload()  →  _store = None  [clears in-memory cache]" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="435" y="840"/><mxPoint x="435" y="840"/></Array></mxGeometry></mxCell>
+        <mxCell id="r3" value="24 · next access to service.store  →  KnowledgeStore.load(store_path)  from knowcode_knowledge.json" style="html=1;endArrow=block;endFill=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="435" y="865"/><mxPoint x="1530" y="865"/></Array></mxGeometry></mxCell>
+        <mxCell id="r4" value="{status: reloaded}" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="435" y="890"/><mxPoint x="90" y="890"/></Array></mxGeometry></mxCell>
+
+        <!-- CONTRAST NOTE -->
+        <mxCell id="note" value="Contrast:  FileMonitor → BackgroundIndexer  performs INCREMENTAL re-index of a single file (steps 12–21).&#xa;POST /api/v1/reload  clears the in-memory cache only; the full graph rebuild runs via GraphBuilder only if triggered by a new knowcode analyze." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666;fontSize=10;align=left;" vertex="1" parent="1"><mxGeometry x="30" y="928" width="1100" height="50" as="geometry" /></mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

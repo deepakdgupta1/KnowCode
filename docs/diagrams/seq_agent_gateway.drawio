@@ -1,0 +1,94 @@
+<mxfile host="app.diagrams.net" modified="2026-04-19T00:00:00.000Z" agent="Claude" version="21.0.0">
+  <diagram name="Seq – Agent Gateway" id="seq-gw">
+    <mxGraphModel dx="1654" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1900" pageHeight="1350" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="title" value="Sequence Diagram — Agent Gateway Workflow  (apps/agent-gateway)&#xa;Startup via local_up.sh  |  Request via POST /api/v1/chat  |  Smoke test via smoke_e2e.py" style="text;html=1;strokeColor=none;fillColor=none;align=center;fontSize=16;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="150" y="10" width="1550" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- PARTICIPANTS -->
+        <mxCell id="p-user"    value="&lt;b&gt;User / IDE&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1"><mxGeometry x="30"   y="80" width="120" height="50" as="geometry" /></mxCell>
+        <mxCell id="p-gw"      value="&lt;b&gt;Gateway&lt;/b&gt;&#xa;&lt;b&gt;FastAPI :8081&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;" vertex="1" parent="1"><mxGeometry x="200"  y="80" width="140" height="50" as="geometry" /></mxCell>
+        <mxCell id="p-orch"    value="&lt;b&gt;Agent&lt;/b&gt;&#xa;&lt;b&gt;Orchestrator&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;" vertex="1" parent="1"><mxGeometry x="390"  y="80" width="140" height="50" as="geometry" /></mxCell>
+        <mxCell id="p-toolsel" value="&lt;b&gt;Tool&lt;/b&gt;&#xa;&lt;b&gt;Selector&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;" vertex="1" parent="1"><mxGeometry x="580"  y="80" width="130" height="50" as="geometry" /></mxCell>
+        <mxCell id="p-oapi"    value="&lt;b&gt;OpenAPI&lt;/b&gt;&#xa;&lt;b&gt;ToolRegistry&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;" vertex="1" parent="1"><mxGeometry x="760"  y="80" width="140" height="50" as="geometry" /></mxCell>
+        <mxCell id="p-llmcli"  value="&lt;b&gt;LiteLLM&lt;/b&gt;&#xa;&lt;b&gt;Client&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;" vertex="1" parent="1"><mxGeometry x="950"  y="80" width="130" height="50" as="geometry" /></mxCell>
+        <mxCell id="p-litellm" value="&lt;b&gt;LiteLLM&lt;/b&gt;&#xa;&lt;b&gt;Proxy :4000&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1"><mxGeometry x="1130" y="80" width="130" height="50" as="geometry" /></mxCell>
+        <mxCell id="p-kccli"   value="&lt;b&gt;KnowCode&lt;/b&gt;&#xa;&lt;b&gt;Client&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;" vertex="1" parent="1"><mxGeometry x="1310" y="80" width="130" height="50" as="geometry" /></mxCell>
+        <mxCell id="p-kcapi"   value="&lt;b&gt;KnowCode&lt;/b&gt;&#xa;&lt;b&gt;REST API :8000&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1"><mxGeometry x="1490" y="80" width="140" height="50" as="geometry" /></mxCell>
+
+        <!-- LIFELINES -->
+        <mxCell id="ll-user"    value="" style="dashed=1;endArrow=none;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="90"   y="130"/><mxPoint x="90"   y="1310"/></Array></mxGeometry></mxCell>
+        <mxCell id="ll-gw"      value="" style="dashed=1;endArrow=none;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="270"  y="130"/><mxPoint x="270"  y="1310"/></Array></mxGeometry></mxCell>
+        <mxCell id="ll-orch"    value="" style="dashed=1;endArrow=none;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="460"  y="130"/><mxPoint x="460"  y="1310"/></Array></mxGeometry></mxCell>
+        <mxCell id="ll-toolsel" value="" style="dashed=1;endArrow=none;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="645"  y="130"/><mxPoint x="645"  y="1310"/></Array></mxGeometry></mxCell>
+        <mxCell id="ll-oapi"    value="" style="dashed=1;endArrow=none;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="830"  y="130"/><mxPoint x="830"  y="1310"/></Array></mxGeometry></mxCell>
+        <mxCell id="ll-llmcli"  value="" style="dashed=1;endArrow=none;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1015" y="130"/><mxPoint x="1015" y="1310"/></Array></mxGeometry></mxCell>
+        <mxCell id="ll-litellm" value="" style="dashed=1;endArrow=none;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1195" y="130"/><mxPoint x="1195" y="1310"/></Array></mxGeometry></mxCell>
+        <mxCell id="ll-kccli"   value="" style="dashed=1;endArrow=none;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1375" y="130"/><mxPoint x="1375" y="1310"/></Array></mxGeometry></mxCell>
+        <mxCell id="ll-kcapi"   value="" style="dashed=1;endArrow=none;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1560" y="130"/><mxPoint x="1560" y="1310"/></Array></mxGeometry></mxCell>
+
+        <!-- ══ STARTUP ══ -->
+        <mxCell id="ph-start" value="STARTUP  (local_up.sh)" style="text;html=1;fontSize=11;fontStyle=1;align=left;" vertex="1" parent="1"><mxGeometry x="30" y="158" width="250" height="18" as="geometry" /></mxCell>
+
+        <mxCell id="s1" value="1 · local_up.sh:  start KnowCode :8000  +  LiteLLM :4000" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="270" y="180"/><mxPoint x="1560" y="180"/></Array></mxGeometry></mxCell>
+        <mxCell id="s2" value="2 · GatewaySettings.from_env()  →  load knowcode_api_base_url, litellm_base_url, default_model, max_tool_rounds=4, openapi_cache_ttl=300s" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="270" y="205"/><mxPoint x="270" y="205"/></Array></mxGeometry></mxCell>
+        <mxCell id="s3" value="3 · fetch_openapi_spec(knowcode_api_base_url + /openapi.json)" style="html=1;endArrow=block;endFill=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="270" y="230"/><mxPoint x="1560" y="230"/></Array></mxGeometry></mxCell>
+        <mxCell id="s3r" value="OpenAPI spec JSON" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1560" y="255"/><mxPoint x="830" y="255"/></Array></mxGeometry></mxCell>
+        <mxCell id="s4" value="4 · OpenAPIToolTranslator → OpenAI-compatible tool schemas  (cached 300s)" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="830" y="280"/><mxPoint x="830" y="280"/></Array></mxGeometry></mxCell>
+        <mxCell id="s5" value="5 · Gateway ready on :8081" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="270" y="305"/><mxPoint x="270" y="305"/></Array></mxGeometry></mxCell>
+
+        <!-- ══ REQUEST HANDLING ══ -->
+        <mxCell id="ph-req" value="AGENTIC REQUEST — POST /api/v1/chat" style="text;html=1;fontSize=11;fontStyle=1;align=left;" vertex="1" parent="1"><mxGeometry x="30" y="328" width="400" height="18" as="geometry" /></mxCell>
+
+        <mxCell id="r1" value="6 · POST /api/v1/chat  ChatRequest{message, conversation[], model, tags, tool_names, temperature}" style="html=1;endArrow=block;endFill=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="90" y="350"/><mxPoint x="270" y="350"/></Array></mxGeometry></mxCell>
+        <mxCell id="r2" value="7 · orchestrator.run(chat_request)" style="html=1;endArrow=block;endFill=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="270" y="375"/><mxPoint x="460" y="375"/></Array></mxGeometry></mxCell>
+        <mxCell id="r3" value="8 · _pick_tool_names(request)  →  select_tool_names(message)" style="html=1;endArrow=block;endFill=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="460" y="400"/><mxPoint x="645" y="400"/></Array></mxGeometry></mxCell>
+        <mxCell id="r3-note" value="Keyword heuristics: 'explain'→get_context, 'find'→search, 'trace'→trace_calls, default→all" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="645" y="425"/><mxPoint x="645" y="425"/></Array></mxGeometry></mxCell>
+        <mxCell id="r3r" value="subset of {query_context, search, get_context, trace_calls}" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="645" y="450"/><mxPoint x="460" y="450"/></Array></mxGeometry></mxCell>
+        <mxCell id="r4" value="9 · get tool schemas from OpenAPIToolRegistry for selected tools" style="html=1;endArrow=block;endFill=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="460" y="475"/><mxPoint x="830" y="475"/></Array></mxGeometry></mxCell>
+        <mxCell id="r4r" value="list of tool schema dicts  (OpenAI-compatible)" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="830" y="500"/><mxPoint x="460" y="500"/></Array></mxGeometry></mxCell>
+
+        <!-- TOOL USE LOOP -->
+        <mxCell id="loop-note" value="[ loop ]  tool-use loop  (max_tool_rounds=4 iterations)" style="text;html=1;fontSize=10;fontStyle=2;align=left;" vertex="1" parent="1"><mxGeometry x="30" y="522" width="450" height="16" as="geometry" /></mxCell>
+
+        <mxCell id="l1" value="10 · litellm_client.create_chat_completion(messages, tools=tool_schemas, model, temperature)" style="html=1;endArrow=block;endFill=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="460" y="542"/><mxPoint x="1015" y="542"/></Array></mxGeometry></mxCell>
+        <mxCell id="l2" value="11 · POST http://litellm_base_url/chat/completions" style="html=1;endArrow=block;endFill=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1015" y="567"/><mxPoint x="1195" y="567"/></Array></mxGeometry></mxCell>
+        <mxCell id="l3" value="12 · proxy → upstream LLM (Gemini / Mistral / …)" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1195" y="592"/><mxPoint x="1195" y="592"/></Array></mxGeometry></mxCell>
+        <mxCell id="l4" value="13 · ChatCompletion response  {choices[0].finish_reason, message.tool_calls[]}" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1195" y="617"/><mxPoint x="1015" y="617"/></Array></mxGeometry></mxCell>
+        <mxCell id="l5" value="14 · _first_choice(response)  →  extract tool_call  {id, name, arguments}" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1015" y="642"/><mxPoint x="460" y="642"/></Array></mxGeometry></mxCell>
+
+        <!-- IF TOOL CALL -->
+        <mxCell id="if-tc" value="[ if finish_reason == tool_calls ]  execute tool  (timeout=30s)" style="text;html=1;fontSize=10;fontStyle=2;align=left;" vertex="1" parent="1"><mxGeometry x="30" y="660" width="480" height="16" as="geometry" /></mxCell>
+
+        <mxCell id="l6" value="15 · _execute_tool_call(tool_call)  →  knowcode_client.execute_tool(name, args)" style="html=1;endArrow=block;endFill=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="460" y="680"/><mxPoint x="1375" y="680"/></Array></mxGeometry></mxCell>
+        <mxCell id="l7a" value="query_context  →  POST /api/v1/context/query  {query, limit, task_type}" style="html=1;endArrow=block;endFill=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1375" y="705"/><mxPoint x="1560" y="705"/></Array></mxGeometry></mxCell>
+        <mxCell id="l7b" value="search         →  GET  /api/v1/search?q=..." style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1375" y="730"/><mxPoint x="1375" y="730"/></Array></mxGeometry></mxCell>
+        <mxCell id="l7c" value="get_context    →  GET  /api/v1/context?target=...&amp;task_type=..." style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1375" y="755"/><mxPoint x="1375" y="755"/></Array></mxGeometry></mxCell>
+        <mxCell id="l7d" value="trace_calls    →  GET  /api/v1/trace_calls/{entity_id}?direction=...&amp;depth=..." style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1375" y="780"/><mxPoint x="1375" y="780"/></Array></mxGeometry></mxCell>
+        <mxCell id="l8" value="16 · KnowCode API returns result JSON" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1560" y="805"/><mxPoint x="1375" y="805"/></Array></mxGeometry></mxCell>
+        <mxCell id="l9" value="17 · record ToolExecutionRecord{tool_name, tool_call_id, arguments, success, latency_ms}" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1375" y="830"/><mxPoint x="460" y="830"/></Array></mxGeometry></mxCell>
+        <mxCell id="l10" value="18 · append tool_result to messages[]  →  continue loop" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="460" y="855"/><mxPoint x="460" y="855"/></Array></mxGeometry></mxCell>
+
+        <!-- END LOOP -->
+        <mxCell id="loop-end" value="[ until finish_reason == stop  OR  max_tool_rounds reached ]" style="text;html=1;fontSize=10;fontStyle=2;align=left;" vertex="1" parent="1"><mxGeometry x="30" y="873" width="500" height="16" as="geometry" /></mxCell>
+
+        <!-- FINAL RESPONSE -->
+        <mxCell id="f1" value="19 · build ChatResponse{answer, model, usage{}, response_cost, finish_reason, selected_tools[], tool_executions[]}" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="460" y="895"/><mxPoint x="270" y="895"/></Array></mxGeometry></mxCell>
+        <mxCell id="f2" value="20 · ChatResponse → User" style="html=1;endArrow=open;endFill=0;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="270" y="920"/><mxPoint x="90" y="920"/></Array></mxGeometry></mxCell>
+
+        <!-- ══ SMOKE E2E ══ -->
+        <mxCell id="ph-smoke" value="SMOKE E2E  (smoke_e2e.py — CI post-deploy or manual)" style="text;html=1;fontSize=11;fontStyle=1;align=left;" vertex="1" parent="1"><mxGeometry x="30" y="950" width="500" height="18" as="geometry" /></mxCell>
+
+        <mxCell id="sm1" value="21 · GET /health  →  assert {status: ok}" style="html=1;endArrow=block;endFill=1;strokeColor=#d79b00;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="90" y="972"/><mxPoint x="270" y="972"/></Array></mxGeometry></mxCell>
+        <mxCell id="sm2" value="22 · GET /api/v1/tools  →  assert count ≥ 1" style="html=1;endArrow=block;endFill=1;strokeColor=#d79b00;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="90" y="997"/><mxPoint x="270" y="997"/></Array></mxGeometry></mxCell>
+        <mxCell id="sm3" value="23 · POST /api/v1/chat  {message: 'Use query_context and get_context to find search logic...'}" style="html=1;endArrow=block;endFill=1;strokeColor=#d79b00;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="90" y="1022"/><mxPoint x="270" y="1022"/></Array></mxGeometry></mxCell>
+        <mxCell id="sm4" value="24 · assert answer != ''  +  len(tool_executions) ≥ min_tool_calls  [optional: filter by tool_name]" style="html=1;endArrow=open;endFill=0;dashed=1;strokeColor=#d79b00;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="270" y="1047"/><mxPoint x="90" y="1047"/></Array></mxGeometry></mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
