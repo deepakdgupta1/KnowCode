@@ -30,8 +30,13 @@ def _disable_rate_limiter() -> None:
 
 
 @pytest.fixture(scope="module")
-def service() -> KnowCodeService:
-    return KnowCodeService(store_path=".")
+def service(tmp_path_factory: pytest.TempPathFactory) -> KnowCodeService:
+    tmp_dir = tmp_path_factory.mktemp("temp_data")
+    (tmp_dir / "app.py").write_text("class GraphBuilder:\n    pass\n", encoding="utf-8")
+    s = KnowCodeService(store_path=str(tmp_dir))
+    s.ensure_store()
+    s.ensure_index()
+    return s
 
 
 def test_reload_endpoint(service: KnowCodeService) -> None:

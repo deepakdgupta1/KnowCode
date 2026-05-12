@@ -950,7 +950,7 @@ Commands invoked without the required extra should fail fast with: *"Install kno
 > - *"Write a summary of what changed in this module since last release."*
 > - *"Which parts of the documentation are stale and need updating?"*
 
-### **Phase 4.5: Architectural Hardening (NEXT)** *(addresses AD-1 through AD-7)*
+### **Phase 4.5: Architectural Hardening (COMPLETED)** *(addresses AD-1 through AD-7)*
 15. **[x] Dependency Modularisation (AD-1)**: Move heavy dependencies behind optional extras (`server`, `search`, `llm`, `watch`, `all`). Core install stays lightweight.
 16. **[x] Side-Effect-Free Query Paths (AD-2)**: Remove auto-analyze/index from `retrieve_context_for_query()`. Fail fast with actionable errors. Add explicit `ensure_store()` / `ensure_index()` helpers.
 17. **[x] Schema Versioning (AD-3)**: Add `schema_version` to knowledge store JSON, index manifest, chunks metadata, and vector metadata. Include migration/validation shims on load.
@@ -958,14 +958,14 @@ Commands invoked without the required extra should fail fast with: *"Install kno
 19. **[x] Configuration Hardening (AD-5)**: Replace `print()` with `logging`; raise on invalid config in server/MCP contexts via strict mode; validate known YAML keys and warn on unknown keys.
 20. **[x] Service Layer Decomposition (AD-6)**: Extracted `RetrievalOrchestrator` from `KnowCodeService`. Added `Protocol` interfaces for `EmbeddingProvider`, `VectorStore`, and `KnowledgeStoreProtocol`.
 21. **[x] Entity Identity Resilience (AD-7)**: Add `content_hash` to entity metadata for rename-resilient correlation.
-22. **[ ] Layer Contract Tests**: Parser → `ParseResult` contract tests; store save/load roundtrip with schema version; retrieval golden-query tests; CLI smoke tests (Click runner); API endpoint contract tests (conditional on `server` extra).
+22. **[x] Layer Contract Tests**: Parser → `ParseResult` contract tests; store save/load roundtrip with schema version; retrieval golden-query tests; CLI smoke tests (Click runner); API endpoint contract tests (conditional on `server` extra).
 
 > *This phase does not unlock new user-facing questions — it makes the existing answers more reliable, portable, and predictable. For example:*
 > - *"I upgraded KnowCode — will my existing analysis still work?"* (schema versioning)
 > - *"I renamed a file — does KnowCode still recognise the same functions?"* (entity identity resilience)
 > - *"Can I install KnowCode without all the heavy AI dependencies?"* (dependency modularisation)
 
-### **Phase 5: Deep Analysis**
+### **Phase 5: Deep Analysis (NEXT)**
 23. **[ ] Static Behavioral Analysis (Layer 4)**: Data flow, state transitions, side-effect classification.
 24. **[ ] Intent Extraction (Layer 6)**: ADR/PR/commit intent linking beyond commit metadata.
 25. **[ ] Confidence Scoring (Layer 3)**: Weighted edges/entities by evidence source.
