@@ -134,3 +134,7 @@ flowchart TB
 37. **[x] Task-Specific Templates**: Debug/extend/review/explain/locate prioritization.
 38. **[x] Multi-hop Queries**: `trace_calls(depth=N)` and `get_impact()` analysis.
 39. **[x] Structured Responses**: JSON with `task_type` and `sufficiency_score`.
+
+### **Phase 8.5: Eval Harness Hardening (NEXT)**
+40. **[ ] Decouple eval metadata from response verbosity**: The short-term eval harness workaround uses `verbosity="diagnostic"` so scoring can read `selected_entities`. The long-term fix is to separate context summarization from response projection, so internal evaluators can score ranking metadata while still exercising the production-like minimal retrieval path.
+41. **[ ] Fix routing accounting in eval scoring**: `tests/eval/harness/scorer.py` currently infers `routed_local` from `retrieval_result["source"]`, but `retrieve_context_for_query()` does not return `source`. Near-term, derive `would_route_local` from the configured sufficiency threshold plus non-empty context. Long-term, either run routing evals through `Agent.smart_answer()` or expose the route decision explicitly in an internal-only retrieval/eval API.
