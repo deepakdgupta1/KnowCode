@@ -30,6 +30,7 @@ class AppConfig:
         "natural_language_models",
         "embedding_models",
         "reranking_models",
+        "eval_models",
         "config",
     }
     KNOWN_CONFIG_KEYS = {"sufficiency_threshold"}

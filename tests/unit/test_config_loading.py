@@ -70,6 +70,25 @@ unknown_top_level: true
         AppConfig.load(str(config_file), strict=True)
 
 
+def test_load_strict_allows_eval_models_section(tmp_path: Path) -> None:
+    """The checked-in eval_models section is intentional config metadata."""
+    config_file = tmp_path / "aimodels.yaml"
+    _write(
+        config_file,
+        """
+natural_language_models:
+  - name: gemini-2.0-flash-lite
+eval_models:
+  - name: voyage-code-3
+    provider: voyageai
+""",
+    )
+
+    cfg = AppConfig.load(str(config_file), strict=True)
+
+    assert cfg.models[0].name == "gemini-2.0-flash-lite"
+
+
 def test_load_strict_rejects_invalid_root_type(tmp_path: Path) -> None:
     """Strict mode should reject invalid YAML root types."""
     config_file = tmp_path / "aimodels.yaml"

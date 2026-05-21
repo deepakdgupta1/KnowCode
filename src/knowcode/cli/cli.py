@@ -376,6 +376,74 @@ def stats(store: str) -> None:
 @cli.command()
 @click.option(
     "--store", "-s",
+    type=click.Path(),
+    default=".",
+    help="Path to knowledge store file or directory",
+)
+@click.option(
+    "--index", "-i",
+    "index_path",
+    type=click.Path(),
+    help="Path to semantic index directory (default: beside the store)",
+)
+@click.option(
+    "--config", "-c",
+    type=click.Path(),
+    help="Path to configuration file (aimodels.yaml)",
+)
+@click.option(
+    "--max-disk-mb",
+    type=float,
+    default=500.0,
+    show_default=True,
+    help="Warn if KnowCode artifacts exceed this size.",
+)
+@click.option(
+    "--mcp/--no-mcp",
+    default=False,
+    help="Spawn the MCP server and verify list_tools plus one tool call.",
+)
+@click.option(
+    "--json", "as_json",
+    is_flag=True,
+    help="Output the doctor report as JSON.",
+)
+def doctor(
+    store: str,
+    index_path: Optional[str],
+    config: Optional[str],
+    max_disk_mb: float,
+    mcp: bool,
+    as_json: bool,
+) -> None:
+    """Check whether the local KnowCode setup is ready."""
+    from knowcode.doctor import run_doctor
+
+    report = run_doctor(
+        store_path=store,
+        index_path=index_path,
+        config_path=config,
+        max_disk_mb=max_disk_mb,
+        include_mcp=mcp,
+    )
+
+    if as_json:
+        click.echo(json.dumps(report.to_dict(), indent=2))
+    else:
+        click.echo("KnowCode Doctor")
+        click.echo("-" * 30)
+        for check in report.checks:
+            click.echo(f"[{check.status.upper()}] {check.name}: {check.message}")
+            if check.hint:
+                click.echo(f"       Hint: {check.hint}")
+
+    if not report.ok:
+        sys.exit(1)
+
+
+@cli.command()
+@click.option(
+    "--store", "-s",
     type=click.Path(exists=True),
     default=".",
     help="Path to knowledge store file or directory",

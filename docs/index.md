@@ -126,6 +126,17 @@ Show statistics about the knowledge store.
 knowcode stats [--store <path>]
 ```
 
+### `doctor`
+Check whether the local KnowCode setup is ready for daily use.
+
+```bash
+knowcode doctor [--store <path>] [--index <path>] [--config <path>] [--mcp] [--json]
+```
+
+Checks include strict config loading, required model API keys, knowledge store
+schema, semantic index schema/embedding dimensions, artifact disk footprint,
+and optionally an MCP stdio handshake.
+
 ### `index`
 Build a semantic search index for your codebase.
 
