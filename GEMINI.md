@@ -15,3 +15,7 @@ If the codebase already addresses the problem you are about to recommend solving
 ## Do not present uncertain claims as facts
 
 If you have not verified something, say "I have not verified this." Hedging is not a weakness — unearned confidence is. When you skip verification to sound more decisive, you trade correctness for tone.
+
+# KnowCode MCP Context
+
+When repository context is needed, follow `docs/mcp-contract.md`. Start with `retrieve_context_for_query` using `verbosity=minimal` and the smallest budget that fits the task. Escalate verbosity or breadth only when the minimal context is insufficient.

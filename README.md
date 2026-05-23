@@ -257,8 +257,8 @@ MCP read tools are deterministic and do not auto-run analysis.
 ```json
 {
   "knowcode": {
-    "command": "knowcode",
-    "args": ["mcp-server", "--store", "/path/to/project"]
+    "command": "uv",
+    "args": ["run", "knowcode", "mcp-server", "--store", "/path/to/project"]
   }
 }
 ```
@@ -272,20 +272,24 @@ pip install "knowcode[mcp]"
 
 KnowCode enables token-efficient IDE agent workflows. When your IDE agent needs context, it invokes KnowCode's MCP tools to retrieve relevant code context locally *before* calling expensive external LLMs.
 
+The canonical retrieval policy lives in [`docs/mcp-contract.md`](docs/mcp-contract.md).
+Keep agent rules pointed there instead of hard-coding separate thresholds or
+token budgets in each client.
+
 **How It Works:**
 1. IDE agent receives user query
-2. Agent invokes `retrieve_context_for_query` via MCP
-3. KnowCode returns context + `sufficiency_score` (0.0-1.0)
-4. **Score ≥ 0.8**: Answer locally (zero external tokens)
-5. **Score < 0.8**: Use returned context with external LLM
+2. Agent invokes `retrieve_context_for_query` with `verbosity="minimal"`
+3. KnowCode returns compact context + `sufficiency_score` (0.0-1.0)
+4. If the score meets `config.sufficiency_threshold`, answer locally
+5. If context is insufficient, escalate verbosity or budget before falling back
 
 **Antigravity Configuration (`.gemini/mcp_servers.json`):**
 ```json
 {
   "mcpServers": {
     "knowcode": {
-      "command": "knowcode",
-      "args": ["mcp-server", "--store", "/path/to/your/project"]
+      "command": "uv",
+      "args": ["run", "knowcode", "mcp-server", "--store", "/path/to/your/project"]
     }
   }
 }

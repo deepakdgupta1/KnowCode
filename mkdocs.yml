@@ -54,6 +54,7 @@ markdown_extensions:
 
 nav:
   - Home: index.md
+  - MCP Contract: mcp-contract.md
   - Evolution: evolution.md
   - API Reference:
       - Knowledge Store: api/knowledge_store.md

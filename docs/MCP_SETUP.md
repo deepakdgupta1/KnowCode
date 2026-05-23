@@ -1,350 +1,176 @@
 # KnowCode MCP Server Setup Guide
 
+**Last Updated:** 2026-05-23
+
+This guide shows how to connect an MCP-capable IDE or agent to KnowCode. The
+agent operating policy is defined in [mcp-contract.md](mcp-contract.md); keep
+thresholds, verbosity rules, and token budgets there so all agents behave the
+same way.
+
 ## Overview
 
-This guide documents how to set up and configure the KnowCode MCP (Model Context Protocol) server for integration with Antigravity IDE.
+KnowCode MCP lets agents retrieve focused repository context before building a
+large prompt. The low-token workflow is:
 
-## What is MCP?
-
-MCP (Model Context Protocol) allows IDE agents to retrieve context from your codebase **before** hitting external LLMs, reducing token consumption and improving response quality.
-
-## Architecture
-
-```
-User Query
-    ↓
-Antigravity Agent
-    ↓
-retrieve_context_for_query (MCP Tool)
-    ↓
-KnowCode MCP Server
-    ↓
-Knowledge Store + Semantic Index
-    ↓
-Context Bundle (with sufficiency_score)
-    ↓
-Agent Decision:
-    • If sufficiency_score >= 0.8 → Answer from context only
-    • If sufficiency_score < 0.8 → Use external LLM
-```
+1. Agent receives a user query.
+2. Agent calls `retrieve_context_for_query` with `verbosity="minimal"`.
+3. KnowCode returns compact `context_text`, `sufficiency_score`, and token count.
+4. Agent answers locally when the configured threshold is met.
+5. Agent escalates budget or verbosity only when the minimal context is not enough.
 
 ## Prerequisites
 
-1. **KnowCode installed** in a virtual environment
-2. **Knowledge store generated** (`knowcode_knowledge.json`)
-3. **Semantic index built** (optional, but recommended)
-4. **Antigravity IDE** with MCP support
+- KnowCode installed in the repository environment.
+- A generated knowledge store: `knowcode_knowledge.json`.
+- A semantic index: `knowcode_index/`.
+- An MCP-capable client such as Antigravity, Claude Desktop, VS Code, or another agent host.
 
-## Configuration
+Run the local readiness check before wiring the client:
 
-### 1. MCP Server Configuration File
+```bash
+uv run knowcode analyze . --output .
+uv run knowcode doctor --store . --mcp
+```
 
-**Location:** `/home/deeog/.gemini/mcp_servers.json`
+## MCP Client Configuration
 
-**Content:**
+Use an absolute repository path for `--store`. In a development checkout, using
+`uv run` keeps the MCP server on the same environment as the project.
+
+Generic MCP config:
+
 ```json
 {
   "mcpServers": {
     "knowcode": {
-      "command": "/home/deeog/Desktop/KnowCode/.venv/bin/knowcode",
-      "args": ["mcp-server", "--store", "/home/deeog/Desktop/KnowCode/"]
+      "command": "uv",
+      "args": [
+        "run",
+        "knowcode",
+        "mcp-server",
+        "--store",
+        "/absolute/path/to/repository"
+      ]
     }
   }
 }
 ```
 
-**⚠️ Important Notes:**
-- Use **absolute path** to the `knowcode` binary in your virtual environment
-- Do NOT use just `"knowcode"` - it won't be in the system PATH
-- The `--store` argument should point to the directory containing `knowcode_knowledge.json`
+If your client cannot run through `uv`, point `command` at the absolute
+`knowcode` executable in the virtual environment:
 
-### 2. Agent Rules Configuration
-
-**Location:** `/home/deeog/Desktop/KnowCode/.agent/context.md`
-
-**Content:**
-```markdown
-Always call the tool retrieve_context_for_query before answering.
-Use task_type=auto, max_tokens=3000, limit_entities=3, expand_deps=true.
-If sufficiency_score >= 0.8 and context_text is non-empty, answer ONLY from context_text.
-Do not call other tools or request more context.
-If sufficiency_score < 0.8, then proceed with a full LLM answer.
+```json
+{
+  "mcpServers": {
+    "knowcode": {
+      "command": "/absolute/path/to/repository/.venv/bin/knowcode",
+      "args": ["mcp-server", "--store", "/absolute/path/to/repository"]
+    }
+  }
+}
 ```
 
-This ensures the agent follows the local-first workflow.
+Restart the IDE or agent host after changing its MCP config.
 
-## Setup Steps
+## Agent Rule
 
-### Step 1: Analyze Codebase (Includes Indexing)
+Put only a pointer plus the compact rule in agent-specific config files:
+
+```md
+When repository context is needed, follow docs/mcp-contract.md.
+Start with retrieve_context_for_query using verbosity=minimal and the smallest
+budget that fits the task. Escalate to standard or verbose only when the minimal
+context is insufficient. Use the configured sufficiency_threshold from
+aimodels.yaml to decide whether to answer from local context.
+```
+
+The repo-level rule is `.agent/rules/context.md`.
+
+## Tool Use
+
+The MCP server exposes four tools:
+
+- `retrieve_context_for_query`: primary natural-language retrieval path.
+- `search_codebase`: find entities by known name or pattern.
+- `get_entity_context`: fetch context for a specific known entity.
+- `trace_calls`: inspect callers or callees for a specific entity.
+
+Agents should call `retrieve_context_for_query` first for ordinary repository
+questions. Use the other tools only for focused follow-up after retrieval has
+identified the relevant entity or missing information.
+
+## Verification
+
+Run:
 
 ```bash
-cd /home/deeog/Desktop/KnowCode
-source .venv/bin/activate
-knowcode analyze . -o .
+uv run knowcode doctor --store . --mcp
 ```
 
-This command:
-- ✅ Parses the codebase and builds the knowledge graph
-- ✅ Creates `knowcode_knowledge.json` with all entities and relationships
-- ✅ Attempts to build the semantic index at `knowcode_index/`
-- ✅ Reports indexed chunk count (or indexing warning if embedding setup is unavailable)
+Then ask the agent a repository question such as:
 
-**Note:** If semantic indexing is skipped (e.g., missing embedding API credentials), run `knowcode index .` after configuring embeddings.
-
-### Step 3: Configure MCP Server
-
-Create or update `/home/deeog/.gemini/mcp_servers.json` with the configuration shown above.
-
-### Step 4: Restart Antigravity IDE
-
-The IDE needs to be restarted to:
-1. Read the updated MCP configuration
-2. Establish connection to the MCP server
-3. Make the `retrieve_context_for_query` tool available
-
-### Step 5: Verify Connection
-
-Run the verification script:
-
-```bash
-./verify_mcp_connection.sh
+```text
+Where is the retrieval orchestration implemented?
 ```
 
-## Testing the Setup
+Expected behavior:
 
-### Test 1: Check MCP Server is Running
-
-```bash
-ps aux | grep "knowcode mcp-server"
-```
-
-You should see a process running with the full path to your venv.
-
-### Test 2: Ask a Question
-
-In Antigravity, ask a question about your codebase:
-
-```
-How does search work in KnowCode?
-```
-
-**Expected behavior:**
-1. Agent calls `retrieve_context_for_query`
-2. Returns context with `sufficiency_score`
-3. If score >= 0.8, answers from context only
-4. If score < 0.8, uses external LLM
-
-### Test 3: Verify All Tools
-
-The MCP server provides 4 specialized tools. You can verify they are all available in the Antigravity tool list:
-1.  **`retrieve_context_for_query`**: Primary tool for general questions (RAG).
-2.  **`search_codebase`**: Best for finding specific symbols by name.
-3.  **`get_entity_context`**: Best for deep-diving into the source of a specific class or method.
-4.  **`trace_calls`**: Best for understanding the call graph and dependencies.
-
-### Test 4: Check Agent Logs
-
-The agent should show:
-```
-Calling retrieve_context_for_query...
-Sufficiency score: 0.92
-Answering from local context only.
-```
+1. The agent calls `retrieve_context_for_query`.
+2. The first call uses `verbosity="minimal"`.
+3. The agent answers from local context when `sufficiency_score` meets the configured threshold.
+4. The agent escalates to `standard` or `verbose` only if the minimal context is insufficient.
 
 ## Troubleshooting
 
-### Issue 1: MCP Server Not Starting
+### MCP Server Not Available
 
-**Symptoms:**
-- `retrieve_context_for_query` tool not available
-- No MCP server process running
-
-**Solutions:**
-1. Check the command path in `mcp_servers.json` is absolute
-2. Verify the knowcode binary exists: `ls -la /path/to/.venv/bin/knowcode`
-3. Check file permissions: `chmod +x /path/to/.venv/bin/knowcode`
-4. Restart the IDE
-
-### Issue 2: Knowledge Store Not Found
-
-**Symptoms:**
-- MCP server starts but returns empty context
-- Error: "Knowledge store not found"
-
-**Solutions:**
-1. Verify `knowcode_knowledge.json` exists in the store path
-2. Check the `--store` argument in `mcp_servers.json`
-3. Re-run `knowcode analyze`
-
-### Issue 3: Low Sufficiency Scores
-
-**Symptoms:**
-- `sufficiency_score` always < 0.8
-- Agent always uses external LLM
-
-**Solutions:**
-1. Build semantic index: `knowcode index .`
-2. Increase `max_tokens` parameter (default: 3000)
-3. Increase `limit_entities` parameter (default: 3)
-4. Check if the query matches your codebase domain
-
-### Issue 4: Semantic Search Not Working
-
-**Symptoms:**
-- Falls back to lexical search
-- Warning: "Semantic retrieval failed"
-
-**Solutions:**
-1. Verify `knowcode_index/` directory exists
-2. Check `knowcode_index/index_manifest.json` exists
-3. Verify embedding model is configured in `aimodels.yaml`
-4. Check API keys for embedding provider (VoyageAI, OpenAI, etc.)
-
-## MCP Server Commands
-
-### Start Manually (for testing)
+Check that the MCP command path is valid, the client config uses an absolute
+store path, and the IDE was restarted after editing the config.
 
 ```bash
-cd /home/deeog/Desktop/KnowCode
-source .venv/bin/activate
-knowcode mcp-server --store .
+uv run knowcode mcp-server --store .
 ```
 
-### Check Status
+### Knowledge Store Not Found
+
+Run:
 
 ```bash
-./check_mcp_server.sh
+uv run knowcode analyze . --output .
 ```
 
-### Stop Server
+Then verify the MCP config `--store` points to the directory containing
+`knowcode_knowledge.json`.
 
-If running manually, press `Ctrl+C`.
+### Semantic Retrieval Fallback
 
-If started by Antigravity, it will be managed automatically.
-
-## Configuration Files Reference
-
-### `aimodels.yaml` (Embedding Configuration)
-
-```yaml
-embedding_models:
-  - name: voyage-code-3
-    provider: voyageai
-    api_key_env: VOYAGE_API_KEY_1
-    dimensions: 1024
-
-reranking_models:
-  - name: rerank-2.5
-    provider: voyageai
-    api_key_env: VOYAGE_API_KEY_1
-```
-
-### Environment Variables
-
-Create a `.env` file in your project root:
+If responses mention semantic retrieval fallback, rebuild the index and rerun
+doctor:
 
 ```bash
-VOYAGE_API_KEY_1=your_api_key_here
-OPENAI_API_KEY=your_openai_key_here
+uv run knowcode index . --output knowcode_index
+uv run knowcode doctor --store .
 ```
 
-## Performance Tuning
+Also confirm embedding API keys from `aimodels.yaml` are present in the agent
+environment.
 
-### Optimize for Speed
+### Context Still Too Small
 
-```markdown
-# In .agent/context.md
-Use task_type=auto, max_tokens=1500, limit_entities=2, expand_deps=false.
-```
+Follow the ladder in [mcp-contract.md](mcp-contract.md): increase breadth while
+staying in `minimal`, then use `standard` for implementation detail, then
+`verbose` for evidence. Avoid making `diagnostic` the default.
 
-### Optimize for Quality
+## Security Notes
 
-```markdown
-# In .agent/context.md
-Use task_type=auto, max_tokens=6000, limit_entities=5, expand_deps=true.
-```
-
-### Balance (Recommended)
-
-```markdown
-# In .agent/context.md
-Use task_type=auto, max_tokens=3000, limit_entities=3, expand_deps=true.
-```
-
-## Monitoring
-
-### Check Token Savings
-
-The MCP server logs show:
-- Queries answered locally (sufficiency >= 0.8)
-- Queries sent to external LLM (sufficiency < 0.8)
-- Token counts for each response
-
-### Metrics to Track
-
-1. **Sufficiency Score Distribution**: Aim for >70% of queries with score >= 0.8
-2. **Token Consumption**: Compare before/after MCP integration
-3. **Response Quality**: Verify local answers are accurate
-
-## Best Practices
-
-1. **Keep Knowledge Store Updated**: Re-analyze after significant code changes
-2. **Rebuild Index Periodically**: Especially after adding new files
-3. **Monitor Sufficiency Scores**: Low scores indicate missing context
-4. **Use Semantic Search**: Much better than lexical-only
-5. **Configure Appropriate Limits**: Balance speed vs. quality
-
-## Advanced Configuration
-
-### Custom Sufficiency Threshold
-
-You can adjust the threshold in `.agent/context.md`:
-
-```markdown
-If sufficiency_score >= 0.75 and context_text is non-empty, answer ONLY from context_text.
-```
-
-Lower threshold = more local answers, but potentially lower quality.
-
-### Multi-Hop Dependency Expansion
-
-For complex queries, enable deeper dependency traversal:
-
-```markdown
-Use expand_deps=true, max_depth=2
-```
-
-### Task-Specific Configuration
-
-```markdown
-For code_explanation queries: max_tokens=4000, limit_entities=5
-For debugging queries: max_tokens=6000, limit_entities=3, expand_deps=true
-For general queries: max_tokens=2000, limit_entities=2
-```
-
-## Security Considerations
-
-1. **API Keys**: Store in `.env`, never commit to git
-2. **MCP Server**: Runs locally, no external data transmission
-3. **Knowledge Store**: Contains your code, keep secure
-4. **Embedding Vectors**: May be sent to external providers (VoyageAI, OpenAI)
-
-## Support
-
-For issues or questions:
-1. Check this documentation
-2. Run `./verify_mcp_connection.sh`
-3. Check `./check_mcp_server.sh`
-4. Review conversation history for similar issues
-
-## Changelog
-
-- **2026-01-13**: Initial MCP setup documentation
-- **2026-01-13**: Fixed command path issue (absolute path required)
-- **2026-01-13**: Added verification script
+- The MCP server runs locally over stdio.
+- `knowcode_knowledge.json` and `knowcode_index/` contain repository-derived data.
+- Embedding providers may receive text during indexing, depending on your
+  configured provider.
+- Store API keys in environment variables, not committed files.
 
 ## References
 
-- [KnowCode Documentation](../README.md)
-- [MCP Protocol Specification](https://modelcontextprotocol.io/)
-- [Antigravity IDE Documentation](https://antigravity.dev/)
+- [MCP retrieval contract](mcp-contract.md)
+- [Documentation MCP section](index.md#mcp-server)
+- [MCP token overhead notes](MCP_TOKEN_OVERHEAD_REDUCTION.md)

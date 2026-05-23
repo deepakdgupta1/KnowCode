@@ -225,6 +225,9 @@ Start an MCP (Model Context Protocol) server for IDE agent integration.
 knowcode mcp-server [--store <path>] [--config <path>]
 ```
 
+For token-efficient IDE agent usage, follow the canonical
+[MCP retrieval contract](mcp-contract.md).
+
 **Tools Exposed:**
 - `search_codebase` - Search for code entities by name
 - `get_entity_context` - Get detailed context for an entity

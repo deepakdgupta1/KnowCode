@@ -2,19 +2,27 @@
 trigger: always_on
 ---
 
-to determine if sufficient local context is available.
-When the user submits a query, use the following sources for generating the required context -
+Follow `docs/mcp-contract.md` for the canonical KnowCode MCP retrieval policy.
+Use the current chat context first. When repository context is still needed,
+call `retrieve_context_for_query` with `verbosity=minimal` and the smallest
+budget that fits the task.
 
-1. Check the context window of the current chat session. If you need more context,
-2. Use the knowcode mcp tool `retrieve_context_for_query` with the following arguments: `task_type=auto`, `max_tokens=3000`, `limit_entities=3`, `expand_deps=true`, and crucially, **`verbosity=minimal`**.
-3. In `minimal` mode, the tool returns a `reduction_summary` telling you what was hidden (e.g., source code or evidence). **If the returned context lacks the implementation details you need**, call the tool again with `verbosity=standard` (to get raw source code) or `verbosity=verbose` (to get evidence chunks).
-4. Consider using the other knowcode mcp tools (listed below) if relevant:
+Default starting points:
 
-- `search_codebase`: Use to find code entities (functions, classes, modules) by name or pattern.
-- `get_entity_context`: Use to get detailed context for a specific entity (source code, docstrings, callers/callees).
-- `trace_calls`: Use to trace the call graph (callers or callees) for an entity up to N hops.
+- Locate or explain one symbol: `max_tokens=1500`, `limit_entities=1`, `expand_deps=false`.
+- Debug a concrete failure: `max_tokens=2000`, `limit_entities=2`, `expand_deps=true`.
+- Review or extend a feature area: `max_tokens=3000`, `limit_entities=2-3`, `expand_deps=true`.
 
-If `sufficiency_score >= 0.88` and `context_text` is non-empty, you may answer from the retrieved context alone to maximize efficiency.
-If more information is needed, or if the score is low, inform the user that you do not have a satisfactory answer to the query and stop, UNLESS you haven't yet escalated your `verbosity` level to recover missing code.
+If `context_text` is insufficient, escalate in this order: increase breadth while
+staying in `minimal`, then use `standard` for implementation detail, then use
+`verbose` for ranking evidence. Use `diagnostic` only for retrieval debugging.
 
-DO NOT use the external frontier LLMs (e.g. Gemini 3 Flash, Gemini 3 Pro, Claude Sonnet 4.5, Claud Opus 4.5, etc.) at all.
+Use the configured `config.sufficiency_threshold` from `aimodels.yaml` to decide
+whether local context is sufficient. If the score is below threshold, recover
+missing local context before falling back to a larger external prompt.
+
+Use focused tools only after the first retrieval call:
+
+- `search_codebase`: find entities by known name or pattern.
+- `get_entity_context`: fetch context for a specific known entity.
+- `trace_calls`: inspect callers or callees for a specific entity.
