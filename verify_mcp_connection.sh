@@ -34,7 +34,7 @@ echo ""
 # 2. Verify MCP configuration
 echo "2. Verifying MCP configuration..."
 MCP_CONFIG_FOUND=0
-for CONFIG_PATH in "$HOME/.gemini/antigravity/mcp_config.json" "$HOME/.gemini/mcp_servers.json" "$HOME/.claude/mcp.json"; do
+for CONFIG_PATH in "$HOME/.gemini/antigravity/mcp_config.json" "$HOME/.gemini/mcp_servers.json" "$HOME/.claude/mcp.json" "$HOME/Library/Application Support/Claude/claude_desktop_config.json"; do
     if [ -f "$CONFIG_PATH" ]; then
         echo -e "   ${GREEN}✓${NC} Config file exists: $CONFIG_PATH"
         MCP_CONFIG_FOUND=1
