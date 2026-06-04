@@ -9,6 +9,8 @@ RED='\033[0;31m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # 1. Check if MCP server process is running
 echo "1. Checking if KnowCode MCP server is running..."
 if ps aux | grep -v grep | grep "knowcode mcp-server" > /dev/null; then
@@ -31,31 +33,42 @@ echo ""
 
 # 2. Verify MCP configuration
 echo "2. Verifying MCP configuration..."
-MCP_CONFIG="/home/deeog/.gemini/antigravity/mcp_config.json"
-if [ -f "$MCP_CONFIG" ]; then
-    echo -e "   ${GREEN}✓${NC} Config file exists: $MCP_CONFIG"
-    
-    # Check if it uses full path
-    if grep -q "/home/deeog/Desktop/KnowCode/.venv/bin/knowcode" "$MCP_CONFIG"; then
-        echo -e "   ${GREEN}✓${NC} Using absolute path to knowcode binary"
-    else
-        echo -e "   ${RED}✗${NC} Not using absolute path - may fail to start"
+MCP_CONFIG_FOUND=0
+for CONFIG_PATH in "$HOME/.gemini/antigravity/mcp_config.json" "$HOME/.gemini/mcp_servers.json" "$HOME/.claude/mcp.json"; do
+    if [ -f "$CONFIG_PATH" ]; then
+        echo -e "   ${GREEN}✓${NC} Config file exists: $CONFIG_PATH"
+        MCP_CONFIG_FOUND=1
+        
+        # Check if it uses full path to knowcode binary in our workspace
+        if grep -q "$SCRIPT_DIR/.venv/bin/knowcode" "$CONFIG_PATH"; then
+            echo -e "   ${GREEN}✓${NC}   Using absolute path to knowcode binary"
+        elif grep -q "uv" "$CONFIG_PATH" && grep -q "knowcode" "$CONFIG_PATH" && grep -q "$SCRIPT_DIR" "$CONFIG_PATH"; then
+            echo -e "   ${GREEN}✓${NC}   Using uv command with project workspace"
+        else
+            echo -e "   ${YELLOW}⚠${NC}   Does not reference local venv knowcode binary"
+        fi
     fi
-else
-    echo -e "   ${RED}✗${NC} Config file not found!"
+done
+
+if [ $MCP_CONFIG_FOUND -eq 0 ]; then
+    echo -e "   ${RED}✗${NC} No known MCP config files found!"
 fi
 
 echo ""
 
 # 3. Check knowledge store
 echo "3. Checking knowledge store..."
-STORE_PATH="/home/deeog/Desktop/KnowCode/knowcode_knowledge.json"
+STORE_PATH="$SCRIPT_DIR/knowcode_knowledge.json"
 if [ -f "$STORE_PATH" ]; then
     SIZE=$(du -h "$STORE_PATH" | cut -f1)
     echo -e "   ${GREEN}✓${NC} Knowledge store exists: $SIZE"
     
-    # Check if it's recent
-    MOD_TIME=$(stat -c %Y "$STORE_PATH")
+    # Check if it's recent (cross-platform macOS/Linux stat check)
+    if stat -f %m "$STORE_PATH" >/dev/null 2>&1; then
+        MOD_TIME=$(stat -f %m "$STORE_PATH")
+    else
+        MOD_TIME=$(stat -c %Y "$STORE_PATH")
+    fi
     CURRENT_TIME=$(date +%s)
     AGE=$((CURRENT_TIME - MOD_TIME))
     
@@ -73,7 +86,7 @@ echo ""
 
 # 4. Check semantic index
 echo "4. Checking semantic index..."
-INDEX_PATH="/home/deeog/Desktop/KnowCode/knowcode_index"
+INDEX_PATH="$SCRIPT_DIR/knowcode_index"
 if [ -d "$INDEX_PATH" ]; then
     echo -e "   ${GREEN}✓${NC} Semantic index directory exists"
     
@@ -103,11 +116,11 @@ echo ""
 
 # 5. Test knowcode CLI
 echo "5. Testing knowcode CLI availability..."
-if [ -f "/home/deeog/Desktop/KnowCode/.venv/bin/knowcode" ]; then
+if [ -f "$SCRIPT_DIR/.venv/bin/knowcode" ]; then
     echo -e "   ${GREEN}✓${NC} knowcode binary exists in venv"
     
     # Try to get version
-    VERSION=$(source /home/deeog/Desktop/KnowCode/.venv/bin/activate && knowcode --version 2>&1 || echo "unknown")
+    VERSION=$(source "$SCRIPT_DIR/.venv/bin/activate" && knowcode --version 2>&1 || echo "unknown")
     echo "   Version: $VERSION"
 else
     echo -e "   ${RED}✗${NC} knowcode binary not found in venv"

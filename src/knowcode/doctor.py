@@ -487,47 +487,49 @@ async def _check_mcp_handshake(
         args=args,
         cwd=Path.cwd(),
     )
-    errlog = io.StringIO()
+    import tempfile
 
-    async with stdio_client(params, errlog=errlog) as (read_stream, write_stream):
-        async with ClientSession(read_stream, write_stream) as session:
-            await asyncio.wait_for(session.initialize(), timeout=timeout_seconds)
-            tools_result = await asyncio.wait_for(
-                session.list_tools(),
-                timeout=timeout_seconds,
-            )
-            tool_names = {tool.name for tool in tools_result.tools}
-            if "search_codebase" not in tool_names:
-                return DoctorCheck(
-                    name="MCP handshake",
-                    status="fail",
-                    message="MCP server did not expose search_codebase.",
-                    hint="Check src/knowcode/mcp/server.py tool registration.",
+    with tempfile.TemporaryFile(mode="w+t") as errlog:
+        async with stdio_client(params, errlog=errlog) as (read_stream, write_stream):
+            async with ClientSession(read_stream, write_stream) as session:
+                await asyncio.wait_for(session.initialize(), timeout=timeout_seconds)
+                tools_result = await asyncio.wait_for(
+                    session.list_tools(),
+                    timeout=timeout_seconds,
                 )
+                tool_names = {tool.name for tool in tools_result.tools}
+                if "search_codebase" not in tool_names:
+                    return DoctorCheck(
+                        name="MCP handshake",
+                        status="fail",
+                        message="MCP server did not expose search_codebase.",
+                        hint="Check src/knowcode/mcp/server.py tool registration.",
+                    )
 
-            call_result = await asyncio.wait_for(
-                session.call_tool("search_codebase", {"query": "", "limit": 1}),
-                timeout=timeout_seconds,
-            )
-            if not call_result.content:
-                return DoctorCheck(
-                    name="MCP handshake",
-                    status="fail",
-                    message="MCP tool call returned no content.",
-                    hint="Run `knowcode mcp-server --store <path>` manually to inspect stderr.",
+                call_result = await asyncio.wait_for(
+                    session.call_tool("search_codebase", {"query": "", "limit": 1}),
+                    timeout=timeout_seconds,
                 )
+                if not call_result.content:
+                    return DoctorCheck(
+                        name="MCP handshake",
+                        status="fail",
+                        message="MCP tool call returned no content.",
+                        hint="Run `knowcode mcp-server --store <path>` manually to inspect stderr.",
+                    )
 
-            text = getattr(call_result.content[0], "text", "")
-            parsed = json.loads(text)
-            if not isinstance(parsed, list):
-                return DoctorCheck(
-                    name="MCP handshake",
-                    status="fail",
-                    message="MCP tool response was not a JSON list.",
-                    hint="Check search_codebase response formatting.",
-                )
+                text = getattr(call_result.content[0], "text", "")
+                parsed = json.loads(text)
+                if not isinstance(parsed, list):
+                    return DoctorCheck(
+                        name="MCP handshake",
+                        status="fail",
+                        message="MCP tool response was not a JSON list.",
+                        hint="Check search_codebase response formatting.",
+                    )
 
-    stderr = errlog.getvalue().strip()
+        errlog.seek(0)
+        stderr = errlog.read().strip()
     message = f"Listed {len(tool_names)} tools and called search_codebase successfully."
     if stderr:
         message = f"{message} Server stderr: {stderr}"
