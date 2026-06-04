@@ -60,6 +60,8 @@ class Agent:
             base_url = None
             if config.provider == "mistralai" or "openrouter" in config.provider:
                 base_url = "https://openrouter.ai/api/v1"
+            elif config.provider in ("glm", "z-ai"):
+                base_url = os.environ.get("GLM_BASE_URL")
             
             client = _create_openai_client(api_key=api_key, base_url=base_url)
             

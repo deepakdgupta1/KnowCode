@@ -1,14 +1,9 @@
 natural_language_models:
-  - name: mistralai/devstral-2512
-    provider: mistralai
-    api_key_env: OPENROUTER_API_KEY
+  - name: glm-5
+    provider: z-ai
+    api_key_env: GLM_API_KEY
     rpm_free_tier_limit: 99999
     rpd_free_tier_limit: 99999
-  - name: gemini-3-flash-preview
-    provider: google
-    api_key_env: GOOGLE_API_KEY_1
-    rpm_free_tier_limit: 5
-    rpd_free_tier_limit: 20
 
 embedding_models:
   - name: voyage-code-3
@@ -19,10 +14,9 @@ embedding_models:
 eval_models:
   - name: voyage-code-3
     provider: voyageai
-#   api_key_env: VOYAGE_API_KEY_1
+    #   api_key_env: VOYAGE_API_KEY_1
     tokens_free_tier_limit: 200000000
 
 # Configuration
 config:
-  sufficiency_threshold: 0.8  # Configurable threshold for local-first answering
-
+  sufficiency_threshold: 0.8 # Configurable threshold for local-first answering
