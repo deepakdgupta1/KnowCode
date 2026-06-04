@@ -35,6 +35,22 @@ def test_cli_analyze_query_stats_context(tmp_path) -> None:  # type: ignore
     assert context.exit_code == 0
 
 
+def test_cli_build_defaults_to_current_directory(tmp_path, monkeypatch) -> None:  # type: ignore
+    """`knowcode build` with no arguments builds the store in the cwd."""
+    (tmp_path / "sample.py").write_text("def foo():\n    return 1\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    runner = CliRunner()
+    result = runner.invoke(cli_module.cli, ["build"])
+
+    assert result.exit_code == 0, result.output
+    assert "Build complete" in result.output
+    store_path = tmp_path / "knowcode_knowledge.json"
+    assert store_path.exists()
+    data = json.loads(store_path.read_text(encoding="utf-8"))
+    assert data["entities"]
+
+
 @pytest.mark.parametrize(
     ("args", "expected_message"),
     [

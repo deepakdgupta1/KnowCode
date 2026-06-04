@@ -83,6 +83,83 @@ def analyze(directory: str, output: str, ignore: tuple[str, ...], temporal: bool
 
 
 @cli.command()
+@click.argument(
+    "directory",
+    type=click.Path(exists=True, file_okay=False),
+    default=".",
+    required=False,
+)
+@click.option(
+    "--ignore", "-i",
+    multiple=True,
+    help="Additional patterns to ignore",
+)
+@click.option(
+    "--temporal/--no-temporal",
+    default=False,
+    help="Analyze git history and add temporal context.",
+)
+@click.option(
+    "--config", "-c",
+    type=click.Path(exists=True, dir_okay=False),
+    help="Path to configuration file (aimodels.yaml) for embedding models.",
+)
+def build(
+    directory: str,
+    ignore: tuple[str, ...],
+    temporal: bool,
+    config: Optional[str],
+) -> None:
+    """Build the knowledge base and semantic index for a directory.
+
+    Scans DIRECTORY (defaults to the current directory), builds the
+    knowledge store, and builds the semantic index alongside it. Run it
+    from inside any project with no arguments:
+
+    \b
+        knowcode build
+    """
+    target = Path(directory).resolve()
+    click.echo(f"Building KnowCode knowledge base for: {target}")
+    if temporal:
+        click.echo("Temporal analysis: Enabled")
+
+    from knowcode.config import AppConfig
+
+    app_config = AppConfig.load(config)
+    service = KnowCodeService(app_config=app_config)
+    stats = service.analyze(
+        directory=str(target),
+        output=str(target),
+        ignore=list(ignore),
+        temporal=temporal,
+    )
+
+    click.echo("\n✓ Build complete!")
+    click.echo(f"  Entities: {stats['total_entities']}")
+    click.echo(f"  Relationships: {stats['total_relationships']}")
+    if stats.get("total_errors", 0) > 0:
+        click.echo(f"  Errors: {stats['total_errors']}")
+    if stats.get("indexed_chunks") is not None:
+        click.echo(f"  Indexed chunks: {stats['indexed_chunks']}")
+
+    save_path = target / KnowledgeStore.DEFAULT_FILENAME
+    click.echo(f"\n  Knowledge store: {save_path}")
+    if stats.get("index_path"):
+        click.echo(f"  Semantic index: {stats['index_path']}")
+    if stats.get("index_error"):
+        click.echo(
+            "\n  Note: semantic index was skipped (knowledge store still built).",
+            err=True,
+        )
+        click.echo(f"    {stats['index_error']}", err=True)
+        click.echo(
+            "    Build it later with `knowcode index` once embeddings are configured.",
+            err=True,
+        )
+
+
+@cli.command()
 @click.argument("directory", type=click.Path(exists=True, file_okay=False))
 @click.option(
     "--output",
