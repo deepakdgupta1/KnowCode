@@ -1,0 +1,255 @@
+{
+  "README_MCP.md": [
+    "\"/home/deeog/Desktop/KnowCode/.venv/bin/knowcode\"",
+    "docs/MCP_SETUP.md",
+    "/home/deeog/.gemini/antigravity/mcp_config.json",
+    ".agent/context.md"
+  ],
+  "MCP_operationalization.md": [
+    "scripts/evaluate.py",
+    "/reload",
+    "tests/eval/data/retrieval_golden_queries.json",
+    "PR3",
+    "PR1",
+    "tests/unit/indexing/test_monitor.py",
+    "PR6",
+    "on_deleted",
+    "bootstrap",
+    "src/knowcode/telemetry.py",
+    "expected_entity_ids",
+    "tests/eval/",
+    "docs/retrieval-evals.md",
+    "tests/unit/indexing/test_background_indexer.py",
+    "PR5",
+    "PR7",
+    "tests/eval/fixtures/mini_repo/",
+    "tests/unit/test_telemetry.py",
+    "docs/observability.md",
+    "docs/supported-language-matrix.md",
+    "docs/mcp-contract.md",
+    "PR2",
+    "/home/deeog/...",
+    "notes",
+    "tests/eval/test_retrieval_golden_queries.py",
+    "PR4",
+    "tests/eval/conftest.py",
+    "tests/unit/cli/test_doctor.py",
+    "tests/unit/cli/test_bootstrap.py",
+    "tests/unit/service/test_freshness.py",
+    "on_moved"
+  ],
+  "README.md": [
+    "/openapi.json",
+    "/api/v1/*",
+    ".gemini/mcp_servers.json",
+    "~/.aimodels.yaml",
+    "docs/mcp-contract.md",
+    "analyze_command",
+    "/path/to/graph_builder.py",
+    "apps/agent-gateway/src/agent_gateway/",
+    "apps/agent-gateway/"
+  ],
+  "KnowCode.md": [
+    "scripts/evaluate.py",
+    "pyyaml",
+    "GitPython",
+    "/context/query",
+    "networkx",
+    "search_history",
+    "~/.knowcode/usage_stats.json",
+    "list_files",
+    "docs_test/index.md",
+    "find_references"
+  ],
+  "GEMINI.md": [
+    "docs/mcp-contract.md"
+  ],
+  "AGENTS.md": [
+    "docs/mcp-contract.md"
+  ],
+  "CLAUDE.md": [
+    "docs/mcp-contract.md"
+  ],
+  "test_mcp_workflow.md": [
+    ".agent/context.md"
+  ],
+  ".agents/workflows/fix-mypy-errors.md": [
+    "scripts/mypy_autofix/fix_colons2.py"
+  ],
+  "docs/BENEFIT_MEASUREMENT.md": [
+    "turns",
+    "wall_clock_s",
+    "must_mention_facts",
+    "GoldenLabel",
+    "tests/eval/harness/scorer.py",
+    "easy",
+    "usd",
+    "scorer.py",
+    "tests/eval/harness/",
+    "must_not_mention_facts",
+    "grep"
+  ],
+  "docs/OPERATIONALIZATION_PRIORITIES.md": [
+    ".knowcode/freshness.json",
+    "src/knowcode/mcp/server.py:344",
+    ".agent/rules/",
+    ".knowcode/agent-rules.md",
+    "last_indexed_at",
+    ".knowcode/telemetry.jsonl",
+    "docs/MCP_TOKEN_OVERHEAD_REDUCTION.md",
+    "store_commit_sha",
+    ".kilocode/rules/",
+    "grep",
+    "index_commit_sha",
+    "commits_behind_head",
+    "freshness",
+    "apps/agent-gateway/"
+  ],
+  "docs/MCP_TOKEN_OVERHEAD_REDUCTION.md": [
+    ".agent/rules/context.md"
+  ],
+  "docs/MCP_SETUP.md": [
+    ".agent/rules/context.md",
+    "knowcode_index/",
+    "uv"
+  ],
+  "docs/GOLDEN_DATASET_PIPELINE.md": [
+    "correct",
+    "difficulty_rationale",
+    "pipeline/",
+    "read_file",
+    "QueryCandidate",
+    "expected_line_ranges",
+    "medium",
+    "minor_issue",
+    "classifier_expectation",
+    "sufficiency_calibration_curve",
+    "tests/eval/golden/baseline_v1.0.json",
+    "expected_entities",
+    "significant_divergence",
+    "must_mention_facts",
+    "canonical_narrative",
+    "OracleAnswer",
+    "AdversaryReport",
+    "hard",
+    "source_evidence",
+    "GoldenLabel",
+    "tests/eval/golden/golden_v1.0.json",
+    "foo.py",
+    "tests/eval/harness/test_retrieval_quality.py",
+    "MRR",
+    "golden/golden_v1.0.json",
+    "equivalent",
+    "tests/eval/pipeline/phase1_plan.json",
+    "easy",
+    "major_issue",
+    "unsupported",
+    "minor_divergence",
+    "blame",
+    "must_not_mention_facts",
+    "target_entity_ids",
+    "expected_files",
+    "uncertainty_notes"
+  ],
+  "docs/index.md": [
+    "~/.aimodels.yaml",
+    "analyze_command",
+    "/path/to/graph_builder.py"
+  ],
+  "docs/OPENAPI_FUNCTION_CALLING.md": [
+    "RequestsToolkit",
+    "/openapi.json",
+    "OpenAPIToolSpec"
+  ],
+  "docs/MULTI_AGENT_SETUP_EFFICIENCY.md": [
+    "/openapi.json",
+    "OpenAPIToolSpec",
+    "ALLOWED_TOOLS",
+    "LANGFUSE_PUBLIC_KEY",
+    "BudgetExceededError",
+    "working_memory",
+    "nsjail",
+    "max_budget",
+    "@samchon/openapi",
+    "alt",
+    "thinking_level",
+    "RequestsToolkit",
+    "gemini/gemini-3-flash-preview",
+    "usage_metadata",
+    "jsonref"
+  ],
+  "docs/evolution.md": [
+    "would_route_local",
+    "tests/eval/harness/scorer.py",
+    "routed_local"
+  ],
+  "docs/diagrams/seq_query_retrieval.md": [
+    "ARCHITECTURE",
+    "DEBUGGING",
+    "IMPLEMENTATION",
+    "TESTING",
+    "~/.knowcode/usage_stats.json"
+  ],
+  "docs/diagrams/seq_indexing.md": [
+    "<store_root>/knowcode_index/",
+    "parsers/"
+  ],
+  "docs/diagrams/architecture_overview.md": [
+    "/openapi.json",
+    "QueryClassifier",
+    "./aimodels.yaml",
+    "knowcode_index/vectors.index",
+    "http://127.0.0.1:8000",
+    "http://127.0.0.1:4000",
+    "~/.knowcode/usage_stats.json",
+    "/api/v1/health",
+    "gemini/gemini-3-flash-preview",
+    "parsers/",
+    "knowcode_index/vectors.json",
+    "ToolSelector",
+    "apps/agent-gateway/",
+    "YAMLParser",
+    "knowcode_index/chunks.json",
+    "~/.aimodels.yaml",
+    "knowcode_index/"
+  ],
+  "docs/diagrams/seq_agent_gateway.md": [
+    "apps/agent-gateway/"
+  ],
+  "docs/diagrams/seq_mcp.md": [
+    "tools/call"
+  ],
+  "docs/diagrams/seq_file_watch.md": [
+    "ChunkRepo",
+    "storage/"
+  ],
+  "docs/architecture/json-storage-analysis.md": [
+    "/home/deeog/Desktop/KnowCode/src/knowcode/data_models.py::EntityKind",
+    "knowcode_index/",
+    "SourceResolver",
+    "measure_storage.py",
+    "knowcode_index/chunks.json"
+  ],
+  ".agent/rules/context.md": [
+    "docs/mcp-contract.md"
+  ],
+  "apps/agent-gateway/OPERATIONS.md": [
+    ".github/workflows/agent-gateway-ci.yml",
+    ".github/workflows/agent-gateway-smoke.yml",
+    "LITELLM_MASTER_KEY",
+    "GOOGLE_API_KEY_1"
+  ],
+  "apps/agent-gateway/EXTRACTION.md": [
+    "/openapi.json",
+    "/api/v1/*"
+  ],
+  "apps/agent-gateway/README.md": [
+    "tests/",
+    "/openapi.json",
+    "/ready",
+    "/v1/chat/completions",
+    ".github/workflows/agent-gateway-ci.yml",
+    ".github/workflows/agent-gateway-smoke.yml",
+    "http://host.docker.internal:8000"
+  ]
+}

@@ -15,7 +15,7 @@
 | CLI / REST / MCP | `cli/cli.py`, `api/api.py`, `mcp/server.py` | Entry point — routes to KnowCodeService |
 | KnowCodeService | `service.py` | Central orchestrator |
 | RetrievalOrchestrator | `retrieval/orchestrator.py` | Validates, classifies, retrieves, synthesizes |
-| QueryClassifier | `llm/query_classifier.py` | Detects task type via regex pattern matching |
+| query_classifier.py (Module) | llm/query_classifier.py | Detects task type via regex pattern matching |
 | SearchEngine | `retrieval/search_engine.py` | Embeds query, calls HybridIndex, reranks |
 | HybridIndex | `retrieval/hybrid_index.py` | Merges BM25 (lexical) + FAISS (dense) results |
 | Reranker | `retrieval/reranker.py` | Cross-encoder reranking (VoyageAI primary, signal fallback) |
@@ -65,11 +65,11 @@ Raises HTTP 412 if the knowledge store or semantic index has not been built yet.
 ## Step 5 — Classify query
 
 ```
-RetrievalOrchestrator → QueryClassifier:  classify_query(query)
+RetrievalOrchestrator → query_classifier.py:  classify_query(query)
 ```
 
 The classifier uses five sets of weighted regex patterns (one per `TaskType`):
-- `IMPLEMENTATION`, `DEBUGGING`, `ARCHITECTURE`, `TESTING`, `GENERAL`
+- `EXPLAIN`, `DEBUG`, `EXTEND`, `REVIEW`, `LOCATE`
 
 Returns: `(TaskType, confidence)`.
 

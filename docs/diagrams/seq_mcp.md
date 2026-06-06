@@ -190,6 +190,8 @@ retrieve_context_for_query(
 )
 ```
 
+> **Note on default budgets:** The signature defaults shown above are defined in the python codebase. However, the canonical `docs/mcp-contract.md` recommends clients call the tool with smaller initial request budgets (`max_tokens=1500`, `limit_entities=1`, `expand_deps=false`) to minimize external token consumption.
+
 ### Invocation
 
 ```

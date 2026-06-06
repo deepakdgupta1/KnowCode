@@ -73,13 +73,13 @@ Create a CI-safe, deterministic retrieval eval harness for code-only MCP usage, 
 6. Keep production behavior unchanged in this PR.
 
 **Files To Add**
-- `tests/eval/test_retrieval_golden_queries.py`
-- `tests/eval/conftest.py`
-- `tests/eval/data/retrieval_golden_queries.json`
+- `tests/eval/data/retrieval_golden_queries.json` (harness structure is present in `tests/eval/harness/`, but golden datasets are still missing)
 - `tests/eval/fixtures/mini_repo/` with a tiny multi-file code fixture
 - `docs/retrieval-evals.md`
 
 **Files To Update**
+- `tests/eval/harness/test_retrieval_quality.py`
+- `tests/eval/harness/scorer.py`
 - [scripts/evaluate.py](/Users/deepg/Desktop/KnowCode/scripts/evaluate.py:1)
 - [README.md](/Users/deepg/Desktop/KnowCode/README.md:436)
 - Optionally [docs/evolution.md](/Users/deepg/Desktop/KnowCode/docs/evolution.md:103) if you want the roadmap item to point at the new harness
@@ -88,7 +88,7 @@ Create a CI-safe, deterministic retrieval eval harness for code-only MCP usage, 
 1. Build a tiny fixture repo that covers the MCP use cases you care about most now:
    `locate`, `explain`, `debug`, and dependency tracing.
 2. Define a simple dataset schema:
-   `query`, `task_type`, `expected_entity_ids`, and optional `notes`.
+   `query`, `task_type`, `expected_entity_ids` (proposed schema field, implemented in `tests/eval/harness/scorer.py`), and optional `notes`.
 3. Write deterministic pytest evals that use the real `Indexer`, `HybridIndex`, `SearchEngine`, and `KnowCodeService.retrieve_context_for_query`, but swap in a mock embedding provider so CI does not require API keys.
 4. Assert on outcomes that matter for correctness:
    returned entity IDs, retrieval mode behavior, non-empty context where expected, and sufficiency score shape.
@@ -147,9 +147,10 @@ Define one canonical MCP retrieval contract and make every agent-facing rule, gu
 6. Keep freshness, coverage, and observability changes out of this PR.
 
 **Files To Add**
-- `docs/mcp-contract.md`
+- None (Note: `docs/mcp-contract.md` has been successfully implemented and is now the canonical contract)
 
 **Files To Update**
+- `docs/mcp-contract.md`
 - [.agent/rules/context.md](/Users/deepg/Desktop/KnowCode/.agent/rules/context.md:1)
 - [docs/MCP_SETUP.md](/Users/deepg/Desktop/KnowCode/docs/MCP_SETUP.md:24)
 - [README.md](/Users/deepg/Desktop/KnowCode/README.md:262)
@@ -176,7 +177,7 @@ Define one canonical MCP retrieval contract and make every agent-facing rule, gu
 
 **Acceptance Criteria**
 - There is one canonical contract doc, and the rule file, setup guide, and README all point to it rather than redefining policy separately.
-- Conflicting threshold guidance such as `0.75`, `0.8`, and `0.88` no longer appears as competing defaults without explanation.
+- Conflicting threshold guidance is resolved (standardized to `0.8` default in config and contract, while unit tests use `0.75` for isolated testing scenarios without conflict).
 - The local-first runtime path follows the same `minimal` then escalate behavior described in the docs.
 - Tests cover both local-answer and escalation paths.
 
@@ -216,7 +217,6 @@ Ensure KnowCode either keeps artifacts fresh enough to trust or clearly tells th
 
 **Files To Add**
 - `tests/unit/indexing/test_monitor.py`
-- `tests/unit/indexing/test_background_indexer.py`
 - `tests/unit/service/test_freshness.py`
 
 **Files To Update**
@@ -227,6 +227,7 @@ Ensure KnowCode either keeps artifacts fresh enough to trust or clearly tells th
 - [src/knowcode/api/api.py](/Users/deepg/Desktop/KnowCode/src/knowcode/api/api.py:222)
 - [README.md](/Users/deepg/Desktop/KnowCode/README.md:166)
 - [docs/MCP_SETUP.md](/Users/deepg/Desktop/KnowCode/docs/MCP_SETUP.md:111)
+- `tests/unit/indexing/test_background_indexer.py` (Note: already implemented)
 
 **Implementation Tasks**
 1. Choose the supported behavior up front:
@@ -323,56 +324,54 @@ uv run pytest tests/unit/indexing/test_scanner.py tests/unit/parsers/test_rust_p
 
 **PR5 Brief**
 
-This PR should make everyday setup operational instead of doc-driven. Right now the building blocks exist, but the workflow is still spread across `analyze`, `index`, hand-edited MCP config, and a machine-specific verification shell script.
+This PR operationalizes everyday setup checks. Note: The `knowcode doctor` command has been fully implemented, and a separate `bootstrap` command is superseded by `knowcode build` + `knowcode doctor`.
 
 **Context**
-The CLI already exposes the primitives in [src/knowcode/cli/cli.py](/Users/deepg/Desktop/KnowCode/src/knowcode/cli/cli.py:18): `analyze`, `index`, `server`, `mcp-server`, `stats`, and `ask`. The service also has idempotent helpers such as [KnowCodeService.ensure_store()](/Users/deepg/Desktop/KnowCode/src/knowcode/service.py:90) and [KnowCodeService.ensure_index()](/Users/deepg/Desktop/KnowCode/src/knowcode/service.py:108). But there is no repo-level `doctor` or `bootstrap` command, and [verify_mcp_connection.sh](/Users/deepg/Desktop/KnowCode/verify_mcp_connection.sh:1) is hardcoded to one environment and MCP client path.
+The CLI already exposes the primitives in [src/knowcode/cli/cli.py](/Users/deepg/Desktop/KnowCode/src/knowcode/cli/cli.py:18): `analyze`, `index`, `build`, `doctor`, `server`, `mcp-server`, `stats`, and `ask`. The doctor check is backed by `src/knowcode/doctor.py` and tested under `tests/unit/cli/test_doctor.py`.
 
 **Objective**
-Provide one repeatable local-repo bootstrap and verification workflow that gets a repo to “KnowCode ready” without relying on tribal knowledge.
+Ensure the bootstrap and verification workflow using `knowcode build` and `knowcode doctor` gets a repo to “KnowCode ready” without relying on tribal knowledge.
 
 **Scope**
-1. Add a bootstrap flow that creates missing local artifacts.
-2. Add a doctor flow that reports readiness and next steps deterministically.
-3. Reuse the freshness and coverage signals from `PR3` and `PR4`.
-4. Replace machine-specific verification guidance with portable CLI behavior.
-5. Update setup docs so the happy path is command-first.
+1. Document the setup flow using `knowcode build` to bootstrap and `knowcode doctor` to verify.
+2. Refine the doctor flow to report readiness and next steps deterministically using freshness and coverage signals.
+3. Replace machine-specific verification guidance in `verify_mcp_connection.sh` with portable check logic.
+4. Update setup docs so the happy path is command-first.
 
 **Files To Add**
-- `tests/unit/cli/test_doctor.py`
-- `tests/unit/cli/test_bootstrap.py`
+- None (All required tools and tests are already created)
 
 **Files To Update**
 - [src/knowcode/cli/cli.py](/Users/deepg/Desktop/KnowCode/src/knowcode/cli/cli.py:18)
 - [src/knowcode/service.py](/Users/deepg/Desktop/KnowCode/src/knowcode/service.py:90)
 - [tests/unit/cli/test_cli.py](/Users/deepg/Desktop/KnowCode/tests/unit/cli/test_cli.py:1)
+- [tests/unit/cli/test_doctor.py](/Users/deepg/Desktop/KnowCode/tests/unit/cli/test_doctor.py)
 - [README.md](/Users/deepg/Desktop/KnowCode/README.md:248)
 - [docs/MCP_SETUP.md](/Users/deepg/Desktop/KnowCode/docs/MCP_SETUP.md:40)
 - [verify_mcp_connection.sh](/Users/deepg/Desktop/KnowCode/verify_mcp_connection.sh:1)
 
 **Implementation Tasks**
-1. Define a doctor report with clear pass/warn/fail output for at least:
+1. Ensure the doctor report has clear pass/warn/fail output for:
    knowledge store presence,
    semantic index presence,
    freshness state,
    MCP server readiness,
    active rule file presence,
    unsupported-extension warnings.
-2. Add a bootstrap command that creates missing artifacts without rebuilding everything unnecessarily.
-3. Reuse existing `ensure_store` and `ensure_index` behavior instead of duplicating build logic in the CLI layer.
-4. Make verification logic path-agnostic so it works outside the original `/home/deeog/...` environment.
-5. Rewrite setup docs around the new bootstrap/doctor flow and demote the old manual checklist to fallback documentation.
+2. Rely on the `build` command (which internally calls `ensure_store` and `ensure_index` behavior) to initialize repository artifacts instead of adding a separate bootstrap command.
+3. Make verification logic path-agnostic so it works outside the original `/home/deeog/...` environment.
+4. Rewrite setup docs around the build/doctor flow and demote manual checklists to fallback documentation.
 
 **Acceptance Criteria**
-- A new local repo can be prepared with one documented bootstrap command.
-- A doctor command explains exactly what is missing or stale and what the next fix step is.
+- A new local repo can be initialized and verified using `knowcode build` and `knowcode doctor`.
+- The doctor command explains exactly what is missing or stale and what the next fix step is.
 - Verification no longer depends on hardcoded absolute paths to one user’s machine or one MCP client.
-- CLI tests cover common bootstrap and prerequisite-failure cases.
+- CLI tests cover common build and doctor prerequisite-failure cases.
 
 **Verification**
 ```bash
-uv run pytest tests/unit/cli/test_cli.py tests/unit/cli/test_bootstrap.py tests/unit/cli/test_doctor.py
-uv run knowcode bootstrap . --output .
+uv run pytest tests/unit/cli/test_cli.py tests/unit/cli/test_doctor.py
+uv run knowcode build . --output .
 uv run knowcode doctor --store .
 ```
 
@@ -382,7 +381,7 @@ uv run knowcode doctor --store .
 - Observability dashboards beyond readiness checks
 
 **Suggested Review Focus**
-- Does the bootstrap path reuse existing service behavior cleanly?
+- Does the doctor workflow reuse existing service behavior cleanly?
 - Is the doctor output deterministic and actionable, or does it still require reading multiple docs?
 - Have the hardcoded environment assumptions been removed?
 

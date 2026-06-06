@@ -17,7 +17,7 @@
 | KnowCodeService | `service.py` | Central orchestrator |
 | GraphBuilder | `indexing/graph_builder.py` | Parses codebase into entity/relationship graph |
 | Scanner | `indexing/scanner.py` | File discovery with gitignore filtering |
-| Parser (×9 langs) | `parsers/` | Language-specific AST extraction |
+| Parser (×8 langs) | `parsers/` | Language-specific AST extraction |
 | KnowledgeStore | `storage/knowledge_store.py` | In-memory graph + JSON persistence |
 | Indexer | `indexing/indexer.py` | Full scan→chunk→embed pipeline |
 | Chunker | `indexing/chunker.py` | Splits entities into BM25-tokenized code chunks |
@@ -77,7 +77,7 @@ Parser:                  parse_file(file_path, source)  →  AST traversal
 Parser returns:          ParseResult  {entities[], relationships[], errors[]}
 ```
 
-Language-specific parsers (Python, JavaScript, TypeScript, Java, Rust, Vue, Markdown, YAML) extend `TreeSitterParser`. Each parser:
+Language-specific parsers (Python, JavaScript, TypeScript, Java, Rust, Vue, Markdown, YamlParser) extend `TreeSitterParser`. Each parser:
 - Parses source with Tree-sitter
 - Extracts entities (functions, classes, methods, variables, modules)
 - Records intra-file relationships (CALLS, IMPORTS, CONTAINS, INHERITS)

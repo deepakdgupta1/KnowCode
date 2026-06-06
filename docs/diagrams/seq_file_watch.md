@@ -175,11 +175,12 @@ Indexer → VectorStore:
   → rebuild FAISS IndexFlatIP
 ```
 
-### Step 19 — Update KnowledgeStore
+### Step 19 — Update KnowledgeStore (No-op in Incremental Indexing)
 
 ```
-Indexer → KnowledgeStore:
-  update entities + relationships for the changed file
+Note: Indexer.index_file() does NOT update the KnowledgeStore.
+The static knowledge graph is kept unchanged on disk (knowcode_knowledge.json)
+until a full 'knowcode analyze' is executed or a reload is triggered.
 ```
 
 ### Step 20 — Persist to disk

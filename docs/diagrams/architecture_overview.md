@@ -17,17 +17,19 @@ All user-facing entry points sit in this layer. Every interface ultimately deleg
 
 ### CLI (`cli.py`, click framework)
 
-The command-line interface exposes eleven commands:
+The command-line interface exposes thirteen commands:
 
 | Command | Purpose |
 |---|---|
 | `analyze` | Scan a directory, build knowledge graph, and auto-build semantic index |
+| `build` | Build the knowledge base and semantic index for a directory |
 | `index` | (Re)build the semantic index from an existing graph |
 | `query` | Lexical query: callers, callees, dependencies, or search |
 | `context` | Generate a task-aware context bundle for an entity |
 | `semantic-search` | Natural-language search over embeddings |
 | `export` | Export the knowledge graph as Markdown documentation |
 | `stats` | Print entity and relationship counts |
+| `doctor` | Check whether the local KnowCode setup is ready |
 | `server` | Start the FastAPI REST server (optionally with `--watch`) |
 | `history` | Show git commit history or entity change history |
 | `ask` | Answer a question using the LLM Agent |
@@ -138,9 +140,9 @@ Three components form a linear chain: **GraphBuilder → Chunker → Indexer**.
 
 ### Retrieval Pipeline
 
-Five components: **QueryClassifier → HybridIndex → SearchEngine → Reranker → expand_dependencies**.
+Five components: **query_classifier.py → HybridIndex → SearchEngine → Reranker → expand_dependencies**.
 
-**`QueryClassifier` (`query_classifier.py`)**
+**`query_classifier.py` (Module)**
 
 - `classify_query(query)` → `(TaskType, confidence: float)`
 - Uses regex pattern matching with weighted scoring across five task types: `EXPLAIN`, `DEBUG`, `EXTEND`, `REVIEW`, `LOCATE`
@@ -274,7 +276,7 @@ Answers codebase questions using configured LLM providers.
 
 ### Parsers (`parsers/`)
 
-Nine parser implementations, all extending `TreeSitterParser` (base class):
+Eight parser implementations, all extending `TreeSitterParser` (base class):
 
 | Parser | Language |
 |---|---|
@@ -285,7 +287,7 @@ Nine parser implementations, all extending `TreeSitterParser` (base class):
 | `RustParser` | Rust |
 | `VueParser` | Vue SFCs |
 | `MarkdownParser` | Markdown (docs) |
-| `YAMLParser` | YAML configs |
+| `YamlParser` | YAML configs |
 
 Each implements `_extract_entities()` and returns `ParseResult {entities[], relationships[], errors[]}`. The base class handles Tree-sitter `parse_file()`, `_get_text()`, `_get_location()`, `_create_entity()`.
 
@@ -375,7 +377,7 @@ Frozen dataclass loaded from environment variables via `from_env()`:
 - `list_tools()` → available tool names
 - `readiness()` → checks KnowCode + LiteLLM health
 
-### `ToolSelector` (`tool_selector.py`)
+### `tool_selector.py` (Module)
 
 - `select_tool_names(message)` — keyword heuristics on the user message text
 - Returns a subset of `allowed_tool_names` based on detected intent
