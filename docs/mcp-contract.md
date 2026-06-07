@@ -17,7 +17,7 @@ context is not enough to answer safely.
 Before relying on MCP retrieval for a repository:
 
 ```bash
-uv run knowcode analyze . --output .
+uv run knowcode build .
 uv run knowcode doctor --store . --mcp
 ```
 
@@ -133,12 +133,14 @@ The MCP approach can be token-expensive due to the following overhead sources:
 
 ## 5 Strategies to Cut Overhead by 90%
 
-### 1. Consolidate to a Single Tool (~60% tool-schema savings)
+> **Implementation Status:** Strategies 2, 3, and 4 are fully implemented in v1.1 (see Status section below). Strategies 1 and 5 are **proposed** optimizations that are not yet implemented.
+
+### 1. Consolidate to a Single Tool — *Proposed* (~60% tool-schema savings)
 
 Currently, 4 separate tool definitions (`search_codebase`, `get_entity_context`, `trace_calls`, `retrieve_context_for_query`) are exposed by the MCP server and injected into _every_ LLM request.
 **Recommendation:** Merge these into a single `knowcode` tool with an `action` parameter. This cuts the tool-schema overhead from ~600 tokens down to ~200 tokens per request.
 
-### 2. Strip the Response to Essentials (~50% response savings)
+### 2. Strip the Response to Essentials — *Implemented* (~50% response savings)
 
 The response from `retrieve_context_for_query` returns 12 fields. The agent realistically only needs 2–3 of these fields to proceed:
 
@@ -148,7 +150,7 @@ The response from `retrieve_context_for_query` returns 12 fields. The agent real
 
 **Recommendation:** Omit all other fields (`query` echo, `task_confidence`, `retrieval_mode`, `max_tokens`, `truncated`, `evidence[]`, `selected_entities[]`, `errors[]`) by default, or gate them behind a `verbose=true` flag.
 
-### 3. Slash `max_tokens` and `limit_entities` (~60% content savings)
+### 3. Slash `max_tokens` and `limit_entities` — *Implemented* (~60% content savings)
 
 The previous defaults in the MCP server were `max_tokens=6000` and `limit_entities=3` (now `max_tokens=4000` by default). For most day-to-day queries, this is excessive.
 **Recommendation:** Update your agent rules (`.agent/rules/context.md`) to use tiered budgets:
@@ -157,7 +159,7 @@ The previous defaults in the MCP server were `max_tokens=6000` and `limit_entiti
 - `max_tokens=2000, limit_entities=2` for "debug" queries.
 - Only use `max_tokens=3000+` for broad "extend" or "review" queries.
 
-### 4. Remove `indent=2` from `json.dumps` (~20% whitespace savings)
+### 4. Remove `indent=2` from `json.dumps` — *Implemented* (~20% whitespace savings)
 
 In `src/knowcode/mcp/server.py` (around line 347), the tool result is formatted with indentation:
 
@@ -171,7 +173,7 @@ return json.dumps(result, indent=2)
 return json.dumps(result, separators=(',', ':'))
 ```
 
-### 5. Return Summaries Instead of Source Code (Biggest Potential Win)
+### 5. Return Summaries Instead of Source Code — *Proposed* (Biggest Potential Win)
 
 Currently, full `source_code` is dumped into `context_text`.
 **Recommendation:** Instead of returning the full body of every function and class, return a **pre-summarized** digest (e.g., signature + docstring + key relationships). Only include raw source code when explicitly requested via `task_type=debug` or `task_type=review`. This single change could cut `context_text` from ~3000 tokens to ~500 tokens for most exploratory queries.
@@ -197,6 +199,8 @@ If all strategies are implemented, the token savings would be dramatic:
 
 The following optimizations have been fully implemented in the KnowCode codebase:
 
-1. **Stripped Response Metadata (Implemented)**: The default `minimal` verbosity mode now returns only `context_text`, `sufficiency_score`, and `total_tokens`. All non-essential fields (such as query echo, task confidence, evidence lists, etc.) are excluded, saving ~800 tokens per call.
-2. **Lowered default token limits (Implemented)**: The default `max_tokens` has been reduced from `6000` to `4000` across `RetrievalOrchestrator` and `KnowCodeMCPServer`.
-3. **Compact JSON Formatting (Implemented)**: Responses in `server.py` are serialized using `json.dumps(result, separators=(',', ':'))`, eliminating unnecessary whitespace and saving ~300 tokens per call.
+1. **Stripped Response Metadata (Strategy 2 — Implemented)**: The default `minimal` verbosity mode now returns only `context_text`, `sufficiency_score`, and `total_tokens`. All non-essential fields (such as query echo, task confidence, evidence lists, etc.) are excluded, saving ~800 tokens per call.
+2. **Lowered default token limits (Strategy 3 — Implemented)**: The default `max_tokens` has been reduced from `6000` to `4000` across `RetrievalOrchestrator` and `KnowCodeMCPServer`.
+3. **Compact JSON Formatting (Strategy 4 — Implemented)**: Responses in `server.py` are serialized using `json.dumps(result, separators=(',', ':'))`, eliminating unnecessary whitespace and saving ~300 tokens per call.
+
+Strategies 1 (tool consolidation) and 5 (summary-first source) remain as proposed future optimizations. They should be evaluated against the golden-query baseline before implementation.

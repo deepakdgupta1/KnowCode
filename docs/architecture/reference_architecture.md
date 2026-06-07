@@ -6,6 +6,8 @@ A codebase is deterministic. So, information extraction from it should be 100% l
 
 This is what drives KnowCode!
 
+> **`[HARDENED]` items throughout this document represent the *target design* for a production-grade system. They are aspirational capabilities and are NOT yet implemented in the current codebase.** They remain as the north-star design. See the Architectural Debt register and the Roadmap for the phased plan to address them.
+
 ---
 
 
@@ -882,13 +884,9 @@ You've essentially defined a **code intelligence system**, not a chatbot with em
 
 This section documents known architectural issues identified during review and the target state for each. Items are prioritised by impact.
 
-### **AD-1: Monolithic Dependency Footprint** *(Priority: Critical)*
+### **AD-1: Monolithic Dependency Footprint** *(Status: ✅ RESOLVED)*
 
-**Current state:** `pyproject.toml` requires FastAPI, FAISS, OpenAI, Gemini, numpy, uvicorn, and watchdog for *every* install — even users who only need `knowcode analyze` + `knowcode query`.
-
-**Impact:** Slow installs, platform-specific failures (FAISS wheels, numpy ABI), increased vulnerability surface, and import-time latency for CLI-only users.
-
-**Target state:** Core install (`pip install knowcode`) includes only: `click`, `networkx`, `pyyaml`, `pathspec`, `tree-sitter`, `tree-sitter-languages`, `GitPython`, `tiktoken`. Heavy dependencies move behind extras:
+**Resolution (v2.3):** Optional extras are now implemented. `pip install knowcode` installs only the lightweight core. Heavy dependencies have been moved behind extras:
 
 | Extra | Dependencies | Unlocks |
 |-------|-------------|---------|
@@ -896,9 +894,11 @@ This section documents known architectural issues identified during review and t
 | `knowcode[search]` | `faiss-cpu`, `numpy` | `knowcode index`, `knowcode semantic-search` |
 | `knowcode[llm]` | `openai`, `google-genai`, `google-api-core` | `knowcode ask` |
 | `knowcode[watch]` | `watchdog` | `knowcode server --watch` |
-| `knowcode[all]` | All of the above | Batteries-included (preserves backward compatibility) |
+| `knowcode[mcp]` | MCP protocol support | `knowcode mcp-server` |
+| `knowcode[voyageai]` | VoyageAI client | VoyageAI embeddings + reranking |
+| `knowcode[all]` | All of the above | Batteries-included |
 
-Commands invoked without the required extra should fail fast with: *"Install knowcode[server] to use `knowcode server`"*.
+Commands fail fast with: *"Install knowcode[server] to use `knowcode server`"*.
 
 ### **AD-2: Hidden Side Effects in Query Paths** *(Priority: Critical)*
 
@@ -908,13 +908,11 @@ Commands invoked without the required extra should fail fast with: *"Install kno
 
 **Target state:** Query methods fail fast with actionable errors when prerequisites are missing (e.g., *"Knowledge store not found. Run `knowcode analyze <dir>` first."*). Opt-in helpers `ensure_store()` and `ensure_index()` are available for callers who want the auto-build behavior.
 
-### **AD-3: No Schema Versioning on Persisted Artifacts** *(Priority: High)*
+### **AD-3: Schema Versioning on Persisted Artifacts** *(Status: ⚠️ PARTIALLY RESOLVED)*
 
-**Current state:** The JSON knowledge store and FAISS index contain no `schema_version` field. Data model changes silently corrupt existing stores.
+**Resolved:** The JSON knowledge store now includes a top-level `schema_version` field (currently `schema_version: 2`). A migration shim in `_migrate_schema()` handles upgrades from older versions.
 
-**Impact:** No safe migration path; users must manually delete and rebuild after upgrades.
-
-**Target state:** Top-level `schema_version` field in both the knowledge store JSON and the index metadata. A minimal migration shim validates version on load and either migrates or emits a clear error.
+**Remaining:** The FAISS vector index (`knowcode_index/`) does not yet have schema versioning. Changes to embedding model or index format can still silently break an existing index. Target: add `schema_version` and `embedding_model` fields to the index metadata file.
 
 ### **AD-4: Metadata Type Restriction** *(Priority: High)*
 

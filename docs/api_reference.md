@@ -2,6 +2,9 @@
 
 The `KnowledgeStore` is the central repository for the semantic graph derived from the codebase. It persists the graph to a JSON file and provides query mechanisms.
 
+> **Populating the store:** Run `knowcode build <directory>` (recommended) or `knowcode analyze <directory>` to build the knowledge store before using these APIs.
+> For the full REST API endpoint reference, see the [Architecture Diagrams doc](diagrams/README.md).
+
 ## Class: `KnowledgeStore`
 
 **Module:** `knowcode.storage.knowledge_store`
@@ -25,6 +28,7 @@ Class method to load a store from a JSON file (or directory containing the file)
 - **`entities`**: A dictionary mapping entity IDs to `Entity` objects.
 - **`relationships`**: A list of `Relationship` objects.
 - **`metadata`**: A dictionary containing scan statistics (scan time, file count) and errors.
+  > **Type note:** Current type is `dict[str, str]` (all values are strings). This is a known limitation (see [reference_architecture.md — AD-4](architecture/reference_architecture.md)); the target type is `dict[str, Any]`.
 
 ### Query Methods
 
@@ -60,6 +64,7 @@ Multi-hop call graph traversal starting from an entity.
 
 - `direction="callees"`: what the entity calls
 - `direction="callers"`: what calls the entity
+- `depth`: number of hops to traverse (1 = direct only, 2 = one level further, etc.)
 
 Each result includes `call_depth` (hops from the starting entity) plus basic location metadata.
 

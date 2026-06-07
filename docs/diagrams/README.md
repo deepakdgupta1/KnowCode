@@ -77,15 +77,9 @@ Used by Claude Desktop and compatible IDEs. Exposes four tools:
 3. `trace_calls(entity_id, direction, depth)`
 4. `retrieve_context_for_query(query, task_type, max_tokens, limit_entities, expand_deps, verbosity)`
 
-### Agent Gateway (FastAPI `:8081`)
+### Agent Gateway (External Microservice)
 
-A separately deployable microservice (in `apps/agent-gateway/`) that proxies to the KnowCode REST API and wraps it in an LLM-driven tool-use loop. Its own endpoints:
-
-- `GET  /health` — gateway liveness
-- `GET  /ready` — checks KnowCode + LiteLLM connectivity
-- `GET  /api/v1/config` — current gateway configuration
-- `GET  /api/v1/tools` — list of available tools (from OpenAPI translation)
-- `POST /api/v1/chat` — submit a message; returns answer + tool execution records
+The Agent Gateway was previously hosted in this repository but has since been extracted to a separate repository. It is a separately deployable microservice that proxies to the KnowCode REST API and wraps it in an LLM-driven tool-use loop via LiteLLM.
 
 ### API Rate Limiter (`rate_limit.py`, slowapi, IP-keyed)
 
@@ -355,73 +349,6 @@ Abstract base `EmbeddingProvider` with `embed(texts[])` and `embed_single(text)`
 - `AppConfig.load()` — priority: explicit path → `./aimodels.yaml` → `~/.aimodels.yaml` → defaults
 - `ModelConfig {name, provider, api_key_env, rpm_free_tier_limit=10, rpd_free_tier_limit=1000}`
 - Defaults: NL models = `[gemini-2.0-flash-lite, gemini-1.5-flash, gemini-1.5-pro]`; embedding = `voyage-code-3`; `sufficiency_threshold = 0.8`
-
----
-
-## Agent Gateway (Separate Microservice)
-
-Located in `apps/agent-gateway/`. Can be moved to an independent repository without code changes.
-
-### `GatewaySettings` (`settings.py`)
-
-Frozen dataclass loaded from environment variables via `from_env()`:
-
-| Setting | Default |
-|---|---|
-| `knowcode_api_base_url` | `http://127.0.0.1:8000` |
-| `litellm_base_url` | `http://127.0.0.1:4000` |
-| `litellm_api_key` | `sk-local-proxy` |
-| `default_model` | `gemini/gemini-3-flash-preview` |
-| `max_tool_rounds` | `4` |
-| `tool_timeout_seconds` | `30.0` |
-| `openapi_cache_ttl_seconds` | `300` |
-| `allowed_tool_names` | `{query_context, search, get_context, trace_calls}` |
-
-### `AgentOrchestrator` (`orchestrator.py`)
-
-- `run(ChatRequest)` → `ChatResponse` — the main agentic loop:
-  1. `_pick_tool_names(request)` → `select_tool_names(message)` (keyword heuristics)
-  2. Fetch tool schemas from `OpenAPIToolRegistry`
-  3. Loop ≤ `max_tool_rounds`:
-     - `LiteLLMClient.create_chat_completion(messages, tools)`
-     - `_first_choice(response)` extracts `tool_call`
-     - `_execute_tool_call(tool_call, timeout)` → `KnowCodeClient.execute_tool()`
-     - Append tool result to messages, record `ToolExecutionRecord`
-  4. Build and return `ChatResponse`
-- `list_tools()` → available tool names
-- `readiness()` → checks KnowCode + LiteLLM health
-
-### `tool_selector.py` (Module)
-
-- `select_tool_names(message)` — keyword heuristics on the user message text
-- Returns a subset of `allowed_tool_names` based on detected intent
-
-### `LiteLLMClient` (`litellm_client.py`)
-
-- `create_chat_completion(messages, tools, model, temperature)` → sends to LiteLLM proxy `:4000`
-- `check_health()` — pings LiteLLM
-- `_extract_response_cost(response)` — extracts cost metadata
-
-### `KnowCodeClient` (`knowcode_client.py`)
-
-- `execute_tool(tool_name, args)` — dispatches to KnowCode REST API:
-  - `query_context` → `POST /api/v1/context/query`
-  - `search` → `GET  /api/v1/search?q=...`
-  - `get_context` → `GET  /api/v1/context?target=...`
-  - `trace_calls` → `GET  /api/v1/trace_calls/{entity_id}?direction=...&depth=...`
-- `check_health()` — pings KnowCode `/api/v1/health`
-
-### `OpenAPIToolRegistry` + `OpenAPIToolTranslator` (`openapi_tools.py`)
-
-- `fetch_openapi_spec(url)` → fetches `/openapi.json` from KnowCode
-- `OpenAPIToolTranslator` converts OpenAPI operation objects into OpenAI-compatible tool schema dicts
-- Results cached for `openapi_cache_ttl_seconds = 300` seconds
-
-### LiteLLM Proxy (`:4000`)
-
-- Configured via `litellm.config.yaml`
-- Accepts OpenAI-compatible requests and proxies to configured upstream LLMs (Google Gemini, others)
-- Manages rate-limit passthrough
 
 ---
 
@@ -1522,10 +1449,11 @@ KnowCodeService → Developer:  {status: "reloaded"}
 > Textual narration of [`seq_agent_gateway.drawio`](seq_agent_gateway.drawio).
 > Every participant, message, and note in the draw.io file is described here in full.
 
-**Located in:** `apps/agent-gateway/`
-**Startup:** `local_up.sh`
+**Gateway Sequence (Historical Reference)**
+**Note:** The Agent Gateway has been extracted from this repository. The sequence below describes its behavior at extraction time.
 **Request entry:** `POST /api/v1/chat`
-**Smoke test:** `scripts/smoke_e2e.py`
+
+---
 
 ---
 

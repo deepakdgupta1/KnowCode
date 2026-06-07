@@ -11,6 +11,21 @@
 > - **PR6 (Observability)**: Non-blocking local telemetry logging implemented.
 > - **PR7 (Hardening Pass)**: Token budget defaults hardened to 4000 max tokens and JSON compacted.
 
+## Completion Summary
+
+| PR | Name | Status |
+|----|------|--------|
+| PR1 | Correctness Baseline | ✅ Complete |
+| PR2 | Canonical MCP Contract | ✅ Complete |
+| PR3 | Freshness & Stale-Context Safety | ✅ Complete |
+| PR4 | Code Coverage Completeness | ✅ Complete |
+| PR5 | Repo Bootstrap & Doctor Flow | ✅ Complete |
+| PR6 | MCP Observability | ✅ Complete |
+| PR7 | Hardening Pass | ✅ Complete |
+
+The detailed briefs for each PR are preserved below as historical reference.
+
+
 **Phased Plan**
 1. `PR1 - Correctness Baseline`
 Goal: make retrieval quality measurable before we change behavior. Build a checked-in golden query set for this repo and 1-2 real target repos, wire it into [scripts/evaluate.py](/Users/deepg/Desktop/KnowCode/scripts/evaluate.py:13), and add pass/fail thresholds for retrieval accuracy. Exit criteria: every change to retrieval can be scored against known-good questions, and regressions are visible before release.

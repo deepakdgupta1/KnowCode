@@ -85,7 +85,9 @@ context is insufficient. Use the configured sufficiency_threshold from
 aimodels.yaml to decide whether to answer from local context.
 ```
 
-The repo-level rule is `.agent/rules/context.md`.
+The repo-level rules are:
+- `.agent/rules/context.md` — MCP retrieval policy (verbosity ladder, token budgets, sufficiency threshold)
+- `.agent/rules/analysis-integrity.md` — evidence-based reasoning rules (always-on)
 
 ## Tool Use
 
@@ -124,12 +126,14 @@ Expected behavior:
 
 ## 📊 Success Metrics
 
-After setup, you should see:
+After setup, the following are **target baselines** to aim for. Actual values depend on your codebase and queries:
 
-- ✅ 70%+ queries with `sufficiency_score >= 0.8`
-- ✅ Faster responses for codebase questions
-- ✅ 50%+ reduction in external LLM token usage
+- 🎯 70%+ queries with `sufficiency_score >= 0.8`
+- ⏱️ Faster responses for codebase questions
+- 💰 50%+ reduction in external LLM token usage
 - ✅ Accurate answers from local context
+
+Monitor your telemetry log (`knowcode_telemetry.jsonl`) to measure actual performance against these targets.
 
 ## Troubleshooting
 
@@ -172,6 +176,13 @@ environment.
 If retrieval results include a `freshness` block stating that `is_stale` is true, the local knowledge store or index does not match the current state of the source tree.
 
 To recover:
+
+Run the unified build command to refresh both the knowledge store and the vector index:
+```bash
+uv run knowcode build .
+```
+
+Or, if you need to update each artifact separately:
 1. Re-run analysis to update the knowledge store:
    ```bash
    uv run knowcode analyze . --output .
@@ -224,9 +235,9 @@ Files with other extensions are ignored during scans. If your project relies hea
 ## ⚡ Performance Tips
 
 1. **Build semantic index** - Much better than lexical
-2. **Keep knowledge store updated** - Re-analyze after major changes
+2. **Keep knowledge store updated** - Run `knowcode build .` after major code changes
 3. **Tune parameters** - Adjust `max_tokens` and `limit_entities` following the verbosity ladder
-4. **Monitor scores** - Track `sufficiency_score` distribution
+4. **Monitor scores** - Track `sufficiency_score` distribution in `knowcode_telemetry.jsonl`
 
 
 ## References

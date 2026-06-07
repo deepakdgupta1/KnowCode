@@ -2,7 +2,7 @@
 
 Transform your codebase into an effective knowledge base that provides accurate, relevant context for AI coding assistants—using minimal tokens.
 
-[![codecov](https://codecov.io/gh/deepakdgupta1/KnowCode/graph/badge.svg?token=placeholder)](https://codecov.io/gh/deepakdgupta1/KnowCode) [![CI/CD Pipeline](https://github.com/deepakdgupta1/KnowCode/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/deepakdgupta1/KnowCode/actions/workflows/ci-cd.yml)
+[![CI/CD Pipeline](https://github.com/deepakdgupta1/KnowCode/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/deepakdgupta1/KnowCode/actions/workflows/ci-cd.yml)
 
 
 ## Overview
@@ -21,8 +21,8 @@ KnowCode analyzes your codebase and builds a semantic graph of entities (functio
 uv venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
-# Install KnowCode (with dev dependencies)
-uv sync --dev
+# Install KnowCode for development (batteries included)
+uv sync --dev --extra all --extra mcp --extra voyageai
 
 # Set API keys (only needed for the features you use; see aimodels.yaml)
 export VOYAGE_API_KEY_1="..."   # embeddings + reranking (semantic search)
@@ -32,39 +32,47 @@ export GOOGLE_API_KEY_1="..."   # LLM (Gemini) for `knowcode ask`
 
 ## Quick Start
 
-```bash
-# 1. Analyze your codebase
-knowcode analyze src/
+The recommended workflow for any new repository is to build the knowledge base and semantic index in one step, then run the doctor to verify readiness:
 
-# 2. Query the knowledge store
+```bash
+# 1. Build the knowledge base and semantic index for the current directory
+knowcode build .
+
+# 2. Verify codebase readiness and MCP server handshake
+knowcode doctor --store . --mcp
+
+# 3. Query the knowledge store
 knowcode query search "MyClass"
 knowcode query callers "my_function"
-knowcode query callees "MyClass.method"
 
-# 3. Generate context for an entity
+# 4. Generate context for an entity
 knowcode context "MyClass.important_method"
 
-# 4. Export documentation
-knowcode export -o docs/
+# 5. Ask questions using the LLM agent
+knowcode ask "How does the graph builder work?"
 
-# 5. (Optional) Build semantic search index explicitly
-#    `analyze` also attempts indexing; this command is useful for rebuilds.
-knowcode index src/
-
-# 6. Perform semantic search
-knowcode semantic-search "How does parsing work?"
-
-# 7. Start the intelligence server with watch mode
+# 6. Start the intelligence server with watch mode
 knowcode server --port 8080 --watch
-
-# 8. View statistics
-knowcode stats
 ```
 
 ## Commands
 
+### `build`
+Build the knowledge base and semantic index for a directory in one step. This is the recommended starting point for any new repository.
+
+```bash
+knowcode build <directory> [--ignore <pattern>] [--config <path>]
+```
+
+**Example:**
+```bash
+knowcode build .  # builds for the current directory
+```
+
+Internally `build` runs `analyze` followed by `index`. Use `analyze` and `index` separately only if you need fine-grained control over individual steps.
+
 ### `analyze`
-Scan and parse a directory to build the knowledge store.
+Scan and parse a directory to build the knowledge store (without building the semantic index).
 
 ```bash
 knowcode analyze <directory> [--output <path>] [--ignore <pattern>]
@@ -174,6 +182,7 @@ Once running, you can access endpoints like:
 - `POST /api/v1/context/query` `(semantic search)`
 - `GET /api/v1/trace_calls/{entity_id}?direction=callers&depth=3` `(multi-hop call graph)`
 - `GET /api/v1/impact/{entity_id}` `(deletion impact analysis)`
+- `GET /api/v1/freshness` `(artifact freshness and staleness report)`
 - `POST /api/v1/reload` (to refresh data after a new `analyze` run)
 
 ### `history`
@@ -326,8 +335,9 @@ ruff format src/
 
 ## Roadmap
 
-See [reference_architecture.md](file:///Users/deepg/Desktop/KnowCode/docs/architecture/reference_architecture.md) for the full vision. The MVP focuses on:
+See [reference_architecture.md](file:///Users/deepg/Desktop/KnowCode/docs/architecture/reference_architecture.md) for the full vision and detailed architectural debt register.
 
+**MVP (completed):**
 - ✅ Single monorepo support
 - ✅ Python, Markdown, YAML parsing
 - ✅ Snapshot-only analysis (no temporal tracking)
@@ -347,8 +357,19 @@ See [reference_architecture.md](file:///Users/deepg/Desktop/KnowCode/docs/archit
   - MCP server for IDE integration
   - VoyageAI cross-encoder reranking
 
+**Next: v2.3 — Architectural Hardening:**
+- ✅ Modularise dependencies into optional extras (core install stays lightweight)
+- Remove hidden side effects from query paths (fail fast, not auto-build)
+- ✅ Schema versioning on knowledge store (`schema_version: 2` is live); FAISS index metadata versioning still pending
+- Fix `metadata` type restriction (`dict[str, str]` → `dict[str, Any]`)
+- Harden configuration loading (logging, validation, strict server mode)
+- Decompose `KnowCodeService` and introduce `Protocol` interfaces
+- ✅ Add layer contract tests (parser, store roundtrip, retrieval golden queries — see [docs/retrieval-evals.md](retrieval-evals.md))
+
 **Future releases:**
-- v3.0: Team sharing & Enterprise features (RBAC, SSO, etc.)
+- v2.4: Multi-level documentation synthesis
+- v3.0: Deep analysis (data flow, intent extraction, confidence scoring)
+- v4.0: Enterprise features (RBAC, scalability, team sharing)
 
 ## License
 

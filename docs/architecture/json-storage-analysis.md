@@ -265,7 +265,7 @@ and the MCP server caches the service in `self._service` ([server.py:165-182](..
 
 ### 3.3 Absolute-Path Entity IDs
 
-Entity IDs use absolute paths (e.g., `/home/deeog/Desktop/KnowCode/src/knowcode/data_models.py::EntityKind`), averaging 85 chars. With 397 entities referenced across 2,698 relationships, this contributes ~168K chars of redundant path prefixes.
+Entity IDs use absolute paths (e.g., `/path/to/project/src/knowcode/data_models.py::EntityKind`), averaging 85 chars. With 397 entities referenced across 2,698 relationships, this contributes ~168K chars of redundant path prefixes.
 
 **Impact**: File size bloat. Not a direct token cost (IDs are not sent to the LLM
 in context bundles), but makes the JSON non-portable across machines.
@@ -398,11 +398,11 @@ entirely, not from shrinking payloads by 500 tokens. The local-first mechanism
 already exists — the priority is to maximize its hit rate.
 
 Actions:
-- [ ] Measure current local-answer hit rate across representative queries
-- [ ] Tune sufficiency scoring weights and threshold (currently 0.8)
-- [ ] Ensure all MCP integration guides instruct IDEs to use `verbosity="minimal"`
+- [x] Measure current local-answer hit rate across representative queries
+- [x] Tune sufficiency scoring weights and threshold (currently 0.8)
+- [x] Ensure all MCP integration guides instruct IDEs to use `verbosity="minimal"`
 - [ ] Audit `get_entity_context` callers to confirm they pass `summarize` correctly
-- [ ] Add telemetry: log `{query, sufficiency_score, source: "local"|"llm"}` per query
+- [x] Add telemetry: log `{query, sufficiency_score, source: "local"|"llm"}` per query
 
 ### Phase 2: Remove Source Code from Knowledge Store (After Measurement)
 

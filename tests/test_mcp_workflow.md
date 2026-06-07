@@ -97,7 +97,7 @@ You should NOT need to manually run `knowcode mcp-server` - Antigravity starts i
    ./verify_mcp_connection.sh
    ```
 
-2. Verify configuration:
+2. Verify configuration (path may vary by IDE; the example below is for Antigravity):
    ```bash
    cat ~/.gemini/mcp_servers.json
    ```
@@ -156,11 +156,11 @@ Track these metrics over time:
 
 | Metric | Target | Current |
 |--------|--------|---------|
-| % Queries with score >= 0.8 | >70% | TBD |
-| Avg response time (local) | <2s | TBD |
-| Avg response time (external) | <10s | TBD |
-| Token savings per day | >50% | TBD |
-| Answer accuracy (local) | >95% | TBD |
+| % Queries with score >= 0.8 | >70% | *(fill from `knowcode_telemetry.jsonl`)* |
+| Avg response time (local) | <2s | *(measure manually)* |
+| Avg response time (external) | <10s | *(measure manually)* |
+| Token savings per day | >50% | *(fill from telemetry `llm_tokens_saved`)* |
+| Answer accuracy (local) | >95% | *(fill from test runs)* |
 
 ---
 

@@ -1,5 +1,6 @@
 ---
 trigger: always_on
+last_updated: 2026-06-07
 ---
 
 Follow `docs/mcp-contract.md` for the canonical KnowCode MCP retrieval policy.
@@ -18,7 +19,7 @@ staying in `minimal`, then use `standard` for implementation detail, then use
 `verbose` for ranking evidence. Use `diagnostic` only for retrieval debugging.
 
 Use the configured `config.sufficiency_threshold` from `aimodels.yaml` to decide
-whether local context is sufficient. If the score is below threshold, recover
+whether local context is sufficient (default: `0.8`). If the score is below threshold, recover
 missing local context before falling back to a larger external prompt.
 
 Use focused tools only after the first retrieval call:

@@ -1,5 +1,6 @@
 ---
 trigger: always_on
+last_updated: 2026-06-07
 ---
 
 # Analysis Integrity

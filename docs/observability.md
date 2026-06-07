@@ -4,7 +4,7 @@ KnowCode implements a local, non-blocking telemetry system to monitor retrieval 
 
 ## Telemetry Log Format
 
-All telemetry events are logged to an append-only JSON Lines (JSONL) file named `knowcode_telemetry.jsonl` located in the root of the `.knowcode` store directory for each repository.
+All telemetry events are logged to an append-only JSON Lines (JSONL) file named `knowcode_telemetry.jsonl` located in the **store root directory** (the directory you pass to `--store`, typically the root of your project). For example, if you run `knowcode build .` from `/path/to/project`, the file is written to `/path/to/project/knowcode_telemetry.jsonl`.
 
 Each log entry is a single line containing a JSON object with at least the following standard fields:
 - `timestamp`: Epoch timestamp (integer seconds)
@@ -61,13 +61,18 @@ The sufficiency threshold (`sufficiency_threshold` in `aimodels.yaml`) controls 
 - **Answer Accuracy**: Escalating to an LLM provides higher accuracy for complex queries.
 
 To tune the threshold for your repository:
-1. Run `knowcode doctor --store .` or inspect `knowcode_telemetry.jsonl` using the telemetry summary helper to check your current `local_routing_rate` and `average_sufficiency_score`.
-2. If the `local_routing_rate` is too low, but you find that local answers are highly accurate, you can lower `sufficiency_threshold` (e.g. to `0.7`).
-3. If users frequently mark local answers as misses (i.e. click "thumbs down" or flag them), raise the `sufficiency_threshold` (e.g. to `0.85` or `0.9`).
+1. Inspect `knowcode_telemetry.jsonl` directly to review `source` ("local" vs "llm"), `sufficiency_score`, and `llm_tokens_saved` across recent queries. You can use any JSONL reader or a simple `jq` command:
+   ```bash
+   cat knowcode_telemetry.jsonl | jq 'select(.event_type == "agent_decision") | {source, sufficiency_score, query}'
+   ```
+2. If the `local` routing rate is too low but local answers are accurate, lower `sufficiency_threshold` (e.g. to `0.7`).
+3. If users frequently mark local answers as misses, raise `sufficiency_threshold` (e.g. to `0.85` or `0.9`).
 
 ---
 
 ## Future Spend-Metric Extension Path
+
+> **Planned — not yet implemented.** The fields below are proposed additions to the telemetry schema for a future release.
 
 To enable cost optimization, the telemetry schema is fully extensible. Future versions of KnowCode will include:
 - `estimated_token_usage`: Exact input/output token counts for LLM calls.

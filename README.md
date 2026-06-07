@@ -29,14 +29,17 @@ export GOOGLE_API_KEY_1="..."   # LLM (Gemini) for `knowcode ask`
 
 ### Optional Dependency Extras
 
-KnowCode now ships with a lightweight core install plus feature extras:
+KnowCode ships with a lightweight core install plus feature extras:
 
 - `knowcode[server]` → `knowcode server`
 - `knowcode[search]` → `knowcode index`, `knowcode semantic-search`
 - `knowcode[llm]` → `knowcode ask`
 - `knowcode[watch]` → `knowcode server --watch`
-- `knowcode[all]` → union of `server`, `search`, `llm`, `watch`
-- `knowcode[mcp]` and `knowcode[voyageai]` remain available as before
+- `knowcode[mcp]` → `knowcode mcp-server` (MCP protocol support)
+- `knowcode[voyageai]` → VoyageAI embeddings + reranking
+- `knowcode[all]` → union of `server`, `search`, `llm`, `watch`, `mcp`, and `voyageai`
+
+The development install command (`uv sync --dev --extra all --extra mcp --extra voyageai`) is equivalent to `--extra all` since `mcp` and `voyageai` are already included in `all`, but explicit flags are shown for clarity.
 
 Commands fail fast with actionable hints, e.g.:
 `Install knowcode[server] to use 'knowcode server'.`
@@ -308,20 +311,6 @@ token budgets in each client.
 }
 ```
 
-## AI Gateway Scaffold (Extractable)
-
-For OpenAPI-to-tool orchestration through LiteLLM, this repository now includes a self-contained gateway app at `apps/agent-gateway/`.
-
-- Source code: `apps/agent-gateway/src/agent_gateway/`
-- Setup + local run: `apps/agent-gateway/README.md`
-- Clean repo split playbook: `apps/agent-gateway/EXTRACTION.md`
-
-The gateway intentionally integrates with KnowCode only over HTTP (`/openapi.json` and `/api/v1/*`) so it can be moved to a separate repository without code changes.
-
-**Token Savings:**
-- Simple "locate" queries → **100% savings** (answered locally)
-- Code explanations → **60-80% savings** (precise context only)
-
 
 ## Supported Language Matrix
 
@@ -481,9 +470,9 @@ See [reference_architecture.md](file:///Users/deepg/Desktop/KnowCode/docs/archit
   - VoyageAI cross-encoder reranking
 
 **Next: v2.3 — Architectural Hardening:**
-- Modularise dependencies into optional extras (core install stays lightweight)
+- ✅ Modularise dependencies into optional extras (core install stays lightweight)
 - Remove hidden side effects from query paths (fail fast, not auto-build)
-- Add schema versioning to knowledge store and index artifacts
+- ✅ Schema versioning on knowledge store (`schema_version: 2` is live); FAISS index metadata versioning still pending
 - Fix `metadata` type restriction (`dict[str, str]` → `dict[str, Any]`)
 - Harden configuration loading (logging, validation, strict server mode)
 - Decompose `KnowCodeService` and introduce `Protocol` interfaces
