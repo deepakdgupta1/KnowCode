@@ -1,3 +1,16 @@
+# MCP Operationalization Plan
+
+> [!NOTE]
+> **Status: Completed (v1.1)**
+> All phases (PR1 through PR7) of this operationalization plan have been fully implemented, verified, and merged.
+> - **PR1 (Correctness Baseline)**: Correctness evaluations and deterministic tests are active.
+> - **PR2 (Canonical MCP Contract)**: Canonical MCP contract aligned across all documentation.
+> - **PR4 (Code discovery)**: Code discovery coverage expanded to include `.jsx`, `.tsx`, `.rs`, and `.vue` extensions.
+> - **PR3 (Freshness & Safety)**: Freshness safety and staleness checks operationalized with watch mode delete/rename support.
+> - **PR5 (Doctor flow)**: CLI `doctor` enhanced with checklist diagnostics.
+> - **PR6 (Observability)**: Non-blocking local telemetry logging implemented.
+> - **PR7 (Hardening Pass)**: Token budget defaults hardened to 4000 max tokens and JSON compacted.
+
 **Phased Plan**
 1. `PR1 - Correctness Baseline`
 Goal: make retrieval quality measurable before we change behavior. Build a checked-in golden query set for this repo and 1-2 real target repos, wire it into [scripts/evaluate.py](/Users/deepg/Desktop/KnowCode/scripts/evaluate.py:13), and add pass/fail thresholds for retrieval accuracy. Exit criteria: every change to retrieval can be scored against known-good questions, and regressions are visible before release.
@@ -47,7 +60,7 @@ Ship the first release when correctness, freshness, coverage, bootstrap, and con
 After release-one correctness stabilizes, extend the eval and telemetry surfaces to measure local-answer rate, escalation rate, payload size by verbosity, and estimated external-token usage. The purpose of this phase is to understand where spend is coming from without yet changing the correctness contract.
 
 3. `Phase 3 - Cost-Aware Tuning`
-Once the data is trustworthy, tighten default budgets, slim default responses, and tune the local-first ladder to lower external-token usage while preserving the correctness floor established in `PR1`. This is where payload-shaping work from [docs/MCP_TOKEN_OVERHEAD_REDUCTION.md](/Users/deepg/Desktop/KnowCode/docs/MCP_TOKEN_OVERHEAD_REDUCTION.md:1) should be prioritized based on evidence rather than intuition.
+Once the data is trustworthy, tighten default budgets, slim default responses, and tune the local-first ladder to lower external-token usage while preserving the correctness floor established in `PR1`. This is where payload-shaping work from [docs/mcp-contract.md](/Users/deepg/Desktop/KnowCode/docs/mcp-contract.md#appendix-token-overhead-reduction-strategies) should be prioritized based on evidence rather than intuition.
 
 4. `Phase 4 - Advanced Cost Optimization`
 Only after the earlier phases are stable should KnowCode consider more invasive moves such as tool-surface consolidation, more aggressive summary-first retrieval, or adaptive cost-aware escalation policies. Each such change should be justified against the golden-query baseline and the observed spend data, not adopted as a first-release architectural dependency.
@@ -82,7 +95,7 @@ Create a CI-safe, deterministic retrieval eval harness for code-only MCP usage, 
 - `tests/eval/harness/scorer.py`
 - [scripts/evaluate.py](/Users/deepg/Desktop/KnowCode/scripts/evaluate.py:1)
 - [README.md](/Users/deepg/Desktop/KnowCode/README.md:436)
-- Optionally [docs/evolution.md](/Users/deepg/Desktop/KnowCode/docs/evolution.md:103) if you want the roadmap item to point at the new harness
+- Optionally [docs/architecture/reference_architecture.md](/Users/deepg/Desktop/KnowCode/docs/architecture/reference_architecture.md:103) if you want the roadmap item to point at the new harness
 
 **Implementation Tasks**
 1. Build a tiny fixture repo that covers the MCP use cases you care about most now:
@@ -456,7 +469,7 @@ uv run pytest tests/unit/test_telemetry.py tests/unit/mcp/test_mcp_server_tools.
 This PR should be the cleanup and polish pass after the correctness-critical work is already stable. It is where you tighten payload shape, token budgets, and other low-risk operational details without reopening the earlier contract questions. It should prepare the path for later spend optimization, but not turn spend reduction into a competing ship gate for the first release.
 
 **Context**
-The repo already has a concrete list of payload-shaping opportunities in [docs/MCP_TOKEN_OVERHEAD_REDUCTION.md](/Users/deepg/Desktop/KnowCode/docs/MCP_TOKEN_OVERHEAD_REDUCTION.md:1). The retrieval path in [src/knowcode/retrieval/orchestrator.py](/Users/deepg/Desktop/KnowCode/src/knowcode/retrieval/orchestrator.py:202) already gates fields by verbosity, and the MCP server response surface is tested in [tests/unit/service/test_retrieve_context_for_query.py](/Users/deepg/Desktop/KnowCode/tests/unit/service/test_retrieve_context_for_query.py:1) and [tests/unit/mcp/test_mcp_server_tools.py](/Users/deepg/Desktop/KnowCode/tests/unit/mcp/test_mcp_server_tools.py:1). That makes this a good last-mile hardening pass once the earlier PRs have reduced correctness risk.
+The repo already has a concrete list of payload-shaping opportunities in [docs/mcp-contract.md](/Users/deepg/Desktop/KnowCode/docs/mcp-contract.md#appendix-token-overhead-reduction-strategies). The retrieval path in [src/knowcode/retrieval/orchestrator.py](/Users/deepg/Desktop/KnowCode/src/knowcode/retrieval/orchestrator.py:202) already gates fields by verbosity, and the MCP server response surface is tested in [tests/unit/service/test_retrieve_context_for_query.py](/Users/deepg/Desktop/KnowCode/tests/unit/service/test_retrieve_context_for_query.py:1) and [tests/unit/mcp/test_mcp_server_tools.py](/Users/deepg/Desktop/KnowCode/tests/unit/mcp/test_mcp_server_tools.py:1). That makes this a good last-mile hardening pass once the earlier PRs have reduced correctness risk.
 
 **Objective**
 Deliver low-risk response-shaping and operational cleanup only after correctness, freshness, coverage, bootstrap, and observability are in place, while preserving the evidence-backed path to later spend tuning.
@@ -471,7 +484,7 @@ Deliver low-risk response-shaping and operational cleanup only after correctness
 **Files To Update**
 - [src/knowcode/mcp/server.py](/Users/deepg/Desktop/KnowCode/src/knowcode/mcp/server.py:109)
 - [src/knowcode/retrieval/orchestrator.py](/Users/deepg/Desktop/KnowCode/src/knowcode/retrieval/orchestrator.py:202)
-- [docs/MCP_TOKEN_OVERHEAD_REDUCTION.md](/Users/deepg/Desktop/KnowCode/docs/MCP_TOKEN_OVERHEAD_REDUCTION.md:1)
+- [docs/mcp-contract.md](/Users/deepg/Desktop/KnowCode/docs/mcp-contract.md#appendix-token-overhead-reduction-strategies)
 - [README.md](/Users/deepg/Desktop/KnowCode/README.md:262)
 - [tests/unit/service/test_retrieve_context_for_query.py](/Users/deepg/Desktop/KnowCode/tests/unit/service/test_retrieve_context_for_query.py:1)
 - [tests/unit/mcp/test_mcp_server_tools.py](/Users/deepg/Desktop/KnowCode/tests/unit/mcp/test_mcp_server_tools.py:1)

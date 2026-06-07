@@ -1,5 +1,6 @@
 """Evaluation script for retrieval quality."""
 
+import argparse
 import json
 import os
 import sys
@@ -9,6 +10,30 @@ from knowcode.storage.vector_store import VectorStore
 from knowcode.retrieval.hybrid_index import HybridIndex
 from knowcode.llm.embedding import OpenAIEmbeddingProvider, VoyageAIEmbeddingProvider
 from knowcode.data_models import EmbeddingConfig, CodeChunk
+
+def normalize_entity_id(entity_id: str) -> str:
+    """Normalize entity ID by making the file path component relative to project root."""
+    if "::" not in entity_id:
+        return entity_id
+    path_part, symbol_part = entity_id.split("::", 1)
+    
+    path = Path(path_part)
+    if not path.is_absolute():
+        return entity_id
+        
+    try:
+        rel_path = path.relative_to(Path.cwd().resolve())
+        return f"{rel_path}::{symbol_part}"
+    except ValueError:
+        pass
+        
+    parts = path.parts
+    for idx, part in enumerate(parts):
+        if part in ("src", "tests"):
+            rel_path = Path(*parts[idx:])
+            return f"{rel_path}::{symbol_part}"
+            
+    return entity_id
 
 def evaluate(ground_truth_path: Path, index_path: Path) -> dict:
     """Evaluate retrieval quality against ground truth."""
@@ -32,7 +57,7 @@ def evaluate(ground_truth_path: Path, index_path: Path) -> dict:
             embedding_meta = manifest.get("embedding", {})
             dimension = embedding_meta.get("dimension", dimension)
             provider_name = embedding_meta.get("provider", provider_name)
-            print(f"Index detected: {provider_name} with dimension {dimension}")
+            print(f"Index detected: {provider_name} with dimension {dimension}", file=sys.stderr)
 
     # Load chunk metadata
     repo = InMemoryChunkRepository()
@@ -69,53 +94,102 @@ def evaluate(ground_truth_path: Path, index_path: Path) -> dict:
     mrr_sum = 0.0
     total_queries = len(ground_truth)
     
-    print(f"Evaluating {total_queries} queries...")
+    print(f"Evaluating {total_queries} queries...", file=sys.stderr)
+
+    per_query_results = []
 
     for item in ground_truth:
-        query = item.get("query")
-        expected_ids = set(item.get("expected_ids", []))
+        query = item.get("query_text") or item.get("query")
+        query_id = item.get("query_id")
+        
+        # Support both new/old expected format
+        raw_expected = item.get("expected_entities") or item.get("expected_ids", [])
+        if raw_expected and isinstance(raw_expected[0], dict):
+            expected_ids = {normalize_entity_id(e["entity_id"]) for e in raw_expected}
+        else:
+            expected_ids = {normalize_entity_id(e) for e in raw_expected}
         
         if not query or not expected_ids:
             continue
             
         q_vec = provider.embed_single(query)
-        # Search directly on hybrid index
         results = hybrid.search(query, q_vec, limit=10)
         
-        found_ids = [c.id for c, _ in results]
+        # Extract entity IDs from returned chunk IDs
+        found_entity_ids = []
+        for c, _ in results:
+            cid = c.id
+            if "::" in cid:
+                parts = cid.rsplit("::", 1)
+                if parts[1].isdigit():
+                    cid = parts[0]
+            found_entity_ids.append(normalize_entity_id(cid))
         
         # Recall@k
-        if any(fid in expected_ids for fid in found_ids[:1]):
+        q_mrr = 0.0
+        q_prec_1 = 1.0 if found_entity_ids and found_entity_ids[0] in expected_ids else 0.0
+        
+        if any(fid in expected_ids for fid in found_entity_ids[:1]):
             hits_at_1 += 1
-        if any(fid in expected_ids for fid in found_ids[:5]):
+        if any(fid in expected_ids for fid in found_entity_ids[:5]):
             hits_at_5 += 1
-        if any(fid in expected_ids for fid in found_ids[:10]):
+        if any(fid in expected_ids for fid in found_entity_ids[:10]):
             hits_at_10 += 1
             
         # MRR
         rank = 0
-        for i, fid in enumerate(found_ids):
+        for i, fid in enumerate(found_entity_ids):
             if fid in expected_ids:
                 rank = i + 1
                 break
         if rank > 0:
-            mrr_sum += 1.0 / rank
+            q_mrr = 1.0 / rank
+            mrr_sum += q_mrr
 
-    return {
+        per_query_results.append({
+            "query_id": query_id,
+            "query": query,
+            "mrr": round(q_mrr, 4),
+            "precision_at_1": q_prec_1,
+            "expected": list(expected_ids),
+            "retrieved": found_entity_ids[:5]
+        })
+
+    aggregate_results = {
         "queries": total_queries,
         "precision_at_1": round(hits_at_1 / total_queries, 4) if total_queries else 0,
         "precision_at_5": round(hits_at_5 / total_queries, 4) if total_queries else 0,
         "recall_at_10": round(hits_at_10 / total_queries, 4) if total_queries else 0,
         "mrr": round(mrr_sum / total_queries, 4) if total_queries else 0,
+        "results": per_query_results
     }
+
+    return aggregate_results
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 3:
-        print("Usage: python evaluate.py <ground_truth.json> <index_dir>")
+    parser = argparse.ArgumentParser(description="Evaluate retrieval quality.")
+    parser.add_argument("ground_truth", type=str, help="Path to ground truth JSON file")
+    parser.add_argument("index_dir", type=str, help="Path to semantic index directory")
+    parser.add_argument("--threshold", type=float, default=None, help="Fail if mean MRR is below this threshold")
+    
+    args = parser.parse_args()
+    
+    gt_path = Path(args.ground_truth)
+    idx_path = Path(args.index_dir)
+    
+    results = evaluate(gt_path, idx_path)
+    
+    if "error" in results:
+        print(f"Error: {results['error']}", file=sys.stderr)
         sys.exit(1)
         
-    gt_path = Path(sys.argv[1])
-    idx_path = Path(sys.argv[2])
-    results = evaluate(gt_path, idx_path)
     print(json.dumps(results, indent=2))
+    
+    if args.threshold is not None:
+        mean_mrr = results.get("mrr", 0.0)
+        if mean_mrr < args.threshold:
+            print(f"FAILED: Mean MRR {mean_mrr:.4f} is below threshold {args.threshold:.4f}", file=sys.stderr)
+            sys.exit(1)
+        else:
+            print(f"PASSED: Mean MRR {mean_mrr:.4f} is above threshold {args.threshold:.4f}", file=sys.stderr)

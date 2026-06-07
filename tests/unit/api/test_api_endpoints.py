@@ -141,6 +141,16 @@ class DummyService:
     def reload(self) -> Any:
         self.reload_called = True
 
+    def get_freshness_metadata(self) -> dict[str, Any]:
+        return {
+            "last_store_rebuild": 100,
+            "last_index_rebuild": 200,
+            "latest_source_change": 150,
+            "is_stale": False,
+            "stale_reasons": [],
+        }
+
+
 
 # --- Original endpoint tests (updated for rate-limited signatures) ---
 
@@ -272,3 +282,16 @@ def test_search_result_limit() -> None:
     # Explicit limit of 0... wait, ge=1, so limit=1 is the minimum
     results = api.search(request=req, q="foo", limit=1, service=service)  # type: ignore
     assert len(results) == 1
+
+
+def test_freshness_endpoint() -> None:
+    """Test that the /freshness endpoint returns the mapped response model."""
+    req = _mock_request()
+    service = DummyService()
+    resp = api.get_freshness(request=req, service=service)  # type: ignore
+    assert resp.last_store_rebuild == 100
+    assert resp.is_stale is False
+    # Correct assertion
+    assert resp.last_index_rebuild == 200
+
+

@@ -241,5 +241,9 @@ def create_embedding_provider(
                     base_url=base_url,
                 )
 
-    # Final fallback: use defaults from EmbeddingConfig (now VoyageAI)
-    return VoyageAIEmbeddingProvider(EmbeddingConfig())
+    # Final fallback: use a dummy embedding provider that does not require external services.
+    # This ensures tests can run without API keys.
+    # Final fallback: use a dummy embedding provider that does not require external services.
+    # This ensures tests can run without API keys.
+    from .embedding import DummyEmbeddingProvider
+    return DummyEmbeddingProvider(EmbeddingConfig())

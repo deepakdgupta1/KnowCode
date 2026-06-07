@@ -30,6 +30,15 @@ class ChunkRepository(ABC):
         pass
 
     @abstractmethod
+    def remove_by_file(self, file_path: str) -> list[str]:
+        """Remove all chunks associated with the given file path.
+        
+        Returns:
+            List of removed chunk IDs.
+        """
+        pass
+
+    @abstractmethod
     def clear(self) -> None:
         """Clear all chunks."""
         pass
@@ -60,6 +69,18 @@ class InMemoryChunkRepository(ChunkRepository):
         chunk_ids = self._by_entity.get(entity_id, [])
         return [self._chunks[cid] for cid in chunk_ids if cid in self._chunks]
 
+    def remove_by_file(self, file_path: str) -> list[str]:
+        """Remove all chunks associated with the given file path."""
+        removed_ids = []
+        for entity_id in list(self._by_entity.keys()):
+            if entity_id == file_path or entity_id.startswith(file_path + "::"):
+                chunk_ids = self._by_entity.pop(entity_id, [])
+                for cid in chunk_ids:
+                    if cid in self._chunks:
+                        self._chunks.pop(cid, None)
+                        removed_ids.append(cid)
+        return removed_ids
+
     def search_by_tokens(self, tokens: list[str], limit: int = 10) -> list[CodeChunk]:
         """Perform a simple token-overlap search over stored chunks."""
         # Simple token overlap scoring
@@ -76,3 +97,4 @@ class InMemoryChunkRepository(ChunkRepository):
     def clear(self) -> None:
         self._chunks.clear()
         self._by_entity.clear()
+

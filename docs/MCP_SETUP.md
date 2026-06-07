@@ -25,12 +25,13 @@ large prompt. The low-token workflow is:
 - A semantic index: `knowcode_index/`.
 - An MCP-capable client such as Antigravity, Claude Desktop, VS Code, or another agent host.
 
-Run the local readiness check before wiring the client:
+Build the knowledge base and semantic index, then run the readiness check:
 
 ```bash
-uv run knowcode analyze . --output .
+uv run knowcode build .
 uv run knowcode doctor --store . --mcp
 ```
+
 
 ## MCP Client Configuration
 
@@ -120,6 +121,16 @@ Expected behavior:
 3. The agent answers from local context when `sufficiency_score` meets the configured threshold.
 4. The agent escalates to `standard` or `verbose` only if the minimal context is insufficient.
 
+
+## 📊 Success Metrics
+
+After setup, you should see:
+
+- ✅ 70%+ queries with `sufficiency_score >= 0.8`
+- ✅ Faster responses for codebase questions
+- ✅ 50%+ reduction in external LLM token usage
+- ✅ Accurate answers from local context
+
 ## Troubleshooting
 
 ### MCP Server Not Available
@@ -136,8 +147,9 @@ uv run knowcode mcp-server --store .
 Run:
 
 ```bash
-uv run knowcode analyze . --output .
+uv run knowcode build .
 ```
+
 
 Then verify the MCP config `--store` points to the directory containing
 `knowcode_knowledge.json`.
@@ -155,13 +167,40 @@ uv run knowcode doctor --store .
 Also confirm embedding API keys from `aimodels.yaml` are present in the agent
 environment.
 
+### Freshness Safety & Stale State Recovery
+
+If retrieval results include a `freshness` block stating that `is_stale` is true, the local knowledge store or index does not match the current state of the source tree.
+
+To recover:
+1. Re-run analysis to update the knowledge store:
+   ```bash
+   uv run knowcode analyze . --output .
+   ```
+2. Re-index the codebase to update the vector index:
+   ```bash
+   uv run knowcode index . --output knowcode_index
+   ```
+3. If running the FastAPI intelligence server, trigger reload:
+   ```bash
+   curl -X POST http://127.0.0.1:8000/api/v1/reload
+   ```
+
 ### Context Still Too Small
+
 
 Follow the ladder in [mcp-contract.md](mcp-contract.md): increase breadth while
 staying in `minimal`, then use `standard` for implementation detail, then
 `verbose` for evidence. Avoid making `diagnostic` the default.
 
+## Supported File Extensions
+
+The MCP server and indexer discover and parse files with the following extensions:
+`.py`, `.js`, `.ts`, `.jsx`, `.tsx`, `.java`, `.rs`, `.vue`, `.md`, `.yaml`, `.yml`.
+
+Files with other extensions are ignored during scans. If your project relies heavily on unsupported languages, those files will not be present in the semantic index or knowledge store.
+
 ## Security Notes
+
 
 - The MCP server runs locally over stdio.
 - `knowcode_knowledge.json` and `knowcode_index/` contain repository-derived data.
@@ -169,8 +208,29 @@ staying in `minimal`, then use `standard` for implementation detail, then
   configured provider.
 - Store API keys in environment variables, not committed files.
 
+
+## 🎓 Key Concepts
+
+**Sufficiency Score**: Confidence that retrieved context is enough to answer the query
+- `>= sufficiency_threshold` (default 0.8) → Answer locally
+- `< sufficiency_threshold` → Escalate or use external LLM
+
+**Retrieval Modes**:
+- **Semantic**: Uses embeddings + vector search (better)
+- **Lexical**: Uses keyword matching (fallback)
+
+**Dependency Expansion**: Includes related code (callees, callers) for complete context
+
+## ⚡ Performance Tips
+
+1. **Build semantic index** - Much better than lexical
+2. **Keep knowledge store updated** - Re-analyze after major changes
+3. **Tune parameters** - Adjust `max_tokens` and `limit_entities` following the verbosity ladder
+4. **Monitor scores** - Track `sufficiency_score` distribution
+
+
 ## References
 
 - [MCP retrieval contract](mcp-contract.md)
 - [Documentation MCP section](index.md#mcp-server)
-- [MCP token overhead notes](MCP_TOKEN_OVERHEAD_REDUCTION.md)
+- [MCP token overhead notes](mcp-contract.md#appendix-token-overhead-reduction-strategies)

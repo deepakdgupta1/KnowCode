@@ -234,13 +234,23 @@ For token-efficient IDE agent usage, follow the canonical
 - `trace_calls` - Trace call graph (callers/callees) with depth
 - `retrieve_context_for_query` - Unified query→retrieval→context bundle
 
-## Supported Languages (MVP)
+## Supported Language Matrix
 
-- **Python** (.py) - Full AST parsing (Supports Python 3.10 - 3.12)
-- **JavaScript / TypeScript** (.js, .ts) - Classes, functions, imports (via tree-sitter)
-- **Java** (.java) - Classes, methods, imports, inheritance (via tree-sitter)
-- **Markdown** (.md) - Document structure with heading hierarchy
-- **YAML** (.yaml, .yml) - Configuration keys with nested structure
+KnowCode scans, parses, and indexes codebases to construct semantic graphs. Below is the support status for various file extensions and programming languages:
+
+| Extension | Language | Parser Mechanism | Discovery Status | Notes |
+|---|---|---|---|---|
+| `.py` | Python | Python AST | Fully Discovered & Parsed | Full semantic parsing (Python 3.10 - 3.12). |
+| `.js`, `.jsx` | JavaScript | Tree-sitter | Fully Discovered & Parsed | Extracts classes, functions, imports, JSX tags. |
+| `.ts`, `.tsx` | TypeScript | Tree-sitter | Fully Discovered & Parsed | Extracts classes, functions, imports, TSX tags. |
+| `.java` | Java | Tree-sitter | Fully Discovered & Parsed | Extracts classes, methods, imports, inheritance. |
+| `.rs` | Rust | Tree-sitter | Fully Discovered & Parsed | Extracts structs, enums, functions, impl blocks. |
+| `.vue` | Vue | Tree-sitter | Fully Discovered & Parsed | Extracts Vue Single-File Component scripts. |
+| `.md` | Markdown | Custom Markdown parser | Fully Discovered & Parsed | Document structure with heading hierarchy. |
+| `.yaml`, `.yml` | YAML | Custom YAML parser | Fully Discovered & Parsed | Configuration keys with nested structure. |
+
+### Unsupported Extensions
+Any file extensions not explicitly listed in the table above (e.g. `.go`, `.cpp`, `.h`, `.swift`, `.rb`, `.php`, `.css`, `.html`) are currently **ignored** during index/analyze operations.
 
 ## Architecture
 
@@ -254,7 +264,7 @@ KnowCode follows a layered architecture:
 6. **Context Synthesizer** - Generates token-efficient context bundles with priority ranking
 7. **CLI** - User interface for all operations
 
-See [evolution.md](evolution.md) for the complete reference architecture.
+See [reference_architecture.md](file:///Users/deepg/Desktop/KnowCode/docs/architecture/reference_architecture.md) for the complete reference architecture.
 
 ## Example Output
 
@@ -316,7 +326,7 @@ ruff format src/
 
 ## Roadmap
 
-See [evolution.md](evolution.md) for the full vision. The MVP focuses on:
+See [reference_architecture.md](file:///Users/deepg/Desktop/KnowCode/docs/architecture/reference_architecture.md) for the full vision. The MVP focuses on:
 
 - ✅ Single monorepo support
 - ✅ Python, Markdown, YAML parsing

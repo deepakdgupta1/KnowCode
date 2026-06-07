@@ -1,0 +1,58 @@
+[
+  {
+    "query_id": "q1",
+    "query_text": "Find the function that parses markdown files.",
+    "task_type": "locate",
+    "difficulty": "easy",
+    "expected_entities": [
+      "src/knowcode/parsers/markdown_parser.py::MarkdownParser.parse_file",
+      "src/knowcode/parsers/markdown_parser.py::MarkdownParser"
+    ],
+    "expected_files": ["src/knowcode/parsers/markdown_parser.py"],
+    "must_mention_facts": [],
+    "must_not_mention_facts": []
+  },
+  {
+    "query_id": "q2",
+    "query_text": "Explain how the monitor handles file deletions.",
+    "task_type": "explain",
+    "difficulty": "medium",
+    "expected_entities": ["src/knowcode/indexing/monitor.py::IndexingHandler.on_deleted"],
+    "expected_files": ["src/knowcode/indexing/monitor.py"],
+    "must_mention_facts": [],
+    "must_not_mention_facts": []
+  },
+  {
+    "query_id": "q3",
+    "query_text": "Debug why a .tsx file is not indexed in scanner or monitor handler.",
+    "task_type": "debug",
+    "difficulty": "hard",
+
+    "expected_entities": [
+      "src/knowcode/indexing/monitor.py::IndexingHandler._handle_change",
+      "src/knowcode/indexing/scanner.py::Scanner"
+    ],
+    "expected_files": [
+      "src/knowcode/indexing/monitor.py",
+      "src/knowcode/indexing/scanner.py"
+    ],
+    "must_mention_facts": [],
+    "must_not_mention_facts": []
+  },
+  {
+    "query_id": "q4",
+    "query_text": "Trace dependencies from module_a to module_b.",
+    "task_type": "dependency-traversal",
+    "difficulty": "medium",
+    "expected_entities": [
+      "tests/eval/fixtures/mini_repo/module_a.py::func_a",
+      "tests/eval/fixtures/mini_repo/module_b.py::func_b"
+    ],
+    "expected_files": [
+      "tests/eval/fixtures/mini_repo/module_a.py",
+      "tests/eval/fixtures/mini_repo/module_b.py"
+    ],
+    "must_mention_facts": [],
+    "must_not_mention_facts": []
+  }
+]

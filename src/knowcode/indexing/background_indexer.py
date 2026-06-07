@@ -41,24 +41,60 @@ class BackgroundIndexer:
         Args:
             path: File path to enqueue for processing.
         """
-        self._queue.put(path)
+        self._queue.put(("index", path))
+
+    def queue_removal(self, path: Path) -> None:
+        """Queue a file for removal from the index.
+
+        Args:
+            path: File path to remove.
+        """
+        self._queue.put(("remove", path))
+
+    def queue_move(self, old_path: Path, new_path: Path) -> None:
+        """Queue a file move/rename.
+
+        Args:
+            old_path: Original file path.
+            new_path: New file path.
+        """
+        self._queue.put(("move", (old_path, new_path)))
 
     def _worker(self) -> None:
         """Worker thread that processes the indexing queue."""
         while self._running:
             try:
                 # Use timeout to allow checking self._running
-                path = self._queue.get(timeout=1.0)
-                if path is None:
+                item = self._queue.get(timeout=1.0)
+                if item is None:
                     self._queue.task_done()
                     break
-                self.indexer.index_file(path)
+
+                # Support both legacy Path-only items and newer command tuples
+                if isinstance(item, tuple):
+                    cmd, args = item
+                else:
+                    cmd, args = "index", item
+
+                if cmd == "index":
+                    # Remove old chunks first to prevent duplicates/stale data on re-index
+                    if hasattr(self.indexer, "remove_file"):
+                        self.indexer.remove_file(args)
+                    self.indexer.index_file(args)
+                elif cmd == "remove":
+                    if hasattr(self.indexer, "remove_file"):
+                        self.indexer.remove_file(args)
+                elif cmd == "move":
+                    old_path, new_path = args
+                    if hasattr(self.indexer, "remove_file"):
+                        self.indexer.remove_file(old_path)
+                    self.indexer.index_file(new_path)
+
                 self._queue.task_done()
             except queue.Empty:
                 continue
             except Exception as e:
-                # Log error but continue
-                # In production, use high-fidelity logging
                 import logging
                 logging.error(f"Background indexer error: {e}")
                 self._queue.task_done()
+

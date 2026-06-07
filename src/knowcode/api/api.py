@@ -74,7 +74,17 @@ class QueryResponse(BaseModel):
     total: int
     task_type: str = "general"
 
+class FreshnessResponse(BaseModel):
+    """Response model for codebase freshness check."""
+    last_store_rebuild: int
+    last_index_rebuild: int
+    latest_source_change: int
+    is_stale: bool
+    stale_reasons: list[str]
+
+
 @router.get("/health", summary="Health Check")
+
 @limiter.limit(STANDARD_LIMIT)
 def health(request: Request) -> dict[str, str]:
     """Check if the server is running and reachable."""
@@ -238,7 +248,15 @@ def reload_store(request: Request, service: KnowCodeService = Depends(get_servic
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/freshness", response_model=FreshnessResponse, summary="Get Codebase Freshness")
+@limiter.limit(STANDARD_LIMIT)
+def get_freshness(request: Request, service: KnowCodeService = Depends(get_service)) -> FreshnessResponse:
+    """Check freshness status of the knowledge store and semantic index."""
+    meta = service.get_freshness_metadata()
+    return FreshnessResponse(**meta)
+
 @router.get("/entities/{entity_id:path}")
+
 @limiter.limit(STANDARD_LIMIT)
 def get_entity(
     request: Request,

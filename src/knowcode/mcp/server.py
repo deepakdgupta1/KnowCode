@@ -123,7 +123,7 @@ TOOL_DEFINITIONS = [
                 "max_tokens": {
                     "type": "integer",
                     "description": "Overall token budget for returned context",
-                    "default": 6000
+                    "default": 4000
                 },
                 "limit_entities": {
                     "type": "integer",
@@ -278,7 +278,7 @@ class KnowCodeMCPServer:
         self,
         query: str,
         task_type: str = "auto",
-        max_tokens: int = 6000,
+        max_tokens: int = 4000,
         limit_entities: int = 3,
         expand_deps: bool = True,
         verbosity: str = "minimal",
@@ -312,7 +312,21 @@ class KnowCodeMCPServer:
             JSON string result.
         """
         try:
+            from knowcode.telemetry import log_event
+            log_event(
+                self.store_path,
+                {
+                    "event_type": "tool_call",
+                    "tool_name": name,
+                    "arguments": arguments,
+                }
+            )
+        except Exception:
+            pass
+
+        try:
             if name == "search_codebase":
+
                 result = self.search_codebase(
                     query=arguments["query"],
                     limit=arguments.get("limit", 10),
@@ -333,7 +347,7 @@ class KnowCodeMCPServer:
                 result = self.retrieve_context_for_query(  # type: ignore
                     query=arguments["query"],
                     task_type=arguments.get("task_type", "auto"),
-                    max_tokens=arguments.get("max_tokens", 6000),
+                    max_tokens=arguments.get("max_tokens", 4000),
                     limit_entities=arguments.get("limit_entities", 3),
                     expand_deps=arguments.get("expand_deps", True),
                     verbosity=arguments.get("verbosity", "minimal"),

@@ -141,8 +141,8 @@ This is the stage where storage format directly affects cost.
 
 **At `verbosity="minimal"` (default MCP path):**
 
-The orchestrator calls `get_context(..., summarize=True)` ([orchestrator.py:176](../../../src/knowcode/retrieval/orchestrator.py#L176)).
-The synthesizer **skips source code** when `summarize=True` ([context_synthesizer.py:142](../../../src/knowcode/analysis/context_synthesizer.py#L142), [context_synthesizer.py:359](../../../src/knowcode/analysis/context_synthesizer.py#L359)).
+The orchestrator calls `get_context(..., summarize=True)` ([orchestrator.py:176](../../src/knowcode/retrieval/orchestrator.py#L176)).
+The synthesizer **skips source code** when `summarize=True` ([context_synthesizer.py:142](../../src/knowcode/analysis/context_synthesizer.py#L142), [context_synthesizer.py:359](../../src/knowcode/analysis/context_synthesizer.py#L359)).
 
 | Payload Component        | Per Entity | 3 Entities | Notes                    |
 |--------------------------|------------|------------|--------------------------|
@@ -221,7 +221,7 @@ from the context bundle without calling any external LLM. This saves the **entir
 frontier LLM cost** for that query — both the tool result injection (Step 14) AND
 the answer generation (Step 15).
 
-The documented workflow from [KnowCode.md:1057-1062](../../../KnowCode.md#L1057-L1062):
+The documented workflow from [reference_architecture.md](reference_architecture.md):
 1. User prompts IDE agent
 2. IDE agent invokes `retrieve_context_for_query` via MCP
 3. KnowCode returns context bundle + sufficiency score
@@ -254,8 +254,8 @@ on the default path. Source IS used when:
 ### 3.2 Startup Load Latency
 
 The full JSON is deserialized once on first access via `KnowledgeStore.load()`. The
-service caches the result in `self._store` ([service.py:48-54](../../../src/knowcode/service.py#L48-L54)),
-and the MCP server caches the service in `self._service` ([server.py:165-182](../../../src/knowcode/mcp/server.py#L165-L182)).
+service caches the result in `self._store` ([service.py:48-54](../../src/knowcode/service.py#L48-L54)),
+and the MCP server caches the service in `self._service` ([server.py:165-182](../../src/knowcode/mcp/server.py#L165-L182)).
 
 **This is a startup cost, not a per-query cost.** For a long-lived MCP server, the
 1.5 MB deserialization happens once. It becomes a problem when:

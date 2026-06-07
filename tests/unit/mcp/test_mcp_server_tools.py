@@ -28,7 +28,7 @@ class DummyService:
             "retrieval_mode": "semantic",
             "context_text": "CTX",
             "total_tokens": 10,
-            "max_tokens": kwargs.get("max_tokens", 6000),
+            "max_tokens": kwargs.get("max_tokens", 4000),
             "truncated": False,
             "sufficiency_score": 0.9,
             "selected_entities": [{"entity_id": "e1"}],
@@ -225,3 +225,72 @@ def test_mcp_server_initializes_service_with_strict_config(
     _ = server._ensure_service()
 
     assert captured.get("strict_config") is True
+
+
+def test_retrieve_context_default_verbosity_minimal(tmp_path: Path) -> None:
+    """Test retrieve_context_for_query defaults to minimal verbosity."""
+    server = KnowCodeMCPServer(store_path=tmp_path)
+    dummy = DummyService()
+    server._ensure_service = lambda allow_missing_store=False: dummy  # type: ignore
+
+    _ = json.loads(
+        server.handle_tool_call(
+            "retrieve_context_for_query",
+            {
+                "query": "Explain Foo",
+            },
+        )
+    )
+
+    assert dummy.calls[0][1]["verbosity"] == "minimal"
+
+
+def test_retrieve_context_returns_expected_structure(tmp_path: Path) -> None:
+    """Test retrieve_context_for_query returns the canonical structure."""
+    server = KnowCodeMCPServer(store_path=tmp_path)
+    dummy = DummyService()
+    server._ensure_service = lambda allow_missing_store=False: dummy  # type: ignore
+
+    payload = json.loads(
+        server.handle_tool_call(
+            "retrieve_context_for_query",
+            {
+                "query": "Explain Foo",
+            },
+        )
+    )
+
+    # Check that canonical keys are present in the response
+    for key in ["query", "context_text", "sufficiency_score", "total_tokens", "task_type", "selected_entities"]:
+        assert key in payload
+
+
+def test_handle_tool_call_emits_telemetry(tmp_path: Path) -> None:
+    """Test that handle_tool_call logs to telemetry."""
+    # Write empty knowledge store so it starts but does not raise missing_knowledge_store
+    (tmp_path / "knowcode_knowledge.json").write_text("{}")
+    
+    server = KnowCodeMCPServer(store_path=tmp_path)
+    mock_service = MockServiceWithStore(tmp_path)
+    server._ensure_service = lambda allow_missing_store=False: mock_service  # type: ignore
+
+    import time
+    _ = server.handle_tool_call("search_codebase", {"query": "Foo", "limit": 5})
+    
+    # Wait for async logging to complete
+    time.sleep(0.15)
+    
+    log_file = tmp_path / "knowcode_telemetry.jsonl"
+    assert log_file.exists()
+    
+    import json
+    lines = log_file.read_text(encoding="utf-8").strip().split("\n")
+    records = [json.loads(line) for line in lines]
+    
+    tool_call_events = [r for r in records if r.get("event_type") == "tool_call"]
+    assert len(tool_call_events) == 1
+    assert tool_call_events[0]["tool_name"] == "search_codebase"
+    assert tool_call_events[0]["arguments"]["query"] == "Foo"
+
+
+

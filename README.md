@@ -43,42 +43,47 @@ Commands fail fast with actionable hints, e.g.:
 
 ## Quick Start
 
-```bash
-# 1. Analyze your codebase
-knowcode analyze src/
+The recommended workflow for any new repository is to build the knowledge base and semantic index in one step, then run the doctor to verify readiness:
 
-# 2. Query the knowledge store
+```bash
+# 1. Build the knowledge base and semantic index for the current directory
+knowcode build .
+
+# 2. Verify codebase readiness and MCP server handshake
+knowcode doctor --store . --mcp
+
+# 3. Query the knowledge store
 knowcode query search "MyClass"
 knowcode query callers "my_function"
-knowcode query callees "MyClass.method"
 
-# 3. Generate context for an entity
+# 4. Generate context for an entity
 knowcode context "MyClass.important_method"
 
-# 4. Export documentation
-knowcode export -o docs/
+# 5. Ask questions using the LLM agent
+knowcode ask "How does the graph builder work?"
 
-# 5. (Optional) Build semantic search index explicitly
-#    `analyze` also attempts indexing; this command is useful for rebuilds.
-knowcode index src/
-
-# 6. Perform semantic search
-knowcode semantic-search "How does parsing work?"
-
-# 7. Start the intelligence server with watch mode
+# 6. Start the intelligence server with watch mode
 knowcode server --port 8080 --watch
-
-# 8. Start MCP server for IDE integration
-knowcode mcp-server --store .
-
-# 9. View statistics
-knowcode stats
 ```
+
 
 ## Commands
 
+### `build`
+Build the knowledge base and semantic index for a directory. Run it from inside the project directory:
+
+```bash
+knowcode build <directory> [--ignore <pattern>] [--config <path>]
+```
+
+**Example:**
+```bash
+knowcode build . --ignore "tests/*"
+```
+
 ### `analyze`
 Scan and parse a directory to build the knowledge store.
+
 
 ```bash
 knowcode analyze <directory> [--output <path>] [--ignore <pattern>]
@@ -189,8 +194,16 @@ Once running, you can access endpoints like:
 - `GET /api/v1/trace_calls/{entity_id}?direction=callers&depth=3` `(multi-hop call graph)`
 - `GET /api/v1/impact/{entity_id}` `(deletion impact analysis)`
 - `POST /api/v1/reload` (to refresh data after a new `analyze` run)
+- `GET /api/v1/freshness` (check if the store or index has become stale)
+
+**Watch Mode & Freshness Semantics:**
+- Passing `--watch` enables the file system monitor to watch for file changes (modify, create, delete, rename).
+- Modified or created files are automatically queued for incremental re-indexing.
+- Deleted or moved files automatically invalidate and remove their old chunks from the index.
+- You can query codebase freshness at `GET /api/v1/freshness`. If stale, invoke `POST /api/v1/reload` or run a fresh build.
 
 ### `history`
+
 Show git history for the codebase or specific entities. Requires analysis with `--temporal`.
 
 ```bash
@@ -310,13 +323,23 @@ The gateway intentionally integrates with KnowCode only over HTTP (`/openapi.jso
 - Code explanations → **60-80% savings** (precise context only)
 
 
-## Supported Languages (MVP)
+## Supported Language Matrix
 
-- **Python** (.py) - Full AST parsing (Supports Python 3.10 - 3.12)
-- **JavaScript / TypeScript** (.js, .ts) - Classes, functions, imports (via tree-sitter)
-- **Java** (.java) - Classes, methods, imports, inheritance (via tree-sitter)
-- **Markdown** (.md) - Document structure with heading hierarchy
-- **YAML** (.yaml, .yml) - Configuration keys with nested structure
+KnowCode scans, parses, and indexes codebases to construct semantic graphs. Below is the support status for various file extensions and programming languages:
+
+| Extension | Language | Parser Mechanism | Discovery Status | Notes |
+|---|---|---|---|---|
+| `.py` | Python | Python AST | Fully Discovered & Parsed | Full semantic parsing (Python 3.10 - 3.12). |
+| `.js`, `.jsx` | JavaScript | Tree-sitter | Fully Discovered & Parsed | Extracts classes, functions, imports, JSX tags. |
+| `.ts`, `.tsx` | TypeScript | Tree-sitter | Fully Discovered & Parsed | Extracts classes, functions, imports, TSX tags. |
+| `.java` | Java | Tree-sitter | Fully Discovered & Parsed | Extracts classes, methods, imports, inheritance. |
+| `.rs` | Rust | Tree-sitter | Fully Discovered & Parsed | Extracts structs, enums, functions, impl blocks. |
+| `.vue` | Vue | Tree-sitter | Fully Discovered & Parsed | Extracts Vue Single-File Component scripts. |
+| `.md` | Markdown | Custom Markdown parser | Fully Discovered & Parsed | Document structure with heading hierarchy. |
+| `.yaml`, `.yml` | YAML | Custom YAML parser | Fully Discovered & Parsed | Configuration keys with nested structure. |
+
+### Unsupported Extensions
+Any file extensions not explicitly listed in the table above (e.g. `.go`, `.cpp`, `.h`, `.swift`, `.rb`, `.php`, `.css`, `.html`) are currently **ignored** during index/analyze operations.
 
 ## Architecture
 
@@ -330,7 +353,7 @@ KnowCode follows a layered architecture:
 6. **Context Synthesizer** - Generates token-efficient context bundles with priority ranking
 7. **CLI** - User interface for all operations
 
-See [KnowCode.md](KnowCode.md) for the complete reference architecture.
+See [reference_architecture.md](file:///Users/deepg/Desktop/KnowCode/docs/architecture/reference_architecture.md) for the complete reference architecture.
 
 ## Configuration
 
@@ -408,7 +431,16 @@ def build_from_directory(self, root_dir: str | Path, ...) -> 'GraphBuilder'
 - `Scanner.scan_all`
 ```
 
+## Observability
+
+
+KnowCode logs local, non-blocking telemetry records to trace query performance, routing decisions, and MCP tool call patterns.
+
+Telemetry logs are saved to an append-only JSON Lines file at `knowcode_telemetry.jsonl` under the store path.
+For details on metrics, privacy tradeoffs, and threshold tuning, see [docs/observability.md](docs/observability.md).
+
 ## Development
+
 
 ```bash
 # Run tests
@@ -426,7 +458,7 @@ ruff format src/
 
 ## Roadmap
 
-See [KnowCode.md](KnowCode.md) for the full vision and detailed architectural debt register.
+See [reference_architecture.md](file:///Users/deepg/Desktop/KnowCode/docs/architecture/reference_architecture.md) for the full vision and detailed architectural debt register.
 
 **MVP (completed):**
 - ✅ Single monorepo support
@@ -455,7 +487,7 @@ See [KnowCode.md](KnowCode.md) for the full vision and detailed architectural de
 - Fix `metadata` type restriction (`dict[str, str]` → `dict[str, Any]`)
 - Harden configuration loading (logging, validation, strict server mode)
 - Decompose `KnowCodeService` and introduce `Protocol` interfaces
-- Add layer contract tests (parser, store roundtrip, retrieval golden queries)
+- ✅ Add layer contract tests (parser, store roundtrip, retrieval golden queries - see [docs/retrieval-evals.md](docs/retrieval-evals.md))
 
 **Future releases:**
 - v2.4: Multi-level documentation synthesis

@@ -1,7 +1,13 @@
 #!/bin/bash
 
+echo -e "\033[1;33m=== WARNING: verify_mcp_connection.sh is DEPRECATED ===\033[0m"
+echo -e "Use the canonical doctor tool instead:"
+echo -e "  \033[0;32muv run knowcode doctor --store . --mcp\033[0m"
+echo ""
+
 echo "=== MCP Connection Verification Script ==="
 echo ""
+
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -142,5 +148,5 @@ echo "3. ${YELLOW}Antigravity will auto-start the MCP server using the config${N
 echo ""
 echo "Expected behavior after restart:"
 echo "  • All 4 KnowCode tools will be available in the IDE"
-echo "  • Agent rules in .agent/context.md will guide tool usage"
+echo "  • Agent rules in .agent/rules/context.md will guide tool usage"
 echo ""

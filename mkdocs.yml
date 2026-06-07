@@ -54,8 +54,14 @@ markdown_extensions:
 
 nav:
   - Home: index.md
+  - Setup Guide: MCP_SETUP.md
   - MCP Contract: mcp-contract.md
-  - Evolution: evolution.md
-  - API Reference:
-      - Knowledge Store: api/knowledge_store.md
-      # Add more API docs here
+  - API Reference: api_reference.md
+  - Function Calling: OPENAPI_FUNCTION_CALLING.md
+  - Architecture & Roadmap: architecture/reference_architecture.md
+  - Storage Analysis ADR: architecture/json-storage-analysis.md
+  - Workflow Diagrams: diagrams/README.md
+  - Retrieval Quality Evals: retrieval-evals.md
+  - Observability & Telemetry: observability.md
+  - Research:
+      - Prose Evaluation: research/knowcode_evaluation_report.md

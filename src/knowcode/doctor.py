@@ -91,6 +91,10 @@ def run_doctor(
         checks=checks,
     )
 
+    _check_agent_rules(store_path, checks)
+    _check_unsupported_languages(store_path, checks)
+    _check_freshness(store_path, config_path, checks)
+
     if include_mcp:
         checks.append(
             _run_mcp_check(
@@ -101,6 +105,7 @@ def run_doctor(
         )
 
     return DoctorReport(checks=checks)
+
 
 
 def _check_config(
@@ -628,3 +633,112 @@ def _path_size(path: Path) -> int:
             if child.is_file():
                 total += child.stat().st_size
     return total
+
+
+def _check_agent_rules(store_path: str | Path, checks: list[DoctorCheck]) -> None:
+    """Validate presence of the agent rule file."""
+    store_root = Path(store_path).resolve()
+    if not store_root.is_dir():
+        store_root = store_root.parent
+
+    rules_file = store_root / ".agent/rules/context.md"
+    if rules_file.exists():
+        checks.append(
+            DoctorCheck(
+                name="Agent rules",
+                status="pass",
+                message=f"Found active agent rule file: {rules_file.name}",
+            )
+        )
+    else:
+        checks.append(
+            DoctorCheck(
+                name="Agent rules",
+                status="warn",
+                message="No active agent rule file found (e.g. .agent/rules/context.md).",
+                hint="Create .agent/rules/context.md containing the canonical MCP contract reference to guide agent actions.",
+            )
+        )
+
+
+def _check_unsupported_languages(store_path: str | Path, checks: list[DoctorCheck]) -> None:
+    """Scan directory for common unsupported source code extensions."""
+    store_root = Path(store_path).resolve()
+    if not store_root.is_dir():
+        store_root = store_root.parent
+
+    unsupported_exts = set()
+    unsupported_map = {
+        ".go": "Go",
+        ".cpp": "C++",
+        ".c": "C",
+        ".h": "C/C++ Header",
+        ".swift": "Swift",
+        ".rb": "Ruby",
+        ".php": "PHP",
+        ".cs": "C#",
+    }
+    ignored_dirs = {".git", ".venv", "venv", "node_modules", "__pycache__", ".pytest_cache", ".mypy_cache"}
+
+    try:
+        for root, dirs, files in os.walk(store_root):
+            dirs[:] = [d for d in dirs if d not in ignored_dirs]
+            for f in files:
+                ext = Path(f).suffix.lower()
+                if ext in unsupported_map:
+                    unsupported_exts.add(unsupported_map[ext])
+    except Exception:
+        pass
+
+    if unsupported_exts:
+        checks.append(
+            DoctorCheck(
+                name="Supported languages",
+                status="warn",
+                message=f"Detected unsupported codebase languages: {', '.join(sorted(unsupported_exts))}.",
+                hint="KnowCode only indexes supported languages (Python, JS/TS, Java, Rust, Vue, Markdown, YAML).",
+            )
+        )
+    else:
+        checks.append(
+            DoctorCheck(
+                name="Supported languages",
+                status="pass",
+                message="No unsupported source code extensions detected.",
+            )
+        )
+
+
+def _check_freshness(store_path: str | Path, config_path: str | Path | None, checks: list[DoctorCheck]) -> None:
+    """Validate freshness of the knowledge store and index."""
+    try:
+        from knowcode.service import KnowCodeService
+        service = KnowCodeService(store_path=store_path, config_path=str(config_path) if config_path else None)
+        freshness = service.get_freshness_metadata()
+        if freshness["is_stale"]:
+            checks.append(
+                DoctorCheck(
+                    name="Freshness",
+                    status="warn",
+                    message=f"Store/index may be stale. Reasons: {', '.join(freshness['stale_reasons'])}.",
+                    hint="Re-run `knowcode analyze` and `knowcode index` to rebuild artifacts.",
+                )
+            )
+        else:
+            checks.append(
+                DoctorCheck(
+                    name="Freshness",
+                    status="pass",
+                    message="Knowledge store and semantic index are fresh and match the source tree.",
+                )
+            )
+    except Exception as exc:
+        checks.append(
+            DoctorCheck(
+                name="Freshness",
+                status="fail",
+                message=f"Could not determine freshness: {exc}",
+                hint="Ensure the knowledge store and semantic index are built.",
+            )
+        )
+

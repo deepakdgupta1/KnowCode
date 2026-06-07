@@ -16,7 +16,7 @@ def test_agent_failover_logic() -> None:
         "retrieval_mode": "none",
         "context_text": "",
         "total_tokens": 0,
-        "max_tokens": 6000,
+        "max_tokens": 4000,
         "truncated": False,
         "sufficiency_score": 0.0,
         "selected_entities": [],

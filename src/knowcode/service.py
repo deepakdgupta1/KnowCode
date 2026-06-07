@@ -172,7 +172,7 @@ class KnowCodeService:
     def retrieve_context_for_query(
         self,
         query: str,
-        max_tokens: int = 6000,
+        max_tokens: int = 4000,
         task_type: Optional["TaskType"] = None,
         limit_entities: int = 3,
         per_entity_max_tokens: Optional[int] = None,
@@ -195,7 +195,7 @@ class KnowCodeService:
         Returns:
             Dictionary with context_text, sufficiency_score, evidence, and metadata.
         """
-        return self._retrieval_orchestrator.retrieve_context_for_query(
+        res = self._retrieval_orchestrator.retrieve_context_for_query(
             query=query,
             max_tokens=max_tokens,
             task_type=task_type,
@@ -204,6 +204,79 @@ class KnowCodeService:
             expand_deps=expand_deps,
             verbosity=verbosity,
         )
+        res["freshness"] = self.get_freshness_metadata()
+
+        # Log query to telemetry
+        from knowcode.telemetry import log_event
+        threshold = self.app_config.sufficiency_threshold
+
+        score = res.get("sufficiency_score", 0.0)
+        local_or_escalated = "local" if score >= threshold else "escalated"
+        log_event(
+            self.store_path,
+            {
+                "query": query,
+                "verbosity": verbosity,
+                "sufficiency_score": score,
+                "is_stale": res["freshness"]["is_stale"],
+                "local_or_escalated": local_or_escalated,
+            }
+        )
+
+        return res
+
+
+    def get_freshness_metadata(self) -> dict[str, Any]:
+        """Compute freshness metadata for the knowledge store and index."""
+        import os
+        
+        store_file = self._store_file()
+        last_store_rebuild = 0.0
+        if store_file.exists():
+            last_store_rebuild = os.path.getmtime(store_file)
+            
+        index_manifest = self._index_path() / "index_manifest.json"
+        last_index_rebuild = 0.0
+        if index_manifest.exists():
+            last_index_rebuild = os.path.getmtime(index_manifest)
+            
+        latest_source_change = 0.0
+        is_stale = False
+        stale_reasons = []
+        
+        try:
+            from knowcode.indexing.scanner import Scanner
+            root_dir = self._store_root()
+            if root_dir.exists() and root_dir.is_dir():
+                scanner = Scanner(root_dir)
+                files = scanner.scan_all()
+                if files:
+                    latest_source_change = max(os.path.getmtime(f.path) for f in files)
+        except Exception:
+            pass
+            
+        if last_store_rebuild == 0.0:
+            is_stale = True
+            stale_reasons.append("knowledge_store_missing")
+        elif latest_source_change > last_store_rebuild:
+            is_stale = True
+            stale_reasons.append("store_stale_source_changed")
+            
+        if last_index_rebuild == 0.0:
+            is_stale = True
+            stale_reasons.append("semantic_index_missing")
+        elif latest_source_change > last_index_rebuild:
+            is_stale = True
+            stale_reasons.append("index_stale_source_changed")
+            
+        return {
+            "last_store_rebuild": int(last_store_rebuild),
+            "last_index_rebuild": int(last_index_rebuild),
+            "latest_source_change": int(latest_source_change),
+            "is_stale": is_stale,
+            "stale_reasons": stale_reasons,
+        }
+
 
     def _build_index(self, directory: str | Path, index_path: str | Path) -> int:
         """Build a semantic index for a directory and persist it."""

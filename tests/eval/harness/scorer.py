@@ -159,6 +159,32 @@ def score_narrative(
 # ---------------------------------------------------------------------------
 
 
+def normalize_entity_id(entity_id: str) -> str:
+    """Normalize entity ID by making the file path component relative to project root."""
+    from pathlib import Path
+    if "::" not in entity_id:
+        return entity_id
+    path_part, symbol_part = entity_id.split("::", 1)
+    
+    path = Path(path_part)
+    if not path.is_absolute():
+        return entity_id
+        
+    try:
+        rel_path = path.relative_to(Path.cwd().resolve())
+        return f"{rel_path}::{symbol_part}"
+    except ValueError:
+        pass
+        
+    parts = path.parts
+    for idx, part in enumerate(parts):
+        if part in ("src", "tests"):
+            rel_path = Path(*parts[idx:])
+            return f"{rel_path}::{symbol_part}"
+            
+    return entity_id
+
+
 def score_record(
     golden: dict[str, Any],
     retrieval_result: dict[str, Any],
@@ -183,15 +209,18 @@ def score_record(
     task_type: str = golden.get("task_type", "unknown")
     difficulty: str = golden.get("difficulty", "unknown")
 
-    expected_entity_ids: set[str] = {
-        e["entity_id"] for e in golden.get("expected_entities", [])
-    }
+    # Handle expected_entities which may be a list of dicts with 'entity_id' or a list of string IDs
+    raw_expected = golden.get("expected_entities", [])
+    if raw_expected and isinstance(raw_expected[0], dict):
+        expected_entity_ids: set[str] = {normalize_entity_id(e["entity_id"]) for e in raw_expected}
+    else:
+        expected_entity_ids: set[str] = {normalize_entity_id(e) for e in raw_expected}
     expected_files: list[str] = golden.get("expected_files", [])
 
     # Build an ordered list of entity IDs from the retrieval result.
     # ``selected_entities`` is ordered by retrieval rank.
     retrieved_entities: list[str] = [
-        e["entity_id"]
+        normalize_entity_id(e["entity_id"])
         for e in retrieval_result.get("selected_entities", [])
         if "entity_id" in e
     ]

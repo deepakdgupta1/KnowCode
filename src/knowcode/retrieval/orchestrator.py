@@ -62,7 +62,7 @@ class RetrievalOrchestrator:
     def retrieve_context_for_query(
         self,
         query: str,
-        max_tokens: int = 6000,
+        max_tokens: int = 4000,
         task_type: Optional["TaskType"] = None,
         limit_entities: int = 3,
         per_entity_max_tokens: Optional[int] = None,
@@ -218,6 +218,26 @@ class RetrievalOrchestrator:
             "evidence": evidence,
             "errors": errors,
         }
+
+        try:
+            store_path = self._service._assert_store_exists()
+            from knowcode.telemetry import log_event
+            log_event(
+                store_path,
+                {
+                    "event_type": "retrieval_decision",
+                    "query": query,
+                    "task_type": resolved_task_type.value,
+                    "retrieval_mode": retrieval_mode,
+                    "sufficiency_score": sufficiency,
+                    "total_tokens": total_tokens,
+                    "max_tokens": max_tokens,
+                    "selected_entities": [e.get("entity_id") for e in selected_entities if "entity_id" in e],
+                }
+            )
+        except Exception:
+            pass
+
 
         if verbosity == "diagnostic":
             return full_response

@@ -251,7 +251,24 @@ class Indexer:
             return int(value)
         raise ValueError(f"Invalid index schema version value: {value!r}")
                     
+    def remove_file(self, file_path: str | Path) -> None:
+        """Remove all chunks associated with a file path from the repository and index.
+
+        Args:
+            file_path: Path of the file to remove.
+        """
+        file_path_str = str(Path(file_path).resolve())
+        removed_ids = self.chunk_repo.remove_by_file(file_path_str)
+        if removed_ids:
+            # Rebuild vector store with remaining chunks
+            remaining_chunks = list(self.chunk_repo._chunks.values())
+            self.vector_store.clear()
+            for c in remaining_chunks:
+                if c.embedding:
+                    self.vector_store.add(c.id, c.embedding)
+
     def index_file(self, file_path: str | Path) -> int:
+
         """Index a single file for incremental updates.
 
         Args:

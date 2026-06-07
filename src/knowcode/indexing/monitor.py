@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+from knowcode.indexing.scanner import Scanner
 from typing import Optional, TYPE_CHECKING
+
 
 try:
     from watchdog.observers import Observer
@@ -69,10 +71,41 @@ class IndexingHandler(FileSystemEventHandler):
         if not event.is_directory:
             self._handle_change(event.src_path)
 
+    def on_deleted(self, event):   # type: ignore
+        """Handle deleted file events."""
+        if not event.is_directory and self.background_indexer:
+            path = Path(event.src_path)
+            if path.suffix in Scanner.SUPPORTED_EXTENSIONS:
+                if hasattr(self.background_indexer, "queue_removal"):
+                    self.background_indexer.queue_removal(path)
+                else:
+                    self._handle_change(event.src_path)
+
+    def on_moved(self, event):   # type: ignore
+        """Handle moved file events."""
+        if not event.is_directory and self.background_indexer:
+            src_path = Path(event.src_path)
+            dest_path = Path(event.dest_path)
+            src_supported = src_path.suffix in Scanner.SUPPORTED_EXTENSIONS
+            dest_supported = dest_path.suffix in Scanner.SUPPORTED_EXTENSIONS
+
+            if src_supported and dest_supported:
+                if hasattr(self.background_indexer, "queue_move"):
+                    self.background_indexer.queue_move(src_path, dest_path)
+                else:
+                    self._handle_change(event.dest_path)
+            elif src_supported:
+                if hasattr(self.background_indexer, "queue_removal"):
+                    self.background_indexer.queue_removal(src_path)
+            elif dest_supported:
+                self._handle_change(event.dest_path)
+
     def _handle_change(self, path_str: str) -> None:
         """Queue a file for indexing if it is a supported source type."""
         if self.background_indexer:
             path = Path(path_str)
-            # Basic extension filtering
-            if path.suffix in {".py", ".js", ".ts", ".java", ".md", ".yml", ".yaml"}:
+            # Filter using Scanner's supported extensions
+            if path.suffix in Scanner.SUPPORTED_EXTENSIONS:
                 self.background_indexer.queue_file(path)
+
+

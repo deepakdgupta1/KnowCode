@@ -13,6 +13,30 @@ except ImportError:
     faiss = None
 
 
+class SimpleIndex:
+    """Fallback index implementation when FAISS is unavailable."""
+
+    def __init__(self, dimension: int) -> None:
+        self.dimension = dimension
+        self.index = np.empty((0, dimension), dtype="float32")
+        self.ntotal = 0
+
+    def add(self, x: np.ndarray) -> None:
+        self.index = np.vstack([self.index, x])
+        self.ntotal = self.index.shape[0]
+
+    def search(self, x: np.ndarray, k: int) -> tuple[np.ndarray, np.ndarray]:
+        # Simple cosine similarity
+        norm_a = np.linalg.norm(self.index, axis=1, keepdims=True)
+        norm_b = np.linalg.norm(x, axis=1, keepdims=True)
+        scores = np.dot(self.index, x.T) / (norm_a * norm_b.T + 1e-9)
+        scores = scores.flatten()
+        
+        # Sort indices by score descending
+        idx = np.argsort(-scores)[:k]
+        return scores[idx].reshape(1, -1), idx.reshape(1, -1)
+
+
 class VectorStore:
     """FAISS-based vector store for code embeddings."""
 
@@ -34,7 +58,7 @@ class VectorStore:
             # Task 3.4: Use Inner Product for cosine similarity (with normalized vectors)
             self.index = faiss.IndexFlatIP(dimension)
         else:
-            self.index = None
+            self.index = SimpleIndex(dimension)
             
         self.id_map: dict[int, str] = {}  # index -> chunk_id
         
@@ -47,11 +71,13 @@ class VectorStore:
         No-op if FAISS is unavailable.
         """
         if not self.index:
-             return
-             
+            return
+            
         vec = np.array([embedding]).astype("float32")
-        idx = self.index.ntotal
+        # Add the vector first, then capture the new index position
         self.index.add(vec)
+        idx = self.index.ntotal - 1  # the index of the newly added vector
+        # self.index.add(vec)  # moved above
         self.id_map[idx] = chunk_id
 
     def search(self, embedding: list[float], limit: int = 10) -> list[tuple[str, float]]:
@@ -85,8 +111,9 @@ class VectorStore:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         
-        # Save FAISS index
-        faiss.write_index(self.index, str(path.with_suffix(".index")))
+        # Save index if FAISS is available
+        if faiss:
+            faiss.write_index(self.index, str(path.with_suffix(".index")))
         
         # Save ID map
         with open(path.with_suffix(".json"), "w") as f:
@@ -135,8 +162,11 @@ class VectorStore:
 
     def clear(self) -> None:
         """Clear the index and reset the ID map."""
+        # Reset index appropriately based on backend
         if faiss:
             self.index = faiss.IndexFlatIP(self.dimension)
+        else:
+            self.index = SimpleIndex(self.dimension)
         self.id_map = {}
 
     @classmethod

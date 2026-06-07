@@ -123,7 +123,7 @@ You should NOT need to manually run `knowcode mcp-server` - Antigravity starts i
 
 ### If Agent Doesn't Follow Rules
 
-1. Verify `.agent/context.md` exists and contains the rules
+1. Verify `.agent/rules/context.md` exists and contains the rules
 2. Check the rules are properly formatted
 3. Try rephrasing your query to be more specific
 

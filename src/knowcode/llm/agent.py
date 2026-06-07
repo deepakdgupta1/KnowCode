@@ -199,7 +199,7 @@ class Agent:
             
             local_answer = self._format_local_answer(query, task_type, context_str)
             
-            return {
+            res = {
                 "answer": local_answer,
                 "source": "local",
                 "task_type": task_type.value,
@@ -213,7 +213,7 @@ class Agent:
             
             llm_answer = self.answer(query)
             
-            return {
+            res = {
                 "answer": llm_answer,
                 "source": "llm",
                 "task_type": task_type.value,
@@ -221,6 +221,27 @@ class Agent:
                 "context": context_str,
                 "llm_tokens_saved": 0,
             }
+
+        try:
+            from knowcode.telemetry import log_event
+            log_event(
+                self.service.store_path,
+                {
+                    "event_type": "agent_decision",
+                    "query": query,
+                    "source": res["source"],
+                    "sufficiency_score": avg_sufficiency,
+                    "threshold": threshold,
+                    "force_llm": force_llm,
+                    "task_type": task_type.value,
+                    "llm_tokens_saved": res["llm_tokens_saved"],
+                }
+            )
+        except Exception:
+            pass
+
+        return res
+
 
     def _format_local_answer(
         self,

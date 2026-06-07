@@ -37,7 +37,7 @@
 
         <!-- ══ ENTRY ══ -->
         <mxCell id="m1" value="1 · query / question / entity_id" style="html=1;endArrow=block;endFill=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="75" y="175"/><mxPoint x="215" y="175"/></Array></mxGeometry></mxCell>
-        <mxCell id="m2" value="2 · service.retrieve_context_for_query(query, max_tokens=6000, task_type, limit_entities=3, expand_deps, verbosity)" style="html=1;endArrow=block;endFill=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="215" y="205"/><mxPoint x="365" y="205"/></Array></mxGeometry></mxCell>
+        <mxCell id="m2" value="2 · service.retrieve_context_for_query(query, max_tokens=4000, task_type, limit_entities=3, expand_deps, verbosity)" style="html=1;endArrow=block;endFill=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="215" y="205"/><mxPoint x="365" y="205"/></Array></mxGeometry></mxCell>
         <mxCell id="m3" value="3 · orchestrator.retrieve_context_for_query(…)" style="html=1;endArrow=block;endFill=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="365" y="235"/><mxPoint x="520" y="235"/></Array></mxGeometry></mxCell>
 
         <!-- VALIDATE -->

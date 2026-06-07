@@ -93,10 +93,16 @@ def _api_keys(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_doctor_passes_with_valid_store_index_and_config(tmp_path: Path) -> None:
     config = tmp_path / "aimodels.yaml"
     _write_config(config)
+    # Write rule file first so it is older than store/index rebuilds
+    rules_dir = tmp_path / ".agent" / "rules"
+    rules_dir.mkdir(parents=True, exist_ok=True)
+    (rules_dir / "context.md").write_text("refer to docs/mcp-contract.md", encoding="utf-8")
+
     _write_store(tmp_path)
     _write_index(tmp_path / "knowcode_index")
 
     result = CliRunner().invoke(
+
         cli_module.cli,
         ["doctor", "--store", str(tmp_path), "--config", str(config), "--json"],
     )
@@ -110,8 +116,12 @@ def test_doctor_passes_with_valid_store_index_and_config(tmp_path: Path) -> None
         "Knowledge store",
         "Semantic index",
         "Disk footprint",
+        "Agent rules",
+        "Supported languages",
+        "Freshness",
     }
     assert all(check["status"] == "pass" for check in payload["checks"])
+
 
 
 def test_doctor_reports_missing_store_and_index(tmp_path: Path) -> None:
@@ -148,3 +158,51 @@ def test_doctor_fails_on_index_dimension_mismatch(tmp_path: Path) -> None:
     semantic = next(check for check in payload["checks"] if check["name"] == "Semantic index")
     assert semantic["status"] == "fail"
     assert "dimension mismatch" in semantic["message"]
+
+
+def test_doctor_checks_rules_freshness_and_unsupported_extensions(tmp_path: Path) -> None:
+    """Test that doctor command checks agent rules, freshness, and unsupported extensions."""
+    config = tmp_path / "aimodels.yaml"
+    _write_config(config)
+    _write_store(tmp_path)
+    _write_index(tmp_path / "knowcode_index")
+
+    # Running doctor should include "Agent rules", "Freshness", and "Supported languages" checks.
+    result = CliRunner().invoke(
+        cli_module.cli,
+        ["doctor", "--store", str(tmp_path), "--config", str(config), "--json"],
+    )
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    
+    # Verify the checks are present and report correct warning statuses
+    checks = {check["name"]: check for check in payload["checks"]}
+    assert "Agent rules" in checks
+    assert "Supported languages" in checks
+    assert "Freshness" in checks
+
+    # Rule file doesn't exist yet, so it should warn
+    assert checks["Agent rules"]["status"] == "warn"
+    assert checks["Supported languages"]["status"] == "pass"
+    assert checks["Freshness"]["status"] == "pass"
+
+    # Now create rule file and an unsupported Go file
+    rules_dir = tmp_path / ".agent" / "rules"
+    rules_dir.mkdir(parents=True)
+    (rules_dir / "context.md").write_text("refer to docs/mcp-contract.md", encoding="utf-8")
+    (tmp_path / "main.go").write_text("package main", encoding="utf-8")
+
+    result2 = CliRunner().invoke(
+        cli_module.cli,
+        ["doctor", "--store", str(tmp_path), "--config", str(config), "--json"],
+    )
+    assert result2.exit_code == 0
+    payload2 = json.loads(result2.output)
+    checks2 = {check["name"]: check for check in payload2["checks"]}
+
+    # Rule file exists -> pass; Go file exists -> warn
+    assert checks2["Agent rules"]["status"] == "pass"
+    assert checks2["Supported languages"]["status"] == "warn"
+    assert "Go" in checks2["Supported languages"]["message"]
+
+
