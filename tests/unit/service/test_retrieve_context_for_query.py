@@ -34,7 +34,13 @@ class DummyService(KnowCodeService):
     def get_search_engine(self, _index_path=None):  # type: ignore
         return self._engine
 
-    def get_context(self, target: str, max_tokens: int = 2000, task_type: TaskType | None = None, summarize: bool = False):  # type: ignore
+    def get_context(
+        self,
+        target: str,
+        max_tokens: int = 2000,
+        task_type: TaskType | None = None,
+        summarize: bool = False,
+    ):  # type: ignore
         assert task_type is not None
         self.context_calls.append((target, max_tokens, task_type))
         return {
@@ -99,7 +105,9 @@ def test_retrieve_context_uses_semantic_when_index_exists(tmp_path: Path) -> Non
     ]
 
     service = DummyService(tmp_path, engine=DummySearchEngine(scored))
-    result = service.retrieve_context_for_query("Explain e1", limit_entities=2, verbosity="diagnostic")
+    result = service.retrieve_context_for_query(
+        "Explain e1", limit_entities=2, verbosity="diagnostic"
+    )
 
     assert result["retrieval_mode"] == "semantic"
     assert [e["entity_id"] for e in result["selected_entities"]] == ["e1", "e2"]
@@ -107,7 +115,36 @@ def test_retrieve_context_uses_semantic_when_index_exists(tmp_path: Path) -> Non
     assert result["context_text"].count("CTX:") == 2
 
 
-def test_retrieve_context_falls_back_to_lexical_on_semantic_error(tmp_path: Path) -> None:
+def test_retrieve_context_can_include_metadata_with_minimal_verbosity(
+    tmp_path: Path,
+) -> None:
+    _write_store_file(tmp_path)
+    (tmp_path / "knowcode_index").mkdir()
+
+    chunk = CodeChunk(id="c1", entity_id="e1", content="one", tokens=["one"])
+    service = DummyService(
+        tmp_path,
+        engine=DummySearchEngine(
+            [ScoredChunk(chunk=chunk, score=0.9, source="retrieved")]
+        ),
+    )
+
+    result = service.retrieve_context_for_query(
+        "Explain e1",
+        limit_entities=1,
+        verbosity="minimal",
+        include_metadata=True,
+    )
+
+    assert "reduction_summary" in result
+    assert result["selected_entities"][0]["entity_id"] == "e1"
+    assert result["evidence"][0]["chunk_id"] == "c1"
+    assert result["retrieval_mode"] == "semantic"
+
+
+def test_retrieve_context_falls_back_to_lexical_on_semantic_error(
+    tmp_path: Path,
+) -> None:
     _write_store_file(tmp_path)
     (tmp_path / "knowcode_index").mkdir()
 
@@ -115,7 +152,9 @@ def test_retrieve_context_falls_back_to_lexical_on_semantic_error(tmp_path: Path
         tmp_path,
         engine=DummySearchEngine(RuntimeError("embed failed")),
     )
-    result = service.retrieve_context_for_query("Where is Foo defined?", limit_entities=1, verbosity="diagnostic")
+    result = service.retrieve_context_for_query(
+        "Where is Foo defined?", limit_entities=1, verbosity="diagnostic"
+    )
 
     assert result["retrieval_mode"] == "lexical"
     assert service.search_calls

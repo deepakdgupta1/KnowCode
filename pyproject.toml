@@ -74,3 +74,8 @@ target-version = "py310"
 [tool.mypy]
 strict = true
 ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+markers = [
+    "eval: retrieval-quality evaluation tests",
+]

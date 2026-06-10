@@ -34,7 +34,9 @@ class RetrievalServiceProtocol(Protocol):
     def _validate_index_compatibility(self, index_path: Path) -> None:
         """Validate configured embedding model against loaded index metadata."""
 
-    def get_search_engine(self, index_path: Optional[str | Path] = None) -> SearchEngineProtocol:
+    def get_search_engine(
+        self, index_path: Optional[str | Path] = None
+    ) -> SearchEngineProtocol:
         """Return a search engine instance."""
 
     def search(self, pattern: str) -> list[dict[str, Any]]:
@@ -68,6 +70,7 @@ class RetrievalOrchestrator:
         per_entity_max_tokens: Optional[int] = None,
         expand_deps: bool = True,
         verbosity: str = "minimal",
+        include_metadata: bool = False,
     ) -> dict[str, Any]:
         """Retrieve an evidence-backed context bundle for a query."""
         from knowcode.llm.query_classifier import classify_query
@@ -159,7 +162,9 @@ class RetrievalOrchestrator:
 
             selected_entity_ids = candidates[:limit_entities]
             for rank, entity_id in enumerate(selected_entity_ids, start=1):
-                evidence.append({"rank": rank, "entity_id": entity_id, "source": "lexical"})
+                evidence.append(
+                    {"rank": rank, "entity_id": entity_id, "source": "lexical"}
+                )
 
         selected_entities: list[dict[str, Any]] = []
         context_parts: list[str] = []
@@ -222,6 +227,7 @@ class RetrievalOrchestrator:
         try:
             store_path = self._service._assert_store_exists()
             from knowcode.telemetry import log_event
+
             log_event(
                 store_path,
                 {
@@ -232,12 +238,15 @@ class RetrievalOrchestrator:
                     "sufficiency_score": sufficiency,
                     "total_tokens": total_tokens,
                     "max_tokens": max_tokens,
-                    "selected_entities": [e.get("entity_id") for e in selected_entities if "entity_id" in e],
-                }
+                    "selected_entities": [
+                        e.get("entity_id")
+                        for e in selected_entities
+                        if "entity_id" in e
+                    ],
+                },
             )
         except Exception:
             pass
-
 
         if verbosity == "diagnostic":
             return full_response
@@ -283,5 +292,20 @@ class RetrievalOrchestrator:
             )
             if errors:
                 filtered_response["errors"] = errors
+
+        if include_metadata:
+            filtered_response.update(
+                {
+                    "query": query,
+                    "task_type": resolved_task_type.value,
+                    "task_confidence": task_confidence,
+                    "retrieval_mode": retrieval_mode,
+                    "max_tokens": max_tokens,
+                    "truncated": truncated,
+                    "selected_entities": selected_entities,
+                    "evidence": evidence,
+                    "errors": errors,
+                }
+            )
 
         return filtered_response

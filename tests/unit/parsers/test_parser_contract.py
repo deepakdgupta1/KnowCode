@@ -1,5 +1,4 @@
 import pytest
-from pathlib import Path
 
 from knowcode.data_models import ParseResult, Entity, Relationship
 from knowcode.parsers.python_parser import PythonParser

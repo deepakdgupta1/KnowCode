@@ -3,7 +3,7 @@
 from unittest.mock import MagicMock
 from knowcode.utils.token_counter import TokenCounter
 from knowcode.analysis.context_synthesizer import ContextSynthesizer
-from knowcode.data_models import Entity, EntityKind, Location
+from knowcode.data_models import Entity, EntityKind, Location, TaskType
 
 def test_token_counter() -> None:
     """Test functionality of TokenCounter."""
@@ -73,3 +73,77 @@ def test_context_synthesizer_priority() -> None:
     # Ensure header info is present
     assert "# Function: `bar`" in bundle.context_text
     assert "**File**: `test.py`" in bundle.context_text
+
+
+def test_context_synthesizer_includes_behavior_metadata() -> None:
+    """Behavior metadata should be visible in generic context bundles."""
+    store = MagicMock()
+
+    entity = Entity(
+        id="test::save",
+        kind=EntityKind.FUNCTION,
+        name="save",
+        qualified_name="save",
+        location=Location("test.py", 1, 5),
+        metadata={
+            "behavior": {
+                "side_effect_class": "io",
+                "side_effects": ["io"],
+                "reads": ["path"],
+                "writes": [],
+                "calls": ["open"],
+                "confidence": 0.9,
+            }
+        },
+    )
+    store.get_entity.return_value = entity
+    store.get_parent.return_value = None
+    store.get_callers.return_value = []
+    store.get_callees.return_value = []
+    store.get_children.return_value = []
+
+    bundle = ContextSynthesizer(store, max_tokens=200).synthesize("test::save")
+
+    assert bundle is not None
+    assert "## Behavior" in bundle.context_text
+    assert "Side effect class: `io`" in bundle.context_text
+    assert "Calls: `open`" in bundle.context_text
+
+
+def test_task_context_synthesizer_includes_behavior_metadata() -> None:
+    """Behavior metadata should be visible in task-aware context bundles."""
+    store = MagicMock()
+
+    entity = Entity(
+        id="test::mutate",
+        kind=EntityKind.FUNCTION,
+        name="mutate",
+        qualified_name="mutate",
+        location=Location("test.py", 1, 5),
+        signature="def mutate(items): ...",
+        metadata={
+            "behavior": {
+                "side_effect_class": "state_mutating",
+                "side_effects": ["state_mutation"],
+                "reads": ["items"],
+                "writes": ["items"],
+                "calls": ["items.append"],
+                "confidence": 0.65,
+            }
+        },
+    )
+    store.get_entity.return_value = entity
+    store.get_parent.return_value = None
+    store.get_callers.return_value = []
+    store.get_callees.return_value = []
+    store.get_children.return_value = []
+
+    bundle = ContextSynthesizer(store, max_tokens=200).synthesize_with_task(
+        "test::mutate",
+        task_type=TaskType.REVIEW,
+    )
+
+    assert bundle is not None
+    assert "## Behavior" in bundle.context_text
+    assert "Side effect class: `state_mutating`" in bundle.context_text
+    assert "Writes: `items`" in bundle.context_text

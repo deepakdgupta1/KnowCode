@@ -1,8 +1,6 @@
 """Unit tests for service freshness logic."""
 
-import os
 from pathlib import Path
-import pytest
 from unittest.mock import MagicMock
 
 from knowcode.service import KnowCodeService

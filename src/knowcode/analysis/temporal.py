@@ -74,7 +74,7 @@ class TemporalAnalyzer:
                     name=author_name,  # type: ignore
                     qualified_name=author_email,  # type: ignore
                     location=Location("git", 0, 0),
-                    metadata={"email": author_email}  # type: ignore
+                    metadata={"email": author_email}
                 )
                 entities.append(author_entity)
 

@@ -39,7 +39,9 @@ class KnowCodeService:
                 silently falling back to defaults.
         """
         self.store_path = Path(store_path)
-        self.app_config = app_config or AppConfig.load(config_path, strict=strict_config)
+        self.app_config = app_config or AppConfig.load(
+            config_path, strict=strict_config
+        )
         self._store: Optional[KnowledgeStore] = None
         self._search_engine: Optional["SearchEngine"] = None
         self._indexer: Optional["Indexer"] = None
@@ -103,7 +105,11 @@ class KnowCodeService:
             temporal=temporal,
             coverage=coverage,
         )
-        return output_path / KnowledgeStore.DEFAULT_FILENAME if output_path.is_dir() else output_path
+        return (
+            output_path / KnowledgeStore.DEFAULT_FILENAME
+            if output_path.is_dir()
+            else output_path
+        )
 
     def ensure_index(
         self,
@@ -111,7 +117,9 @@ class KnowCodeService:
         index_path: Optional[str | Path] = None,
     ) -> Path:
         """Ensure the semantic index exists, building it only if missing."""
-        resolved_index_path = Path(index_path) if index_path is not None else self._index_path()
+        resolved_index_path = (
+            Path(index_path) if index_path is not None else self._index_path()
+        )
         if resolved_index_path.exists():
             return resolved_index_path
 
@@ -131,20 +139,22 @@ class KnowCodeService:
         if self._indexer is None:
             from knowcode.llm.embedding import create_embedding_provider
             from knowcode.indexing.indexer import Indexer
-            
+
             provider = create_embedding_provider(app_config=self.app_config)
             self._indexer = Indexer(provider)
-            
+
             if index_path:
                 self._indexer.load(Path(index_path))
             else:
                 default_index = self._index_path()
                 if default_index.exists():
                     self._indexer.load(default_index)
-                
+
         return self._indexer
 
-    def get_search_engine(self, index_path: Optional[str | Path] = None) -> "SearchEngine":
+    def get_search_engine(
+        self, index_path: Optional[str | Path] = None
+    ) -> "SearchEngine":
         """Get or create the search engine.
 
         Args:
@@ -156,14 +166,14 @@ class KnowCodeService:
         if self._search_engine is None:
             from knowcode.retrieval.hybrid_index import HybridIndex
             from knowcode.retrieval.search_engine import SearchEngine
-            
+
             indexer = self.get_indexer(index_path)
             hybrid_index = HybridIndex(indexer.chunk_repo, indexer.vector_store)
-            
+
             self._search_engine = SearchEngine(
-                indexer.chunk_repo, 
-                indexer.embedding_provider, 
-                hybrid_index, 
+                indexer.chunk_repo,
+                indexer.embedding_provider,
+                hybrid_index,
                 self.store,
                 config=self.app_config,
             )
@@ -178,6 +188,7 @@ class KnowCodeService:
         per_entity_max_tokens: Optional[int] = None,
         expand_deps: bool = True,
         verbosity: str = "minimal",
+        include_metadata: bool = False,
     ) -> dict[str, Any]:
         """Retrieve an evidence-backed context bundle for a natural-language query.
 
@@ -203,11 +214,13 @@ class KnowCodeService:
             per_entity_max_tokens=per_entity_max_tokens,
             expand_deps=expand_deps,
             verbosity=verbosity,
+            include_metadata=include_metadata,
         )
         res["freshness"] = self.get_freshness_metadata()
 
         # Log query to telemetry
         from knowcode.telemetry import log_event
+
         threshold = self.app_config.sufficiency_threshold
 
         score = res.get("sufficiency_score", 0.0)
@@ -220,32 +233,32 @@ class KnowCodeService:
                 "sufficiency_score": score,
                 "is_stale": res["freshness"]["is_stale"],
                 "local_or_escalated": local_or_escalated,
-            }
+            },
         )
 
         return res
 
-
     def get_freshness_metadata(self) -> dict[str, Any]:
         """Compute freshness metadata for the knowledge store and index."""
         import os
-        
+
         store_file = self._store_file()
         last_store_rebuild = 0.0
         if store_file.exists():
             last_store_rebuild = os.path.getmtime(store_file)
-            
+
         index_manifest = self._index_path() / "index_manifest.json"
         last_index_rebuild = 0.0
         if index_manifest.exists():
             last_index_rebuild = os.path.getmtime(index_manifest)
-            
+
         latest_source_change = 0.0
         is_stale = False
         stale_reasons = []
-        
+
         try:
             from knowcode.indexing.scanner import Scanner
+
             root_dir = self._store_root()
             if root_dir.exists() and root_dir.is_dir():
                 scanner = Scanner(root_dir)
@@ -254,21 +267,21 @@ class KnowCodeService:
                     latest_source_change = max(os.path.getmtime(f.path) for f in files)
         except Exception:
             pass
-            
+
         if last_store_rebuild == 0.0:
             is_stale = True
             stale_reasons.append("knowledge_store_missing")
         elif latest_source_change > last_store_rebuild:
             is_stale = True
             stale_reasons.append("store_stale_source_changed")
-            
+
         if last_index_rebuild == 0.0:
             is_stale = True
             stale_reasons.append("semantic_index_missing")
         elif latest_source_change > last_index_rebuild:
             is_stale = True
             stale_reasons.append("index_stale_source_changed")
-            
+
         return {
             "last_store_rebuild": int(last_store_rebuild),
             "last_index_rebuild": int(last_index_rebuild),
@@ -276,7 +289,6 @@ class KnowCodeService:
             "is_stale": is_stale,
             "stale_reasons": stale_reasons,
         }
-
 
     def _build_index(self, directory: str | Path, index_path: str | Path) -> int:
         """Build a semantic index for a directory and persist it."""
@@ -318,11 +330,7 @@ class KnowCodeService:
             "or",
         }
         tokens = re.findall(r"\b[a-zA-Z_][a-zA-Z0-9_.]+\b", query)
-        keywords = [
-            t
-            for t in tokens
-            if len(t) > 3 and t.lower() not in stopwords
-        ]
+        keywords = [t for t in tokens if len(t) > 3 and t.lower() not in stopwords]
         return keywords[:10]
 
     def _validate_index_compatibility(self, index_path: Path) -> None:
@@ -472,15 +480,17 @@ class KnowCodeService:
             raise ValueError(f"Entity not found: {target}")
 
         synthesizer = ContextSynthesizer(self.store, max_tokens=max_tokens)
-        
+
         # Use task-specific synthesis if task_type provided
         if task_type is not None:
-            bundle = synthesizer.synthesize_with_task(entity.id, task_type, summarize=summarize)
+            bundle = synthesizer.synthesize_with_task(
+                entity.id, task_type, summarize=summarize
+            )
         else:
             bundle = synthesizer.synthesize(entity.id, summarize=summarize)
-        
+
         if not bundle:
-             raise ValueError(f"Failed to synthesize context for {entity.id}")
+            raise ValueError(f"Failed to synthesize context for {entity.id}")
 
         result = {
             "entity_id": bundle.target_entity.id,
@@ -489,15 +499,17 @@ class KnowCodeService:
             "truncated": bundle.truncated,
             "included_entities": bundle.included_entities,
         }
-        
+
         # Add task-specific fields if using task synthesis
-        if hasattr(bundle, 'task_type') and hasattr(bundle, 'sufficiency_score'):
-            result["task_type"] = bundle.task_type.value if bundle.task_type else "general"
+        if hasattr(bundle, "task_type") and hasattr(bundle, "sufficiency_score"):
+            result["task_type"] = (
+                bundle.task_type.value if bundle.task_type else "general"
+            )
             result["sufficiency_score"] = bundle.sufficiency_score
         else:
             result["task_type"] = "general"
             result["sufficiency_score"] = 0.0
-            
+
         return result
 
     def get_stats(self) -> dict[str, Any]:
@@ -523,13 +535,16 @@ class KnowCodeService:
             "total_relationships": len(self.store.relationships),
             "relationships_by_type": rel_types,
         }
-        
+
         # Add index stats if indexer is loaded
         if self._indexer:
             stats["total_chunks"] = len(self._indexer.chunk_repo._chunks)
-            if hasattr(self._indexer.vector_store, "index") and self._indexer.vector_store.index:
+            if (
+                hasattr(self._indexer.vector_store, "index")
+                and self._indexer.vector_store.index
+            ):
                 stats["vector_index_size"] = self._indexer.vector_store.index.ntotal
-                
+
         return stats
 
     def get_callers(self, entity_id: str) -> list[dict[str, Any]]:
@@ -542,12 +557,15 @@ class KnowCodeService:
             Caller metadata dictionaries.
         """
         callers = self.store.get_callers(entity_id)
-        return [{"id": c.id, "name": c.qualified_name, "file": c.location.file_path} for c in callers]
+        return [
+            {"id": c.id, "name": c.qualified_name, "file": c.location.file_path}
+            for c in callers
+        ]
 
     def reload(self) -> None:
         """Reload the knowledge store from disk.
-        
-        Useful when the underlying JSON file has been updated by a 
+
+        Useful when the underlying JSON file has been updated by a
         separate process (e.g., a CLI scan).
         """
         self._store = None
@@ -560,16 +578,16 @@ class KnowCodeService:
 
     def get_entity_details(self, entity_id: str) -> Optional[dict[str, Any]]:
         """Get detailed information about an entity as a dictionary.
-        
-        This returns the raw structured data including source code, 
+
+        This returns the raw structured data including source code,
         docstrings, and metadata, which is useful for tool-calling agents.
         """
         entity = self.store.get_entity(entity_id)
         if not entity:
             return None
-        
+
         # Convert to dictionary (using internal helper or creating one)
-        # We can reuse the knowledge store's _entity_to_dict if exposed, 
+        # We can reuse the knowledge store's _entity_to_dict if exposed,
         # or just construct it manually here to be safe and explicit.
         from dataclasses import asdict
 

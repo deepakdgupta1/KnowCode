@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+import hashlib
+import math
 import os
 from typing import Any
 
@@ -95,17 +97,14 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
         """
         if not texts:
             return []
-            
+
         client = self._get_client()
-        response = client.embeddings.create(
-            model=self.config.model_name,
-            input=texts
-        )
+        response = client.embeddings.create(model=self.config.model_name, input=texts)
         embeddings = [item.embedding for item in response.data]
-        
+
         if self.config.normalize:
             embeddings = [self._normalize(e) for e in embeddings]
-            
+
         return embeddings
 
     def embed_single(self, text: str) -> list[float]:
@@ -115,7 +114,8 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
     def _normalize(self, vec: list[float]) -> list[float]:
         """Normalize a vector to unit length for cosine similarity."""
         import math
-        norm = math.sqrt(sum(x*x for x in vec))
+
+        norm = math.sqrt(sum(x * x for x in vec))
         return [x / norm for x in vec] if norm > 0 else vec
 
 
@@ -137,7 +137,7 @@ class VoyageAIEmbeddingProvider(EmbeddingProvider):
         self.api_key_env = api_key_env
         self.client = None
 
-    def _get_client(self):   # type: ignore
+    def _get_client(self):  # type: ignore
         """Return an initialized VoyageAI client, loading credentials if needed."""
         if self.client is None:
             from knowcode.llm.voyageai_client import get_voyageai_client
@@ -147,7 +147,7 @@ class VoyageAIEmbeddingProvider(EmbeddingProvider):
         if self.client is None:
             raise ValueError(
                 f"VoyageAI client unavailable; set {self.api_key_env} and install "
-                "optional dependency with: pip install \"knowcode[voyageai]\""
+                'optional dependency with: pip install "knowcode[voyageai]"'
             )
 
         return self.client
@@ -189,6 +189,36 @@ class VoyageAIEmbeddingProvider(EmbeddingProvider):
         """Normalize a vector to unit length for cosine similarity."""
         import math
 
+        norm = math.sqrt(sum(x * x for x in vec))
+        return [x / norm for x in vec] if norm > 0 else vec
+
+
+class DummyEmbeddingProvider(EmbeddingProvider):
+    """Deterministic embedding fallback that requires no external API keys."""
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        """Generate stable pseudo-embeddings for a batch of texts."""
+        return [self.embed_single(text) for text in texts]
+
+    def embed_single(self, text: str) -> list[float]:
+        """Generate a stable pseudo-embedding for one text."""
+        dimension = max(0, self.config.dimension)
+        if dimension == 0:
+            return []
+
+        values: list[float] = []
+        seed = text.encode("utf-8", errors="replace")
+        counter = 0
+        while len(values) < dimension:
+            digest = hashlib.sha256(seed + counter.to_bytes(4, "big")).digest()
+            values.extend((byte / 127.5) - 1.0 for byte in digest)
+            counter += 1
+
+        vector = values[:dimension]
+        return self._normalize(vector) if self.config.normalize else vector
+
+    def _normalize(self, vec: list[float]) -> list[float]:
+        """Normalize a vector to unit length for cosine similarity."""
         norm = math.sqrt(sum(x * x for x in vec))
         return [x / norm for x in vec] if norm > 0 else vec
 
@@ -241,9 +271,4 @@ def create_embedding_provider(
                     base_url=base_url,
                 )
 
-    # Final fallback: use a dummy embedding provider that does not require external services.
-    # This ensures tests can run without API keys.
-    # Final fallback: use a dummy embedding provider that does not require external services.
-    # This ensures tests can run without API keys.
-    from .embedding import DummyEmbeddingProvider
     return DummyEmbeddingProvider(EmbeddingConfig())

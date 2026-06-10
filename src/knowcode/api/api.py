@@ -17,6 +17,7 @@ router = APIRouter(prefix="/api/v1")
 # Global service instance (will be initialized by main.py)
 _service: Optional[KnowCodeService] = None
 
+
 def get_service() -> KnowCodeService:
     """Return the global service instance or raise if uninitialized."""
     if _service is None:
@@ -26,6 +27,7 @@ def get_service() -> KnowCodeService:
 
 class TaskTypeParam(str, Enum):
     """Task type for context prioritization."""
+
     explain = "explain"
     debug = "debug"
     extend = "extend"
@@ -36,6 +38,7 @@ class TaskTypeParam(str, Enum):
 
 class SearchResult(BaseModel):
     """Response model for entity search results."""
+
     id: str
     kind: str
     name: str
@@ -43,8 +46,10 @@ class SearchResult(BaseModel):
     file: str
     line: int
 
+
 class ContextResponse(BaseModel):
     """Response model for synthesized entity context."""
+
     entity_id: str
     context_text: str
     total_tokens: int
@@ -53,29 +58,41 @@ class ContextResponse(BaseModel):
     task_type: str = "general"
     sufficiency_score: float = 0.0
 
+
 class ChunkResult(BaseModel):
     """Response model for a retrieved chunk."""
+
     id: str
     content: str
     entity_id: str
     score: float
 
+
 class QueryRequest(BaseModel):
     """Request model for semantic search queries."""
+
     query: str
-    limit: Optional[int] = Field(default=5, le=20, description="Max results (capped at 20)")
-    max_tokens: Optional[int] = Field(default=4000, le=8000, description="Max total tokens in response content")
+    limit: Optional[int] = Field(
+        default=5, le=20, description="Max results (capped at 20)"
+    )
+    max_tokens: Optional[int] = Field(
+        default=4000, le=8000, description="Max total tokens in response content"
+    )
     expand_deps: Optional[bool] = True
     task_type: Optional[TaskTypeParam] = TaskTypeParam.general
 
+
 class QueryResponse(BaseModel):
     """Response model for semantic search queries."""
+
     chunks: list[ChunkResult]
     total: int
     task_type: str = "general"
 
+
 class FreshnessResponse(BaseModel):
     """Response model for codebase freshness check."""
+
     last_store_rebuild: int
     last_index_rebuild: int
     latest_source_change: int
@@ -84,24 +101,31 @@ class FreshnessResponse(BaseModel):
 
 
 @router.get("/health", summary="Health Check")
-
 @limiter.limit(STANDARD_LIMIT)
 def health(request: Request) -> dict[str, str]:
     """Check if the server is running and reachable."""
     return {"status": "ok"}
 
+
 @router.get("/stats", summary="Get Knowledge Graph Stats")
 @limiter.limit(STANDARD_LIMIT)
-def get_stats(request: Request, service: KnowCodeService = Depends(get_service)) -> dict[str, Any]:
+def get_stats(
+    request: Request, service: KnowCodeService = Depends(get_service)
+) -> dict[str, Any]:
     """Returns statistics about the number of entities and relationships in the graph."""
     return service.get_stats()
 
-@router.post("/context/query", response_model=QueryResponse, summary="Query Codebase Semantically")
+
+@router.post(
+    "/context/query",
+    response_model=QueryResponse,
+    summary="Query Codebase Semantically",
+)
 @limiter.limit(STANDARD_LIMIT)
 def query_context(
     http_request: Request,
     request: QueryRequest,
-    service: KnowCodeService = Depends(get_service)
+    service: KnowCodeService = Depends(get_service),
 ) -> QueryResponse:
     """Execute task-aware retrieval and return relevant code chunks with scores."""
     # Required by slowapi's decorator; keep explicit to preserve endpoint contract.
@@ -138,17 +162,17 @@ def query_context(
             if not isinstance(chunk_id, str) or chunk_id in seen_ids:
                 continue
 
-            chunk = engine.chunk_repo.get(chunk_id)
-            if not chunk:
+            stored_chunk = engine.chunk_repo.get(chunk_id)
+            if not stored_chunk:
                 continue
 
             score_raw = item.get("score", 0.0)
             score = float(score_raw) if isinstance(score_raw, (int, float)) else 0.0
             results.append(
                 ChunkResult(
-                    id=chunk.id,
-                    content=chunk.content,
-                    entity_id=chunk.entity_id,
+                    id=stored_chunk.id,
+                    content=stored_chunk.content,
+                    entity_id=stored_chunk.entity_id,
                     score=score,
                 )
             )
@@ -176,51 +200,70 @@ def query_context(
     # --- Response capping: truncate chunk content to stay within token budget ---
     total_chars = 0
     capped_results: list[ChunkResult] = []
-    for chunk in results:
-        if total_chars + len(chunk.content) > max_tokens_budget:
+    for result_chunk in results:
+        if total_chars + len(result_chunk.content) > max_tokens_budget:
             remaining = max_tokens_budget - total_chars
             if remaining > 100:  # Only include if meaningful content fits
                 capped_results.append(
                     ChunkResult(
-                        id=chunk.id,
-                        content=chunk.content[:remaining] + "\n... [TRUNCATED]",
-                        entity_id=chunk.entity_id,
-                        score=chunk.score,
+                        id=result_chunk.id,
+                        content=result_chunk.content[:remaining] + "\n... [TRUNCATED]",
+                        entity_id=result_chunk.entity_id,
+                        score=result_chunk.score,
                     )
                 )
             break
-        capped_results.append(chunk)
-        total_chars += len(chunk.content)
+        capped_results.append(result_chunk)
+        total_chars += len(result_chunk.content)
 
     return QueryResponse(
         chunks=capped_results,
         total=len(capped_results),
-        task_type=str(retrieval.get("task_type", request.task_type.value if request.task_type else "general")),
+        task_type=str(
+            retrieval.get(
+                "task_type", request.task_type.value if request.task_type else "general"
+            )
+        ),
     )
+
 
 @router.get("/search", response_model=list[SearchResult], summary="Search Entities")
 @limiter.limit(STANDARD_LIMIT)
 def search(
     request: Request,
-    q: str = Query(..., min_length=1, description="Search pattern (substring match on name or qualified name)"),
+    q: str = Query(
+        ...,
+        min_length=1,
+        description="Search pattern (substring match on name or qualified name)",
+    ),
     limit: int = Query(20, ge=1, le=50, description="Max results (default 20, max 50)"),
-    service: KnowCodeService = Depends(get_service)
+    service: KnowCodeService = Depends(get_service),
 ) -> list[Any]:
     """Search for entities matching the given query string."""
     results = service.search(q)
     return results[:limit]
 
+
 @router.get("/context", response_model=ContextResponse, summary="Get Entity Context")
 @limiter.limit(STANDARD_LIMIT)
 def get_context(
     request: Request,
-    target: str = Query(..., min_length=1, description="Entity ID or name to get context for"),
-    max_tokens: int = Query(2000, ge=100, le=8000, description="Maximum tokens in returned context (100-8000)"),
-    task_type: TaskTypeParam = Query(TaskTypeParam.general, description="Task type for context prioritization"),
-    service: KnowCodeService = Depends(get_service)
+    target: str = Query(
+        ..., min_length=1, description="Entity ID or name to get context for"
+    ),
+    max_tokens: int = Query(
+        2000,
+        ge=100,
+        le=8000,
+        description="Maximum tokens in returned context (100-8000)",
+    ),
+    task_type: TaskTypeParam = Query(
+        TaskTypeParam.general, description="Task type for context prioritization"
+    ),
+    service: KnowCodeService = Depends(get_service),
 ) -> Any:
     """Generates a synthesized context bundle for an entity, optimized for LLM consumption.
-    
+
     The task_type parameter enables task-specific context prioritization:
     - explain: Prioritizes docstrings, signatures, and callees for understanding
     - debug: Prioritizes source code and callers for tracing issues
@@ -228,19 +271,24 @@ def get_context(
     - review: Prioritizes changes, callers, and callees for impact analysis
     - locate: Minimal context, just location info
     - general: Balanced context (default)
-    
+
     Returns sufficiency_score (0.0-1.0) indicating if context is sufficient for local answering.
     """
     try:
         # Convert API enum to data model enum
         data_task_type = TaskType(task_type.value)
-        return service.get_context(target, max_tokens=max_tokens, task_type=data_task_type)
+        return service.get_context(
+            target, max_tokens=max_tokens, task_type=data_task_type
+        )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
+
 @router.post("/reload", summary="Reload Knowledge Store")
 @limiter.limit(STANDARD_LIMIT)
-def reload_store(request: Request, service: KnowCodeService = Depends(get_service)) -> dict[str, str]:
+def reload_store(
+    request: Request, service: KnowCodeService = Depends(get_service)
+) -> dict[str, str]:
     """Reload the knowledge store from disk."""
     try:
         service.reload()
@@ -248,20 +296,23 @@ def reload_store(request: Request, service: KnowCodeService = Depends(get_servic
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/freshness", response_model=FreshnessResponse, summary="Get Codebase Freshness")
+
+@router.get(
+    "/freshness", response_model=FreshnessResponse, summary="Get Codebase Freshness"
+)
 @limiter.limit(STANDARD_LIMIT)
-def get_freshness(request: Request, service: KnowCodeService = Depends(get_service)) -> FreshnessResponse:
+def get_freshness(
+    request: Request, service: KnowCodeService = Depends(get_service)
+) -> FreshnessResponse:
     """Check freshness status of the knowledge store and semantic index."""
     meta = service.get_freshness_metadata()
     return FreshnessResponse(**meta)
 
-@router.get("/entities/{entity_id:path}")
 
+@router.get("/entities/{entity_id:path}")
 @limiter.limit(STANDARD_LIMIT)
 def get_entity(
-    request: Request,
-    entity_id: str,
-    service: KnowCodeService = Depends(get_service)
+    request: Request, entity_id: str, service: KnowCodeService = Depends(get_service)
 ) -> Any:
     """Get raw entity details."""
     details = service.get_entity_details(entity_id)
@@ -269,22 +320,20 @@ def get_entity(
         raise HTTPException(status_code=404, detail=f"Entity not found: {entity_id}")
     return details
 
+
 @router.get("/callers/{entity_id:path}", summary="Get Entity Callers")
 @limiter.limit(STANDARD_LIMIT)
 def get_callers(
-    request: Request,
-    entity_id: str,
-    service: KnowCodeService = Depends(get_service)
+    request: Request, entity_id: str, service: KnowCodeService = Depends(get_service)
 ) -> list[Any]:
     """Find all entities that call the specified entity."""
     return service.get_callers(entity_id)
 
+
 @router.get("/callees/{entity_id:path}", summary="Get Entity Callees")
 @limiter.limit(STANDARD_LIMIT)
 def get_callees(
-    request: Request,
-    entity_id: str,
-    service: KnowCodeService = Depends(get_service)
+    request: Request, entity_id: str, service: KnowCodeService = Depends(get_service)
 ) -> list[Any]:
     """Find all entities called by the specified entity."""
     return service.get_callees(entity_id)
@@ -292,6 +341,7 @@ def get_callees(
 
 class DirectionParam(str, Enum):
     """Direction for call graph traversal."""
+
     callers = "callers"
     callees = "callees"
 
@@ -301,22 +351,21 @@ class DirectionParam(str, Enum):
 def trace_calls(
     request: Request,
     entity_id: str,
-    direction: DirectionParam = Query(DirectionParam.callees, description="Direction: callers or callees"),
+    direction: DirectionParam = Query(
+        DirectionParam.callees, description="Direction: callers or callees"
+    ),
     depth: int = Query(1, ge=1, le=5, description="Traversal depth (1-5)"),
     max_results: int = Query(50, ge=1, le=100, description="Max results"),
-    service: KnowCodeService = Depends(get_service)
+    service: KnowCodeService = Depends(get_service),
 ) -> list[dict[str, Any]]:
     """Multi-hop call graph traversal.
-    
+
     Traverse the call graph from a starting entity to find all callers or callees
     up to the specified depth. Each result includes the call_depth indicating
     how many hops from the starting entity.
     """
     return service.store.trace_calls(
-        entity_id,
-        direction=direction.value,
-        depth=depth,
-        max_results=max_results
+        entity_id, direction=direction.value, depth=depth, max_results=max_results
     )
 
 
@@ -325,11 +374,13 @@ def trace_calls(
 def get_impact(
     request: Request,
     entity_id: str,
-    max_depth: int = Query(3, ge=1, le=5, description="Max depth for transitive analysis"),
-    service: KnowCodeService = Depends(get_service)
+    max_depth: int = Query(
+        3, ge=1, le=5, description="Max depth for transitive analysis"
+    ),
+    service: KnowCodeService = Depends(get_service),
 ) -> dict[str, Any]:
     """Analyze the impact of modifying or deleting an entity.
-    
+
     Returns:
     - direct_dependents: Entities that directly depend on this entity
     - transitive_dependents: Entities affected through the dependency chain

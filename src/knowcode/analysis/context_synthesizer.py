@@ -138,6 +138,13 @@ class ContextSynthesizer:
                 sections.append(sig)
                 current_tokens += t
 
+        behavior = self._format_behavior(entity)
+        if behavior:
+            t = self.tokenizer.count_tokens(behavior)
+            if current_tokens + t < self.max_tokens:
+                sections.append(behavior)
+                current_tokens += t
+
         # Priority 2: Source Code (Huge consumer, often truncated)
         if entity.source_code and not summarize:
             code_header = "## Source Code\n\n```python\n"
@@ -268,6 +275,39 @@ class ContextSynthesizer:
             lines.append(f"- ... and {len(children) - 15} more")
         return "\n".join(lines)
 
+    def _format_behavior(self, entity: Entity) -> str:
+        """Format static behavior metadata when available."""
+        behavior = entity.metadata.get("behavior")
+        if not isinstance(behavior, dict):
+            return ""
+
+        side_effect_class = behavior.get("side_effect_class", "unknown")
+        side_effects = _metadata_list(behavior.get("side_effects"))
+        reads = _metadata_list(behavior.get("reads"))
+        writes = _metadata_list(behavior.get("writes"))
+        calls = _metadata_list(behavior.get("calls"))
+        confidence = behavior.get("confidence")
+
+        lines = ["## Behavior", "", f"- Side effect class: `{side_effect_class}`"]
+        lines.append(
+            "- Signals: "
+            + (
+                ", ".join(f"`{effect}`" for effect in side_effects[:8])
+                if side_effects
+                else "none detected"
+            )
+        )
+        if reads:
+            lines.append("- Reads: " + ", ".join(f"`{name}`" for name in reads[:8]))
+        if writes:
+            lines.append("- Writes: " + ", ".join(f"`{name}`" for name in writes[:8]))
+        if calls:
+            lines.append("- Calls: " + ", ".join(f"`{name}`" for name in calls[:8]))
+        if isinstance(confidence, (int, float)):
+            lines.append(f"- Confidence: {confidence:.0%}")
+
+        return "\n".join(lines)
+
     def synthesize_for_search(
         self,
         query: str,
@@ -346,7 +386,14 @@ class ContextSynthesizer:
         header = self._format_entity_header(entity)
         current_tokens = self.tokenizer.count_tokens(header)
         sections.append(header)
-        
+
+        behavior = self._format_behavior(entity)
+        if behavior:
+            t = self.tokenizer.count_tokens(behavior)
+            if current_tokens + t < self.max_tokens:
+                sections.append(behavior)
+                current_tokens += t
+
         # Build content sections based on priority order
         content_sections = {}
         
@@ -484,5 +531,16 @@ class ContextSynthesizer:
         min_useful_tokens = 100
         if len(context_text) < min_useful_tokens:
             score *= 0.5
-            
+
         return min(1.0, round(score / max_score, 2)) if max_score > 0 else 0.0
+
+
+def _metadata_list(value: object) -> list[str]:
+    """Normalize metadata list-like values for display."""
+    if isinstance(value, list):
+        return [str(item) for item in value if item is not None]
+    if isinstance(value, tuple):
+        return [str(item) for item in value if item is not None]
+    if isinstance(value, str) and value:
+        return [value]
+    return []

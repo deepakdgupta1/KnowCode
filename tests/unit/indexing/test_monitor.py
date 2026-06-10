@@ -1,7 +1,6 @@
 """Unit tests for the file system monitor."""
 
 from pathlib import Path
-import pytest
 from knowcode.indexing.monitor import IndexingHandler
 from knowcode.indexing.scanner import Scanner
 

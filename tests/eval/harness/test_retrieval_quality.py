@@ -31,7 +31,6 @@ in CI).
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -51,7 +50,6 @@ _GOLDEN_DIR = _EVAL_DIR / "golden"
 _GOLDEN_DATASET = _GOLDEN_DIR / "golden_v1.0.json"
 _GOLDEN_META = _GOLDEN_DIR / "golden_v1.0.meta.json"
 _BASELINE_PATH = _GOLDEN_DIR / "baseline_v1.0.json"
-
 
 
 # ---------------------------------------------------------------------------
@@ -93,7 +91,6 @@ def knowcode_service():  # type: ignore[return]
 
     # Probe: a missing store raises MissingKnowledgeStoreError on first access.
     try:
-        from knowcode.errors import MissingKnowledgeStoreError
         _ = service.store  # noqa: F841  — triggers the lazy load
     except Exception as exc:
         pytest.skip(f"KnowCode knowledge store not ready: {exc}")
@@ -144,14 +141,22 @@ def sha_guard(request: pytest.FixtureRequest) -> None:
 
 def _run_retrieval(service: Any, query_text: str) -> dict[str, Any]:
     """Call KnowCode retrieval and return the result dict."""
-    return service.retrieve_context_for_query(
+    retrieval = service.retrieve_context_for_query(
         query=query_text,
-        limit_entities=10,   # generous upper bound for recall@10
+        limit_entities=10,  # generous upper bound for recall@10
         max_tokens=8000,
-        # Short-term eval fix: scorer needs selected_entities, which are only
-        # exposed by the diagnostic response today.
-        verbosity="diagnostic",
+        verbosity="minimal",
+        include_metadata=True,
     )
+    threshold = float(getattr(service.app_config, "sufficiency_threshold", 0.8))
+    sufficiency = retrieval.get("sufficiency_score", 0.0)
+    if not isinstance(sufficiency, (int, float)):
+        sufficiency = 0.0
+    retrieval["sufficiency_threshold"] = threshold
+    retrieval["would_route_local"] = bool(retrieval.get("context_text")) and (
+        float(sufficiency) >= threshold
+    )
+    return retrieval
 
 
 def _collect_scores(
@@ -236,7 +241,9 @@ class TestRetrievalQuality:
             "is below floor of 0.50"
         )
 
-    def test_easy_queries_precision_at_1(self, all_scores: list[dict[str, Any]]) -> None:
+    def test_easy_queries_precision_at_1(
+        self, all_scores: list[dict[str, Any]]
+    ) -> None:
         """Every EASY query must have precision@1 == 1.0.
 
         Easy queries have single-entity ground truth.  Failing to rank the
@@ -310,7 +317,11 @@ class TestRetrievalQuality:
             print(f"  judged_count  = {result['judged_count']}")
             print(f"  correct_count = {result['correct_count']}")
             ac = result["answer_correctness"]
-            print(f"  answer_correctness = {ac:.3f}" if ac is not None else "  answer_correctness = N/A (no judged records)")
+            print(
+                f"  answer_correctness = {ac:.3f}"
+                if ac is not None
+                else "  answer_correctness = N/A (no judged records)"
+            )
             print("-------------------------------")
 
     # -- Per-task-type checks ------------------------------------------------
@@ -325,9 +336,7 @@ class TestRetrievalQuality:
         if not locate:
             pytest.skip("No LOCATE queries in golden dataset")
         mean_mrr = sum(s["mrr"] for s in locate) / len(locate)
-        assert mean_mrr >= 0.6, (
-            f"LOCATE mean_mrr={mean_mrr:.3f} is below floor of 0.60"
-        )
+        assert mean_mrr >= 0.6, f"LOCATE mean_mrr={mean_mrr:.3f} is below floor of 0.60"
 
     def test_no_task_type_has_zero_recall(self, summary: dict[str, Any]) -> None:
         """No task type should have mean recall@10 == 0.0.
@@ -337,9 +346,8 @@ class TestRetrievalQuality:
         """
         by_task = summary.get("by_task_type", {})
         zero_recall = [
-            task for task, s in by_task.items()
+            task
+            for task, s in by_task.items()
             if s.get("mean_recall_at_10", 1.0) == 0.0 and s.get("n", 0) > 0
         ]
-        assert not zero_recall, (
-            f"Task types with recall@10 == 0: {zero_recall}"
-        )
+        assert not zero_recall, f"Task types with recall@10 == 0: {zero_recall}"

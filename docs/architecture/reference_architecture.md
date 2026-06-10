@@ -1025,8 +1025,8 @@ Commands fail fast with: *"Install knowcode[server] to use `knowcode server`"*.
 > - *"I renamed a file — does KnowCode still recognise the same functions?"* (entity identity resilience)
 > - *"Can I install KnowCode without all the heavy AI dependencies?"* (dependency modularisation)
 
-### **Phase 5: Deep Analysis (NEXT)**
-23. **[ ] Static Behavioral Analysis (Layer 4)**: Data flow, state transitions, side-effect classification.
+### **Phase 5: Deep Analysis (IN PROGRESS)**
+23. **[~] Static Behavioral Analysis (Layer 4)**: Python function/method behavior metadata is now attached during graph build and surfaced in context bundles; broader data flow and state-transition analysis remain.
 24. **[ ] Intent Extraction (Layer 6)**: ADR/PR/commit intent linking beyond commit metadata.
 25. **[ ] Confidence Scoring (Layer 3)**: Weighted edges/entities by evidence source.
 
@@ -1091,7 +1091,7 @@ Commands fail fast with: *"Install knowcode[server] to use `knowcode server`"*.
 13. **[x] Markdown Export (MVP)**: CLI `export` produces an index-style Markdown doc.
 14. **[ ] Multi-Level Doc Synthesis (Layer 7)**: Architecture/module/function narratives, change summaries, and freshness tracking.
 
-### **Phase 4.5: Architectural Hardening (PARTIAL)**
+### **Phase 4.5: Architectural Hardening (COMPLETED)**
 15. **[x] Dependency Modularisation (AD-1)**: Optional extras (`server`, `search`, `llm`, `watch`, `all`) with lightweight core install.
 16. **[x] Side-Effect-Free Query Paths (AD-2)**: Retrieval and MCP read tools fail fast on missing prerequisites; no auto analyze/index side effects.
 17. **[x] Schema Versioning (AD-3)**: Persisted artifact schema versioning + migration shim across store/index/vector metadata.
@@ -1100,8 +1100,8 @@ Commands fail fast with: *"Install knowcode[server] to use `knowcode server`"*.
 20. **[x] Service Layer Decomposition (AD-6)**: Retrieval orchestrator + protocol interfaces.
 21. **[x] Entity Identity Resilience (AD-7)**: Add `content_hash` for rename-resilient correlation.
 
-### **Phase 5: Deep Analysis (NEXT)**
-22. **[ ] Static Behavioral Analysis (Layer 4)**: Data flow, state transitions, side-effect classification.
+### **Phase 5: Deep Analysis (IN PROGRESS)**
+22. **[~] Static Behavioral Analysis (Layer 4)**: Python function/method behavior metadata is now attached during graph build and surfaced in context bundles; broader data flow and state-transition analysis remain.
 23. **[ ] Intent Extraction (Layer 6)**: ADR/PR/commit intent linking beyond commit metadata.
 24. **[ ] Confidence Scoring (Layer 3)**: Weighted edges/entities by evidence source.
 
@@ -1126,9 +1126,9 @@ Commands fail fast with: *"Install knowcode[server] to use `knowcode server`"*.
 38. **[x] Multi-hop Queries**: `trace_calls(depth=N)` and `get_impact()` analysis.
 39. **[x] Structured Responses**: JSON with `task_type` and `sufficiency_score`.
 
-### **Phase 8.5: Eval Harness Hardening (NEXT)**
-40. **[ ] Decouple eval metadata from response verbosity**: The short-term eval harness workaround uses `verbosity="diagnostic"` so scoring can read `selected_entities`. The long-term fix is to separate context summarization from response projection, so internal evaluators can score ranking metadata while still exercising the production-like minimal retrieval path.
-41. **[ ] Fix routing accounting in eval scoring**: `tests/eval/harness/scorer.py` currently infers `routed_local` from `retrieval_result["source"]`, but `retrieve_context_for_query()` does not return `source`. Near-term, derive `would_route_local` from the configured sufficiency threshold plus non-empty context. Long-term, either run routing evals through `Agent.smart_answer()` or expose the route decision explicitly in an internal-only retrieval/eval API.
+### **Phase 8.5: Eval Harness Hardening (COMPLETED)**
+40. **[x] Decouple eval metadata from response verbosity**: Internal eval runs can request ranking metadata while still exercising production-like minimal context projection.
+41. **[x] Fix routing accounting in eval scoring**: The eval harness annotates retrieval results with the configured sufficiency threshold and `would_route_local`, and the scorer falls back to threshold-plus-context derivation when explicit routing metadata is absent.
 
 ---
 

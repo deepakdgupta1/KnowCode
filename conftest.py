@@ -1,9 +1,12 @@
-"""pytest configuration for the retrieval-quality eval harness."""
+"""Repository-wide pytest configuration."""
+
+from __future__ import annotations
 
 import pytest
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
+    """Register options used by repository-level test runs."""
     parser.addoption(
         "--save-baseline",
         action="store_true",
@@ -14,5 +17,5 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         "--allow-drift",
         action="store_true",
         default=False,
-        help="Skip the SHA guard (local exploration only; never in CI).",
+        help="Skip the eval golden SHA guard for local exploration.",
     )

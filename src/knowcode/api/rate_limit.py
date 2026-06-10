@@ -7,9 +7,9 @@ Implements tiered rate limits to protect the API from runaway agent loops:
 Uses slowapi with client IP-based keying.
 """
 
-from slowapi import Limiter, _rate_limit_exceeded_handler  # type: ignore[import-untyped]
-from slowapi.errors import RateLimitExceeded  # type: ignore[import-untyped]
-from slowapi.util import get_remote_address  # type: ignore[import-untyped]
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 from fastapi import FastAPI
 
 # --- Rate Limit Tiers ---

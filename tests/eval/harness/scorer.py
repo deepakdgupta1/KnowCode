@@ -90,9 +90,7 @@ def file_coverage_at_k(
         return 0.0
     top_k = retrieved_entities[:k]
     covered = {
-        f
-        for f in expected_files
-        if any(entity.startswith(f) for entity in top_k)
+        f for f in expected_files if any(entity.startswith(f) for entity in top_k)
     }
     return len(covered) / len(expected_files)
 
@@ -162,27 +160,46 @@ def score_narrative(
 def normalize_entity_id(entity_id: str) -> str:
     """Normalize entity ID by making the file path component relative to project root."""
     from pathlib import Path
+
     if "::" not in entity_id:
         return entity_id
     path_part, symbol_part = entity_id.split("::", 1)
-    
+
     path = Path(path_part)
     if not path.is_absolute():
         return entity_id
-        
+
     try:
         rel_path = path.relative_to(Path.cwd().resolve())
         return f"{rel_path}::{symbol_part}"
     except ValueError:
         pass
-        
+
     parts = path.parts
     for idx, part in enumerate(parts):
         if part in ("src", "tests"):
             rel_path = Path(*parts[idx:])
             return f"{rel_path}::{symbol_part}"
-            
+
     return entity_id
+
+
+def _would_route_local(
+    retrieval_result: dict[str, Any],
+    sufficiency: float,
+) -> bool:
+    """Derive the local-routing decision from retrieval metadata."""
+    explicit = retrieval_result.get("would_route_local")
+    if isinstance(explicit, bool):
+        return explicit
+
+    threshold = retrieval_result.get("sufficiency_threshold", 0.8)
+    if not isinstance(threshold, (int, float)):
+        threshold = 0.8
+
+    return bool(retrieval_result.get("context_text")) and sufficiency >= float(
+        threshold
+    )
 
 
 def score_record(
@@ -211,10 +228,13 @@ def score_record(
 
     # Handle expected_entities which may be a list of dicts with 'entity_id' or a list of string IDs
     raw_expected = golden.get("expected_entities", [])
+    expected_entity_ids: set[str]
     if raw_expected and isinstance(raw_expected[0], dict):
-        expected_entity_ids: set[str] = {normalize_entity_id(e["entity_id"]) for e in raw_expected}
+        expected_entity_ids = {
+            normalize_entity_id(e["entity_id"]) for e in raw_expected
+        }
     else:
-        expected_entity_ids: set[str] = {normalize_entity_id(e) for e in raw_expected}
+        expected_entity_ids = {normalize_entity_id(e) for e in raw_expected}
     expected_files: list[str] = golden.get("expected_files", [])
 
     # Build an ordered list of entity IDs from the retrieval result.
@@ -226,8 +246,7 @@ def score_record(
     ]
 
     sufficiency: float = float(retrieval_result.get("sufficiency_score", 0.0))
-    # "local" routing means the system answered without an LLM
-    routed_local: bool = retrieval_result.get("source") == "local"
+    routed_local = _would_route_local(retrieval_result, sufficiency)
 
     return {
         "query_id": query_id,
@@ -237,8 +256,12 @@ def score_record(
         "precision_at_5": precision_at_k(retrieved_entities, expected_entity_ids, k=5),
         "recall_at_10": recall_at_k(retrieved_entities, expected_entity_ids, k=10),
         "mrr": reciprocal_rank(retrieved_entities, expected_entity_ids),
-        "file_coverage_at_1": file_coverage_at_k(retrieved_entities, expected_files, k=1),
-        "file_coverage_at_5": file_coverage_at_k(retrieved_entities, expected_files, k=5),
+        "file_coverage_at_1": file_coverage_at_k(
+            retrieved_entities, expected_files, k=1
+        ),
+        "file_coverage_at_5": file_coverage_at_k(
+            retrieved_entities, expected_files, k=5
+        ),
         "sufficiency_score": sufficiency,
         "routed_local": routed_local,
         "narrative": score_narrative(

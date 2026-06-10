@@ -469,14 +469,14 @@ See [reference_architecture.md](file:///Users/deepg/Desktop/KnowCode/docs/archit
   - MCP server for IDE integration
   - VoyageAI cross-encoder reranking
 
-**Next: v2.3 — Architectural Hardening:**
+**v2.3 — Architectural Hardening (completed):**
 - ✅ Modularise dependencies into optional extras (core install stays lightweight)
-- Remove hidden side effects from query paths (fail fast, not auto-build)
-- ✅ Schema versioning on knowledge store (`schema_version: 2` is live); FAISS index metadata versioning still pending
-- Fix `metadata` type restriction (`dict[str, str]` → `dict[str, Any]`)
-- Harden configuration loading (logging, validation, strict server mode)
-- Decompose `KnowCodeService` and introduce `Protocol` interfaces
-- ✅ Add layer contract tests (parser, store roundtrip, retrieval golden queries - see [docs/retrieval-evals.md](docs/retrieval-evals.md))
+- ✅ Remove hidden side effects from query paths (fail fast, not auto-build)
+- ✅ Schema versioning on persisted knowledge store and index artifacts
+- ✅ Fix `metadata` type restriction (`dict[str, str]` → `dict[str, Any]`)
+- ✅ Harden configuration loading (logging, validation, strict server mode)
+- ✅ Decompose `KnowCodeService` and introduce `Protocol` interfaces
+- ✅ Add layer contract tests and harden retrieval evals (parser, store roundtrip, golden queries - see [docs/retrieval-evals.md](docs/retrieval-evals.md))
 
 **Future releases:**
 - v2.4: Multi-level documentation synthesis

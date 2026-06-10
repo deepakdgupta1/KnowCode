@@ -1,4 +1,3 @@
-import pytest
 from knowcode.indexing.scanner import Scanner
 
 def test_supported_extensions_contains_jsx_and_tsx():

@@ -14,6 +14,7 @@ from knowcode.parsers.vue_parser import VueParser
 from knowcode.indexing.scanner import FileInfo, Scanner
 from knowcode.analysis.signals import CoverageProcessor
 from knowcode.analysis.temporal import TemporalAnalyzer
+from knowcode.analysis.behavior import annotate_entity_behavior
 from knowcode.utils.entity_identity import ensure_entity_content_hash
 
 
@@ -58,7 +59,7 @@ class GraphBuilder:
         )
 
         files = scanner.scan_all()
-        
+
         # Static Analysis
         self.build_from_files(files)
 
@@ -67,13 +68,13 @@ class GraphBuilder:
             temporal_analyzer = TemporalAnalyzer(root_dir)
             result = temporal_analyzer.analyze_history()
             self._merge_result(result)
-            
+
         # Coverage Analysis
         if coverage_path:
             coverage_processor = CoverageProcessor(root_dir)
             result = coverage_processor.process_cobertura(coverage_path)
             self._merge_result(result)
-            
+
         return self
 
     def build_from_files(self, files: list[FileInfo]) -> "GraphBuilder":
@@ -123,6 +124,7 @@ class GraphBuilder:
     def _merge_result(self, result: ParseResult) -> None:
         """Merge parse result into the graph."""
         for entity in result.entities:
+            annotate_entity_behavior(entity)
             ensure_entity_content_hash(entity)
             self.entities[entity.id] = entity
 
@@ -131,10 +133,10 @@ class GraphBuilder:
 
     def _resolve_references(self) -> None:
         """Resolve reference-based relationships to actual entity IDs.
-        
-        Some parsers (like Tree-sitter) may produce relationships pointing to 
+
+        Some parsers (like Tree-sitter) may produce relationships pointing to
         'ref::SomeName' because they don't know the full qualified name at parse time.
-        This pass iterates through all relationships and attempts to link these 
+        This pass iterates through all relationships and attempts to link these
         placeholders to concrete Entity IDs in the graph.
         """
         resolved_relationships: list[Relationship] = []
@@ -195,7 +197,8 @@ class GraphBuilder:
         """Search entities by name pattern (case-insensitive substring)."""
         pattern_lower = pattern.lower()
         return [
-            e for e in self.entities.values()
+            e
+            for e in self.entities.values()
             if pattern_lower in e.name.lower()
             or pattern_lower in e.qualified_name.lower()
         ]

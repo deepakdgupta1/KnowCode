@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import io
 import json
 import os
 import sys
@@ -741,4 +740,3 @@ def _check_freshness(store_path: str | Path, config_path: str | Path | None, che
                 hint="Ensure the knowledge store and semantic index are built.",
             )
         )
-

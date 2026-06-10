@@ -1,13 +1,15 @@
 """Vector store for dense retrieval using FAISS."""
 
 import json
+import importlib
 from pathlib import Path
 from typing import Any, Optional
 
 import numpy as np
 
+faiss: Any | None
 try:
-    import faiss
+    faiss = importlib.import_module("faiss")
 except ImportError:
     # Optional dependency
     faiss = None
@@ -31,7 +33,7 @@ class SimpleIndex:
         norm_b = np.linalg.norm(x, axis=1, keepdims=True)
         scores = np.dot(self.index, x.T) / (norm_a * norm_b.T + 1e-9)
         scores = scores.flatten()
-        
+
         # Sort indices by score descending
         idx = np.argsort(-scores)[:k]
         return scores[idx].reshape(1, -1), idx.reshape(1, -1)
@@ -44,7 +46,9 @@ class VectorStore:
     LEGACY_SCHEMA_VERSION = 1
     SUPPORTED_SCHEMA_VERSIONS = {SCHEMA_VERSION}
 
-    def __init__(self, dimension: int = 1536, index_path: Optional[Path] = None) -> None:
+    def __init__(
+        self, dimension: int = 1536, index_path: Optional[Path] = None
+    ) -> None:
         """Initialize the vector index.
 
         Args:
@@ -53,15 +57,16 @@ class VectorStore:
         """
         self.dimension = dimension
         self.index_path = index_path
-        
+        self.index: Any
+
         if faiss:
             # Task 3.4: Use Inner Product for cosine similarity (with normalized vectors)
             self.index = faiss.IndexFlatIP(dimension)
         else:
             self.index = SimpleIndex(dimension)
-            
+
         self.id_map: dict[int, str] = {}  # index -> chunk_id
-        
+
         if index_path and index_path.exists():
             self.load(index_path)
 
@@ -72,7 +77,7 @@ class VectorStore:
         """
         if not self.index:
             return
-            
+
         vec = np.array([embedding]).astype("float32")
         # Add the vector first, then capture the new index position
         self.index.add(vec)
@@ -80,7 +85,9 @@ class VectorStore:
         # self.index.add(vec)  # moved above
         self.id_map[idx] = chunk_id
 
-    def search(self, embedding: list[float], limit: int = 10) -> list[tuple[str, float]]:
+    def search(
+        self, embedding: list[float], limit: int = 10
+    ) -> list[tuple[str, float]]:
         """Search for similar embeddings.
 
         Args:
@@ -92,29 +99,29 @@ class VectorStore:
         """
         if not self.index:
             return []
-            
+
         vec = np.array([embedding]).astype("float32")
         distances, indices = self.index.search(vec, limit)
-        
+
         results = []
         for dist, idx in zip(distances[0], indices[0]):
             if idx in self.id_map:
                 results.append((self.id_map[int(idx)], float(dist)))
-                
+
         return results
 
     def save(self, path: Path) -> None:
         """Save index and ID map to disk."""
         if not self.index:
             return
-            
+
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         # Save index if FAISS is available
         if faiss:
             faiss.write_index(self.index, str(path.with_suffix(".index")))
-        
+
         # Save ID map
         with open(path.with_suffix(".json"), "w") as f:
             json.dump(
@@ -133,14 +140,14 @@ class VectorStore:
         """
         if not faiss:
             return
-            
+
         path = Path(path)
         index_file = path.with_suffix(".index")
         json_file = path.with_suffix(".json")
-        
+
         if index_file.exists():
             self.index = faiss.read_index(str(index_file))
-            
+
         if json_file.exists():
             with open(json_file) as f:
                 data = json.load(f)
