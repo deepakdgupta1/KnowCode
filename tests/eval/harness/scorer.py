@@ -248,20 +248,23 @@ def score_record(
     sufficiency: float = float(retrieval_result.get("sufficiency_score", 0.0))
     routed_local = _would_route_local(retrieval_result, sufficiency)
 
-    return {
+    precision_1 = precision_at_k(retrieved_entities, expected_entity_ids, k=1)
+    precision_5 = precision_at_k(retrieved_entities, expected_entity_ids, k=5)
+    recall_10 = recall_at_k(retrieved_entities, expected_entity_ids, k=10)
+    mrr = reciprocal_rank(retrieved_entities, expected_entity_ids)
+    file_coverage_1 = file_coverage_at_k(retrieved_entities, expected_files, k=1)
+    file_coverage_5 = file_coverage_at_k(retrieved_entities, expected_files, k=5)
+
+    result = {
         "query_id": query_id,
         "task_type": task_type,
         "difficulty": difficulty,
-        "precision_at_1": precision_at_k(retrieved_entities, expected_entity_ids, k=1),
-        "precision_at_5": precision_at_k(retrieved_entities, expected_entity_ids, k=5),
-        "recall_at_10": recall_at_k(retrieved_entities, expected_entity_ids, k=10),
-        "mrr": reciprocal_rank(retrieved_entities, expected_entity_ids),
-        "file_coverage_at_1": file_coverage_at_k(
-            retrieved_entities, expected_files, k=1
-        ),
-        "file_coverage_at_5": file_coverage_at_k(
-            retrieved_entities, expected_files, k=5
-        ),
+        "precision_at_1": precision_1,
+        "precision_at_5": precision_5,
+        "recall_at_10": recall_10,
+        "mrr": mrr,
+        "file_coverage_at_1": file_coverage_1,
+        "file_coverage_at_5": file_coverage_5,
         "sufficiency_score": sufficiency,
         "routed_local": routed_local,
         "narrative": score_narrative(
@@ -271,6 +274,13 @@ def score_record(
             candidate_answer=retrieval_result.get("context_text", ""),
         ),
     }
+
+    judged_correct = golden.get("correct")
+    if isinstance(judged_correct, bool):
+        structural_match = recall_10 == 1.0 and file_coverage_5 == 1.0
+        result["correct"] = bool(judged_correct and structural_match)
+
+    return result
 
 
 # ---------------------------------------------------------------------------

@@ -24,10 +24,18 @@ The golden dataset is stored in [golden_v1.0.json](file:///Users/deepg/Desktop/K
 
 Metadata for the dataset version is stored in [golden_v1.0.meta.json](file:///Users/deepg/Desktop/KnowCode/tests/eval/golden/golden_v1.0.meta.json) to guard against codebase line range drift.
 
+**Current status:** `golden_v1.0.json` is a committed smoke baseline, not the
+full Phase 1 dataset. Its metadata is marked with
+`"dataset_status": "smoke_baseline"` and includes per-source-file hashes so
+unrelated commits do not invalidate the eval gate. The full 60-record sampling
+plan is committed at
+[phase1_plan.json](file:///Users/deepg/Desktop/KnowCode/tests/eval/pipeline/phase1_plan.json).
+
 ### How to Add a New Query
 1. Open [golden_v1.0.json](file:///Users/deepg/Desktop/KnowCode/tests/eval/golden/golden_v1.0.json).
 2. Append a new object specifying the `query_id`, `query_text`, `task_type`, `difficulty`, `expected_entities` (as relative project paths `file_path::symbol`), and `expected_files` (as relative file paths).
 3. Increment the `query_count` in [golden_v1.0.meta.json](file:///Users/deepg/Desktop/KnowCode/tests/eval/golden/golden_v1.0.meta.json).
+4. Add or refresh any affected `source_file_hashes` in the metadata file.
 
 ---
 

@@ -1,6 +1,16 @@
 {
-  "source_sha": "1cb6768c7035068f42cc8c2dc159f06b4d3d26be",
-  "created_at": "2026-06-06T19:33:00Z",
+  "source_sha": "bb373c43a5f20c775d0c2b0ea592372dbe9feb20",
+  "created_at": "2026-06-10T15:20:00Z",
   "schema_version": "1.0.0",
-  "query_count": 4
+  "dataset_status": "smoke_baseline",
+  "query_count": 6,
+  "source_file_hashes": {
+    "src/knowcode/api/api.py": "cb0ce6411ff0811c6f0e3d35052202693d0e5ef66285c66924718bd0539a0d13",
+    "src/knowcode/doctor.py": "2d5fd42b5cd0fe36691917f34eb04c130e3261806333d76a12aff6fbcdee6117",
+    "src/knowcode/indexing/monitor.py": "84e8453161f0db615100d7d6256e4c3a5a5cbaac3b89bfba3081507a2164f8eb",
+    "src/knowcode/indexing/scanner.py": "739509e9e0c3781d3c4779f592bfa7ad87b0ff26b39198512dde6fb8471f7dcd",
+    "src/knowcode/parsers/markdown_parser.py": "7e7c0981f74a20300c255a758b1d35a75e2a9e2e106dff074d675795168b6e91",
+    "tests/eval/fixtures/mini_repo/module_a.py": "84ca71356a2fed4896569839c0c4126b3c1a45f298933f60cc1cbcaaad27986b",
+    "tests/eval/fixtures/mini_repo/module_b.py": "e11d5c43b2ff79a23d7f8af1a343ddfc4a35a10327e5d242fcae87f943b3ee94"
+  }
 }

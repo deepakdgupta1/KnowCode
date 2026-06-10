@@ -1,0 +1,30 @@
+{
+  "schema_version": "1.0.0",
+  "dataset_version": "golden_v1.0",
+  "target_records": 60,
+  "status": "planned",
+  "strata": [
+    {"task_type": "locate", "difficulty": "easy", "target": 6},
+    {"task_type": "locate", "difficulty": "medium", "target": 4},
+    {"task_type": "locate", "difficulty": "hard", "target": 0},
+    {"task_type": "explain", "difficulty": "easy", "target": 2},
+    {"task_type": "explain", "difficulty": "medium", "target": 6},
+    {"task_type": "explain", "difficulty": "hard", "target": 4},
+    {"task_type": "debug", "difficulty": "easy", "target": 2},
+    {"task_type": "debug", "difficulty": "medium", "target": 6},
+    {"task_type": "debug", "difficulty": "hard", "target": 4},
+    {"task_type": "extend", "difficulty": "easy", "target": 2},
+    {"task_type": "extend", "difficulty": "medium", "target": 6},
+    {"task_type": "extend", "difficulty": "hard", "target": 4},
+    {"task_type": "review", "difficulty": "easy", "target": 1},
+    {"task_type": "review", "difficulty": "medium", "target": 5},
+    {"task_type": "review", "difficulty": "hard", "target": 2},
+    {"task_type": "general", "difficulty": "easy", "target": 2},
+    {"task_type": "general", "difficulty": "medium", "target": 2},
+    {"task_type": "general", "difficulty": "hard", "target": 2}
+  ],
+  "notes": [
+    "This is the committed sampling plan required before expanding the smoke baseline to the full Phase 1 dataset.",
+    "The current golden_v1.0.json is marked as a smoke baseline until these strata are filled and reviewed."
+  ]
+}

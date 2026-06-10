@@ -54,5 +54,40 @@
     ],
     "must_mention_facts": [],
     "must_not_mention_facts": []
+  },
+  {
+    "query_id": "q5",
+    "query_text": "Where is the API freshness endpoint implemented?",
+    "task_type": "locate",
+    "difficulty": "easy",
+    "expected_entities": ["src/knowcode/api/api.py::get_freshness"],
+    "expected_files": ["src/knowcode/api/api.py"],
+    "must_mention_facts": [
+      "The freshness endpoint is implemented by `get_freshness`.",
+      "The endpoint delegates to `service.get_freshness_metadata()`."
+    ],
+    "must_not_mention_facts": [
+      "The endpoint rebuilds the knowledge store or index."
+    ],
+    "correct": true
+  },
+  {
+    "query_id": "q6",
+    "query_text": "Explain how the doctor command checks freshness.",
+    "task_type": "explain",
+    "difficulty": "medium",
+    "expected_entities": [
+      "src/knowcode/doctor.py::_check_freshness",
+      "src/knowcode/doctor.py::run_doctor"
+    ],
+    "expected_files": ["src/knowcode/doctor.py"],
+    "must_mention_facts": [
+      "`run_doctor` invokes `_check_freshness` as part of the doctor checklist.",
+      "`_check_freshness` calls `service.get_freshness_metadata()` and reports a warning when artifacts are stale."
+    ],
+    "must_not_mention_facts": [
+      "The doctor command silently rebuilds stale artifacts."
+    ],
+    "correct": true
   }
 ]

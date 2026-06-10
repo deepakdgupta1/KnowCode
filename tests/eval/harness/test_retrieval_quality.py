@@ -30,10 +30,11 @@ in CI).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -50,6 +51,36 @@ _GOLDEN_DIR = _EVAL_DIR / "golden"
 _GOLDEN_DATASET = _GOLDEN_DIR / "golden_v1.0.json"
 _GOLDEN_META = _GOLDEN_DIR / "golden_v1.0.meta.json"
 _BASELINE_PATH = _GOLDEN_DIR / "baseline_v1.0.json"
+
+
+def _sha256_file(path: Path) -> str:
+    """Return a stable content hash for a file."""
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _source_file_hashes_match(
+    repo_root: Path,
+    source_file_hashes: dict[str, str],
+) -> tuple[bool, list[str]]:
+    """Check whether golden source files still match their recorded hashes."""
+    mismatches: list[str] = []
+    for rel_path, expected_hash in sorted(source_file_hashes.items()):
+        path = repo_root / rel_path
+        if not path.exists():
+            mismatches.append(f"{rel_path}: missing")
+            continue
+
+        actual_hash = _sha256_file(path)
+        if actual_hash != expected_hash:
+            mismatches.append(
+                f"{rel_path}: expected {expected_hash[:12]}, got {actual_hash[:12]}"
+            )
+
+    return not mismatches, mismatches
 
 
 # ---------------------------------------------------------------------------
@@ -75,7 +106,7 @@ def golden_records() -> list[dict[str, Any]]:
 
 
 @pytest.fixture(scope="session")
-def knowcode_service():  # type: ignore[return]
+def knowcode_service() -> Any:
     """Return an initialised KnowCodeService pointed at the repo root.
 
     The test session is skipped if the knowledge store artefact is absent
@@ -126,10 +157,27 @@ def sha_guard(request: pytest.FixtureRequest) -> None:
         return  # not in a git repo — skip guard
 
     if current_sha != recorded_sha:
+        source_file_hashes = meta.get("source_file_hashes")
+        if isinstance(source_file_hashes, dict) and source_file_hashes:
+            repo_root = Path(__file__).parents[3]
+            hashes_match, mismatches = _source_file_hashes_match(
+                repo_root,
+                {str(k): str(v) for k, v in source_file_hashes.items()},
+            )
+            if hashes_match:
+                return
+
+            mismatch_details = "; ".join(mismatches[:5])
+            if len(mismatches) > 5:
+                mismatch_details += f"; ... and {len(mismatches) - 5} more"
+        else:
+            mismatch_details = "golden_v1.0.meta.json has no source_file_hashes"
+
         pytest.fail(
             f"HEAD SHA ({current_sha[:12]}) does not match the SHA recorded in "
             f"golden_v1.0.meta.json ({recorded_sha[:12]}). "
             "Line ranges in the golden dataset may be stale. "
+            f"Source hash check failed: {mismatch_details}. "
             "Re-run the pipeline or pass --allow-drift to bypass."
         )
 
@@ -156,7 +204,7 @@ def _run_retrieval(service: Any, query_text: str) -> dict[str, Any]:
     retrieval["would_route_local"] = bool(retrieval.get("context_text")) and (
         float(sufficiency) >= threshold
     )
-    return retrieval
+    return cast(dict[str, Any], retrieval)
 
 
 def _collect_scores(
