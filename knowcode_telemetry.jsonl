@@ -138,3 +138,29 @@
 {"query": "Debug why a .tsx file is not indexed in scanner or monitor handler.", "verbosity": "minimal", "sufficiency_score": 0.26, "is_stale": true, "local_or_escalated": "escalated", "timestamp": 1780846251}
 {"event_type": "retrieval_decision", "query": "Trace dependencies from module_a to module_b.", "task_type": "general", "retrieval_mode": "semantic", "sufficiency_score": 0.73, "total_tokens": 664, "max_tokens": 8000, "selected_entities": ["/Users/deepg/Desktop/KnowCode/tests/eval/fixtures/mini_repo/module_a.py::func_a", "/Users/deepg/Desktop/KnowCode/src/knowcode/storage/knowledge_store.py::KnowledgeStore.get_impact", "/Users/deepg/Desktop/KnowCode/src/knowcode/retrieval/completeness.py::expand_dependencies", "/Users/deepg/Desktop/KnowCode/src/knowcode/storage/knowledge_store.py::KnowledgeStore"], "timestamp": 1780846253}
 {"query": "Trace dependencies from module_a to module_b.", "verbosity": "minimal", "sufficiency_score": 0.73, "is_stale": true, "local_or_escalated": "escalated", "timestamp": 1780846253}
+{"event_type": "tool_call", "tool_name": "search_codebase", "arguments": {"query": "", "limit": 1}, "timestamp": 1781109031}
+{"event_type": "tool_call", "tool_name": "search_codebase", "arguments": {"query": "", "limit": 1}, "timestamp": 1781109157}
+{"event_type": "tool_call", "tool_name": "search_codebase", "arguments": {"query": "", "limit": 1}, "timestamp": 1781109262}
+{"event_type": "tool_call", "tool_name": "search_codebase", "arguments": {"query": "", "limit": 1}, "timestamp": 1781109280}
+{"event_type": "tool_call", "tool_name": "search_codebase", "arguments": {"query": "", "limit": 1}, "timestamp": 1781109390}
+{"event_type": "tool_call", "tool_name": "search_codebase", "arguments": {"query": "", "limit": 1}, "timestamp": 1781109410}
+{"event_type": "tool_call", "tool_name": "retrieve_context_for_query", "arguments": {"expand_deps": true, "limit_entities": 3, "max_tokens": 3000, "query": "How does this codebase enable semantic search?", "verbosity": "minimal"}, "timestamp": 1781109565}
+{"event_type": "retrieval_decision", "query": "How does this codebase enable semantic search?", "task_type": "explain", "retrieval_mode": "semantic", "sufficiency_score": 0.86, "total_tokens": 250, "max_tokens": 3000, "selected_entities": ["/Users/deepg/Desktop/KnowCode/src/knowcode/cli/cli.py::semantic_search"], "timestamp": 1781109568}
+{"query": "How does this codebase enable semantic search?", "verbosity": "minimal", "sufficiency_score": 0.86, "is_stale": true, "local_or_escalated": "local", "timestamp": 1781109568}
+{"event_type": "tool_call", "tool_name": "retrieve_context_for_query", "arguments": {"expand_deps": true, "limit_entities": 3, "max_tokens": 3000, "query": "How is semantic search implemented inside KnowCodeService or search engine?", "verbosity": "standard"}, "timestamp": 1781109570}
+{"event_type": "retrieval_decision", "query": "How is semantic search implemented inside KnowCodeService or search engine?", "task_type": "locate", "retrieval_mode": "semantic", "sufficiency_score": 1.0, "total_tokens": 230, "max_tokens": 3000, "selected_entities": ["/Users/deepg/Desktop/KnowCode/src/knowcode/cli/cli.py::semantic_search"], "timestamp": 1781109572}
+{"query": "How is semantic search implemented inside KnowCodeService or search engine?", "verbosity": "standard", "sufficiency_score": 1.0, "is_stale": true, "local_or_escalated": "local", "timestamp": 1781109572}
+{"event_type": "tool_call", "tool_name": "search_codebase", "arguments": {"query": "KnowCodeService"}, "timestamp": 1781109574}
+{"event_type": "tool_call", "tool_name": "search_codebase", "arguments": {"query": "engine"}, "timestamp": 1781109576}
+{"event_type": "tool_call", "tool_name": "search_codebase", "arguments": {"query": "SearchEngine"}, "timestamp": 1781109577}
+{"event_type": "tool_call", "tool_name": "get_entity_context", "arguments": {"entity_id": "/Users/deepg/Desktop/KnowCode/src/knowcode/retrieval/search_engine.py::SearchEngine"}, "timestamp": 1781109587}
+{"event_type": "tool_call", "tool_name": "search_codebase", "arguments": {"query": "HybridIndex"}, "timestamp": 1781109592}
+{"event_type": "tool_call", "tool_name": "get_entity_context", "arguments": {"entity_id": "/Users/deepg/Desktop/KnowCode/src/knowcode/retrieval/hybrid_index.py::HybridIndex"}, "timestamp": 1781109593}
+{"event_type": "tool_call", "tool_name": "search_codebase", "arguments": {"query": "VectorStore"}, "timestamp": 1781109595}
+{"event_type": "tool_call", "tool_name": "search_codebase", "arguments": {"query": "vector_store"}, "timestamp": 1781109598}
+{"event_type": "tool_call", "tool_name": "get_entity_context", "arguments": {"entity_id": "/Users/deepg/Desktop/KnowCode/src/knowcode/storage/vector_store.py::vector_store"}, "timestamp": 1781109600}
+{"event_type": "tool_call", "tool_name": "search_codebase", "arguments": {"query": "EmbeddingProvider"}, "timestamp": 1781109605}
+{"event_type": "tool_call", "tool_name": "search_codebase", "arguments": {"query": "provider"}, "timestamp": 1781109606}
+{"event_type": "tool_call", "tool_name": "search_codebase", "arguments": {"query": "embedding_provider"}, "timestamp": 1781109608}
+{"event_type": "tool_call", "tool_name": "get_entity_context", "arguments": {"entity_id": "/Users/deepg/Desktop/KnowCode/src/knowcode/llm/embedding.py::create_embedding_provider"}, "timestamp": 1781109613}
+{"event_type": "tool_call", "tool_name": "search_codebase", "arguments": {"query": "Reranker"}, "timestamp": 1781109618}
