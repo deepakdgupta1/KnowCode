@@ -41,7 +41,7 @@ The command-line interface exposes thirteen commands:
 | `query` | Lexical query: callers, callees, dependencies, or search |
 | `context` | Generate a task-aware context bundle for an entity |
 | `semantic-search` | Natural-language search over embeddings |
-| `export` | Export the knowledge graph as Markdown documentation |
+| `export` | Export multi-level Markdown documentation from the knowledge graph |
 | `stats` | Print entity and relationship counts |
 | `doctor` | Check whether the local KnowCode setup is ready |
 | `server` | Start the FastAPI REST server (optionally with `--watch`) |

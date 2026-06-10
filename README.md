@@ -130,7 +130,9 @@ knowcode context "GraphBuilder.build_from_directory" --max-tokens 4000
 ```
 
 ### `export`
-Export the knowledge store as Markdown documentation.
+Export the knowledge store as multi-level Markdown documentation. The export
+includes an index, architecture overview, per-module pages, and a manifest with
+entity content hashes for freshness checks.
 
 ```bash
 knowcode export [--store <path>] [--output <dir>]
@@ -479,7 +481,7 @@ See [reference_architecture.md](file:///Users/deepg/Desktop/KnowCode/docs/archit
 - ✅ Add layer contract tests and harden retrieval evals (parser, store roundtrip, golden-query smoke baseline - see [docs/retrieval-evals.md](docs/retrieval-evals.md))
 
 **Future releases:**
-- v2.4: Multi-level documentation synthesis
+- v2.4: Multi-level documentation synthesis (in progress: architecture/module/function export + freshness manifest)
 - v3.0: Deep analysis (data flow, intent extraction, confidence scoring)
 - v4.0: Enterprise features (RBAC, scalability, team sharing)
 

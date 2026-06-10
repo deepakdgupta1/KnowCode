@@ -34,6 +34,21 @@ def test_cli_analyze_query_stats_context(tmp_path) -> None:  # type: ignore
     )
     assert context.exit_code == 0
 
+    docs_dir = tmp_path / "docs"
+    export = runner.invoke(
+        cli_module.cli,
+        ["export", "--store", str(tmp_path), "--output", str(docs_dir)],
+    )
+    assert export.exit_code == 0, export.output
+    assert "Documents:" in export.output
+    assert (docs_dir / "index.md").exists()
+    assert (docs_dir / "architecture.md").exists()
+    manifest = json.loads(
+        (docs_dir / "documentation_manifest.json").read_text(encoding="utf-8")
+    )
+    assert "index.md" in manifest["documents"]
+    assert "architecture.md" in manifest["documents"]
+
 
 def test_cli_build_defaults_to_current_directory(tmp_path, monkeypatch) -> None:  # type: ignore
     """`knowcode build` with no arguments builds the store in the cwd."""

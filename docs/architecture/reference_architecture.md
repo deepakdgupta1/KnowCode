@@ -422,6 +422,9 @@ Generate **explainable, navigable, abstraction-aware documentation** directly fr
   * Consistency with actual code
   * Traceability back to source
 * Keep docs incrementally up-to-date
+* **[PARTIAL]** Deterministic Markdown export now emits an index, architecture
+  overview, per-module pages, function/class narratives, and a documentation
+  manifest keyed by entity content hashes.
 * **[HARDENED]** Multiple output formats: Markdown, HTML, IDE tooltips, OpenAPI, AsyncAPI
 * **[HARDENED]** Audience targeting: new engineers, domain experts, API consumers
 * **[HARDENED]** Auto-generate "what changed since version X" summaries
@@ -999,8 +1002,8 @@ Commands fail fast with: *"Install knowcode[server] to use `knowcode server`"*.
 > - *"Which files change together most often?"*
 
 ### **Phase 4: Documentation Synthesis (PARTIAL)**
-13. **[x] Markdown Export (MVP)**: CLI `export` produces an index-style Markdown doc (see `docs_test/index.md`).
-14. **[ ] Multi-Level Doc Synthesis (Layer 7)**: Architecture/module/function narratives, change summaries, and freshness tracking.
+13. **[x] Markdown Export (MVP)**: CLI `export` produces Markdown documentation from the knowledge store.
+14. **[~] Multi-Level Doc Synthesis (Layer 7)**: CLI `export` now emits architecture/module/function documentation plus a freshness manifest keyed by entity content hashes. Remaining work: change summaries, stale-doc detection, and richer audience-aware narratives.
 
 > **Questions you can now answer:**
 > - *"Can I get a written overview of this codebase I can share with a new team member?"*
@@ -1088,8 +1091,8 @@ Commands fail fast with: *"Install knowcode[server] to use `knowcode server`"*.
 12. **[x] Coverage Signals (Layer 5)**: Cobertura ingestion with coverage report entities and covers/executed_by relationships.
 
 ### **Phase 4: Documentation Synthesis (PARTIAL)**
-13. **[x] Markdown Export (MVP)**: CLI `export` produces an index-style Markdown doc.
-14. **[ ] Multi-Level Doc Synthesis (Layer 7)**: Architecture/module/function narratives, change summaries, and freshness tracking.
+13. **[x] Markdown Export (MVP)**: CLI `export` produces Markdown documentation from the knowledge store.
+14. **[~] Multi-Level Doc Synthesis (Layer 7)**: CLI `export` now emits architecture/module/function documentation plus a freshness manifest keyed by entity content hashes. Remaining work: change summaries, stale-doc detection, and richer audience-aware narratives.
 
 ### **Phase 4.5: Architectural Hardening (COMPLETED)**
 15. **[x] Dependency Modularisation (AD-1)**: Optional extras (`server`, `search`, `llm`, `watch`, `all`) with lightweight core install.
