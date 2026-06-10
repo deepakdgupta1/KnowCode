@@ -199,7 +199,7 @@ class VectorStore:
             "Unsupported vector index schema version "
             f"{schema_version!r}. Supported versions: "
             f"{sorted(cls.SUPPORTED_SCHEMA_VERSIONS)}. "
-            "Rebuild with `knowcode index`."
+            "Rebuild with `knowcode build`."
         )
 
     @staticmethod

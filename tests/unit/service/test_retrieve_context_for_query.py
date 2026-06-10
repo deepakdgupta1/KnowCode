@@ -167,7 +167,7 @@ def test_retrieve_context_raises_when_store_missing(tmp_path: Path) -> None:
     with pytest.raises(MissingKnowledgeStoreError) as exc:
         service.retrieve_context_for_query("Explain e1", verbosity="diagnostic")
     assert exc.value.code == "missing_knowledge_store"
-    assert "knowcode analyze" in exc.value.hint
+    assert "knowcode build" in exc.value.hint
 
 
 def test_retrieve_context_raises_when_index_missing(tmp_path: Path) -> None:
@@ -177,7 +177,7 @@ def test_retrieve_context_raises_when_index_missing(tmp_path: Path) -> None:
     with pytest.raises(MissingSemanticIndexError) as exc:
         service.retrieve_context_for_query("Explain e1", verbosity="diagnostic")
     assert exc.value.code == "missing_semantic_index"
-    assert "knowcode index" in exc.value.hint
+    assert "knowcode build" in exc.value.hint
 
 
 def test_ensure_store_builds_only_when_missing(tmp_path: Path) -> None:

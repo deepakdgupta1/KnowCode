@@ -206,7 +206,7 @@ def test_handle_tool_call_reports_missing_prerequisites(tmp_path: Path) -> None:
     result = json.loads(server.handle_tool_call("search_codebase", {"query": "Foo"}))
 
     assert result["code"] == "missing_knowledge_store"
-    assert "knowcode analyze" in result["hint"]
+    assert "knowcode build" in result["hint"]
 
 
 def test_mcp_server_initializes_service_with_strict_config(

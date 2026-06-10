@@ -138,8 +138,8 @@ def test_doctor_reports_missing_store_and_index(tmp_path: Path) -> None:
     failed = {check["name"]: check for check in payload["checks"] if check["status"] == "fail"}
     assert "Knowledge store" in failed
     assert "Semantic index" in failed
-    assert "knowcode analyze" in failed["Knowledge store"]["hint"]
-    assert "knowcode index" in failed["Semantic index"]["hint"]
+    assert "knowcode build" in failed["Knowledge store"]["hint"]
+    assert "knowcode build" in failed["Semantic index"]["hint"]
 
 
 def test_doctor_fails_on_index_dimension_mismatch(tmp_path: Path) -> None:

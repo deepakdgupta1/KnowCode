@@ -216,7 +216,7 @@ def _check_knowledge_store(store_file: Path, checks: list[DoctorCheck]) -> None:
                 name="Knowledge store",
                 status="fail",
                 message=f"Knowledge store not found: {store_file}",
-                hint="Run `knowcode analyze <dir>` first.",
+                hint="Run `knowcode build <dir>` first.",
             )
         )
         return
@@ -230,7 +230,7 @@ def _check_knowledge_store(store_file: Path, checks: list[DoctorCheck]) -> None:
                 name="Knowledge store",
                 status="fail",
                 message=f"Could not load {store_file}: {exc}",
-                hint="Re-run `knowcode analyze <dir>` to rebuild the store.",
+                hint="Re-run `knowcode build <dir>` to rebuild the store.",
             )
         )
         return
@@ -245,7 +245,7 @@ def _check_knowledge_store(store_file: Path, checks: list[DoctorCheck]) -> None:
                     f"Loaded {store_file} via schema migration "
                     f"({len(store.entities)} entities)."
                 ),
-                hint="Re-run `knowcode analyze <dir>` to persist the current schema.",
+                hint="Re-run `knowcode build <dir>` to persist the current schema.",
             )
         )
         return
@@ -275,7 +275,7 @@ def _check_semantic_index(
                 name="Semantic index",
                 status="fail",
                 message=f"Semantic index not found: {index_path}",
-                hint="Run `knowcode index <dir>` first.",
+                hint="Run `knowcode build <dir>` first.",
             )
         )
         return
@@ -375,7 +375,7 @@ def _check_semantic_index(
                 name="Semantic index",
                 status="fail",
                 message=f"{index_path}: {'; '.join(failures)}.",
-                hint="Rebuild the semantic index with `knowcode index <dir>`.",
+                hint="Rebuild the semantic index with `knowcode build <dir>`.",
             )
         )
         return
@@ -720,7 +720,7 @@ def _check_freshness(store_path: str | Path, config_path: str | Path | None, che
                     name="Freshness",
                     status="warn",
                     message=f"Store/index may be stale. Reasons: {', '.join(freshness['stale_reasons'])}.",
-                    hint="Re-run `knowcode analyze` and `knowcode index` to rebuild artifacts.",
+                    hint="Re-run `knowcode build` to rebuild artifacts.",
                 )
             )
         else:

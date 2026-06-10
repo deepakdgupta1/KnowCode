@@ -143,7 +143,7 @@ class KnowledgeStore:
                 return migrated
             raise ValueError(
                 "Unsupported legacy knowledge store format. "
-                f"Found version={legacy_version!r}. Re-run `knowcode analyze`."
+                f"Found version={legacy_version!r}. Re-run `knowcode build`."
             )
 
         normalized = cls._normalize_schema_version(schema_version)
@@ -160,7 +160,7 @@ class KnowledgeStore:
             "Unsupported knowledge store schema version "
             f"{schema_version!r}. Supported versions: "
             f"{sorted(cls.SUPPORTED_SCHEMA_VERSIONS)}. "
-            "Re-run `knowcode analyze` to rebuild persisted artifacts."
+            "Re-run `knowcode build` to rebuild persisted artifacts."
         )
 
     @staticmethod

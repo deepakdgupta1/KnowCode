@@ -21,7 +21,7 @@ class MissingKnowledgeStoreError(KnowCodePrerequisiteError):
         super().__init__(
             f"Knowledge store not found: {store_file}",
             code="missing_knowledge_store",
-            hint="Run `knowcode analyze <dir>` first.",
+            hint="Run `knowcode build <dir>` first.",
         )
 
 
@@ -32,5 +32,5 @@ class MissingSemanticIndexError(KnowCodePrerequisiteError):
         super().__init__(
             f"Semantic index not found: {index_path}",
             code="missing_semantic_index",
-            hint="Run `knowcode index <dir>` first.",
+            hint="Run `knowcode build <dir>` first.",
         )

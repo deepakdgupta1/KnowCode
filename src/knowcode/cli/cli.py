@@ -224,7 +224,7 @@ def query(query_type: str, target: str, store: str, as_json: bool) -> None:
     try:
         service = KnowCodeService(store_path=store)
     except FileNotFoundError:
-        click.echo("Error: Knowledge store not found. Run 'knowcode analyze' first.", err=True)
+        click.echo("Error: Knowledge store not found. Run 'knowcode build' first.", err=True)
         sys.exit(1)
 
     results: list[dict[str, Any]] = []
@@ -355,7 +355,7 @@ def context(target: str, store: str, max_tokens: int) -> None:
     try:
         service = KnowCodeService(store_path=store)
     except FileNotFoundError:
-        click.echo("Error: Knowledge store not found. Run 'knowcode analyze' first.", err=True)
+        click.echo("Error: Knowledge store not found. Run 'knowcode build' first.", err=True)
         sys.exit(1)
 
     try:
@@ -387,7 +387,7 @@ def export(store: str, output: str) -> None:
     try:
         service = KnowCodeService(store_path=store)
     except FileNotFoundError:
-        click.echo("Error: Knowledge store not found. Run 'knowcode analyze' first.", err=True)
+        click.echo("Error: Knowledge store not found. Run 'knowcode build' first.", err=True)
         sys.exit(1)
 
     output_dir = Path(output)
@@ -413,7 +413,7 @@ def stats(store: str) -> None:
     try:
         service = KnowCodeService(store_path=store)
     except FileNotFoundError:
-        click.echo("Error: Knowledge store not found. Run 'knowcode analyze' first.", err=True)
+        click.echo("Error: Knowledge store not found. Run 'knowcode build' first.", err=True)
         sys.exit(1)
 
     s = service.get_stats()
@@ -560,7 +560,7 @@ def history(target: Optional[str], store: str, limit: int) -> None:
     try:
         service = KnowCodeService(store_path=store)
     except FileNotFoundError:
-        click.echo("Error: Knowledge store not found. Run 'knowcode analyze' first.", err=True)
+        click.echo("Error: Knowledge store not found. Run 'knowcode build' first.", err=True)
         sys.exit(1)
         
     knowledge = service.store
@@ -708,7 +708,7 @@ def mcp_server(store: str, config: Optional[str]) -> None:
     store_file = store_path / KnowledgeStore.DEFAULT_FILENAME if store_path.is_dir() else store_path
     if not store_file.exists():
         click.echo(
-            "Error: Knowledge store not found. Run `knowcode analyze <dir>` first.",
+            "Error: Knowledge store not found. Run `knowcode build <dir>` first.",
             err=True,
         )
         sys.exit(1)

@@ -219,7 +219,7 @@ class Indexer:
                 if legacy_value not in allowed_legacy_values:
                     raise ValueError(
                         f"Unsupported legacy {payload_name} version "
-                        f"{legacy_value!r}. Rebuild with `knowcode index`."
+                        f"{legacy_value!r}. Rebuild with `knowcode build`."
                     )
             migrated = dict(payload)
             migrated["schema_version"] = cls.SCHEMA_VERSION
@@ -239,7 +239,7 @@ class Indexer:
             f"Unsupported {payload_name} schema version "
             f"{schema_version!r}. Supported versions: "
             f"{sorted(cls.SUPPORTED_SCHEMA_VERSIONS)}. "
-            "Rebuild with `knowcode index`."
+            "Rebuild with `knowcode build`."
         )
 
     @staticmethod

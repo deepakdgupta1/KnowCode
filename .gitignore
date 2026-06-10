@@ -206,6 +206,7 @@ __marimo__/
 
 # KnowCode generated files
 knowcode_knowledge.json
+knowcode_telemetry.jsonl
 CHANGELOG.md
 docs_test/
 #aimodels.yaml
