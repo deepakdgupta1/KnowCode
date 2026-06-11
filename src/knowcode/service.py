@@ -169,7 +169,11 @@ class KnowCodeService:
             from knowcode.retrieval.search_engine import SearchEngine
 
             indexer = self.get_indexer(index_path)
-            hybrid_index = HybridIndex(indexer.chunk_repo, indexer.vector_store)
+            hybrid_index = HybridIndex(
+                indexer.chunk_repo, 
+                indexer.vector_store,
+                alpha=self.app_config.hybrid_alpha
+            )
 
             self._search_engine = SearchEngine(
                 indexer.chunk_repo,

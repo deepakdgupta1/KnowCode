@@ -44,8 +44,10 @@ class Reranker:
             try:
                 from knowcode.llm.voyageai_client import get_voyageai_client
                 self.voyage_client = get_voyageai_client(api_key_env)
-            except Exception:
-                pass  # Fall back to signal-based
+            except ImportError as e:
+                print(f"  ⚠️ VoyageAI client not available (missing package): {e}")
+            except ValueError as e:
+                print(f"  ⚠️ VoyageAI client not available (configuration error): {e}")
     
     def rerank(
         self,
@@ -75,15 +77,45 @@ class Reranker:
         
         # Try VoyageAI cross-encoder reranking
         if self.voyage_client:
+            start_time = time.time()
             try:
-                return self._rerank_with_voyageai(query, chunks, top_k)
+                result = self._rerank_with_voyageai(query, chunks, top_k)
+                latency = time.time() - start_time
+                self._log_telemetry("voyageai", latency, len(chunks))
+                return result
+            except ValueError as e:
+                print(f"  ⚠️ VoyageAI reranking failed (invalid input): {e}. Using signal-based fallback.")
+            except ConnectionError as e:
+                print(f"  ⚠️ VoyageAI reranking failed (network error): {e}. Using signal-based fallback.")
             except Exception as e:
+                import logging
+                logging.error(f"VoyageAI reranking API failed: {e}")
                 print(f"  ⚠️ VoyageAI reranking failed: {e}. Using signal-based fallback.")
         
         # Fallback to signal-based reranking
-        return self._rerank_with_signals(
+        start_time = time.time()
+        result = self._rerank_with_signals(
             query, chunks, boost_recent, boost_documented, top_k
         )
+        latency = time.time() - start_time
+        self._log_telemetry("signal_based", latency, len(chunks))
+        return result
+        
+    def _log_telemetry(self, method: str, latency: float, num_chunks: int) -> None:
+        """Log reranking latency telemetry."""
+        from knowcode.telemetry import log_event
+        try:
+            log_event(
+                ".",  # We don't have store_path here, telemetry.py handles fallback to current dir
+                {
+                    "event_type": "reranker_latency",
+                    "method": method,
+                    "latency_seconds": latency,
+                    "num_chunks": num_chunks,
+                }
+            )
+        except Exception:
+            pass
     
     def _rerank_with_voyageai(
         self,

@@ -33,12 +33,14 @@ class AppConfig:
         "eval_models",
         "config",
     }
-    KNOWN_CONFIG_KEYS = {"sufficiency_threshold"}
+    KNOWN_CONFIG_KEYS = {"sufficiency_threshold", "hybrid_alpha", "reranker_top_k_multiplier"}
 
     models: list[ModelConfig] = field(default_factory=list)
     embedding_models: list[ModelConfig] = field(default_factory=list)
     reranking_models: list[ModelConfig] = field(default_factory=list)
     sufficiency_threshold: float = 0.8  # For local-first answering
+    hybrid_alpha: float = 0.2
+    reranker_top_k_multiplier: int = 5
 
     @classmethod
     def load(cls, config_path: Optional[str] = None, strict: bool = False) -> "AppConfig":
@@ -87,6 +89,8 @@ class AppConfig:
                 )
             ],
             sufficiency_threshold=0.8,
+            hybrid_alpha=0.2,
+            reranker_top_k_multiplier=5,
         )
 
     @classmethod
@@ -153,6 +157,14 @@ class AppConfig:
             if not isinstance(sufficiency_threshold, (int, float)):
                 raise ValueError("'config.sufficiency_threshold' must be a number.")
             
+            hybrid_alpha = config_section.get("hybrid_alpha", 0.5)
+            if not isinstance(hybrid_alpha, (int, float)):
+                raise ValueError("'config.hybrid_alpha' must be a number.")
+            
+            reranker_top_k_multiplier = config_section.get("reranker_top_k_multiplier", 5)
+            if not isinstance(reranker_top_k_multiplier, int):
+                raise ValueError("'config.reranker_top_k_multiplier' must be an integer.")
+            
             if not models:
                 models = cls.default().models
                 
@@ -161,6 +173,8 @@ class AppConfig:
                 embedding_models=embedding_models,
                 reranking_models=reranking_models,
                 sufficiency_threshold=sufficiency_threshold,
+                hybrid_alpha=hybrid_alpha,
+                reranker_top_k_multiplier=reranker_top_k_multiplier,
             )
         except Exception as e:
             message = f"Failed to load config from {path}: {e}"

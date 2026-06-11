@@ -119,6 +119,8 @@ def test_doctor_passes_with_valid_store_index_and_config(tmp_path: Path) -> None
         "Agent rules",
         "Supported languages",
         "Freshness",
+        "Native dependencies",
+        "Optional dependencies",
     }
     assert all(check["status"] == "pass" for check in payload["checks"])
 

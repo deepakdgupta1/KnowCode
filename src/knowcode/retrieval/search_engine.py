@@ -53,6 +53,7 @@ class SearchEngine:
             use_voyageai=use_voyageai_reranking,
             config=config,
         )
+        self.multiplier = config.reranker_top_k_multiplier if config else 5
 
     def search_scored(
         self,
@@ -74,7 +75,7 @@ class SearchEngine:
             Ranked list of ScoredChunk objects.
         """
         query_embedding = self.embedding_provider.embed_single(query)
-        results = self.hybrid_index.search(query, query_embedding, limit=limit * 2)
+        results = self.hybrid_index.search(query, query_embedding, limit=limit * self.multiplier)
         reranked = self.reranker.rerank(query, results, top_k=limit)
         primary = [ScoredChunk(chunk=c, score=s, source="retrieved") for c, s in reranked]
 

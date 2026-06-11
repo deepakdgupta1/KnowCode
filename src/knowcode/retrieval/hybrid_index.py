@@ -47,10 +47,10 @@ class HybridIndex:
         # 1. BM25 Search
         query_tokens = tokenize_code(query)
         # We get more results for fusion
-        sparse_results = self.chunk_repo.search_by_tokens(query_tokens, limit=limit * 2)
+        sparse_results = self.chunk_repo.search_by_tokens(query_tokens, limit=limit * 3)
         
         # 2. Vector Search
-        dense_results = self.vector_store.search(query_embedding, limit=limit * 2)
+        dense_results = self.vector_store.search(query_embedding, limit=limit * 3)
         
         # 3. Combine scores (RRF)
         combined_scores: dict[str, float] = {}
