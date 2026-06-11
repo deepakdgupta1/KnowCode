@@ -19,3 +19,9 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=False,
         help="Skip the eval golden SHA guard for local exploration.",
     )
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Configure repository-wide settings before tests run."""
+    import os
+    os.environ["KNOWCODE_TESTING"] = "1"

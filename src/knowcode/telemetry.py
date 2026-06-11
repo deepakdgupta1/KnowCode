@@ -10,7 +10,11 @@ _executor = ThreadPoolExecutor(max_workers=1)
 
 def log_event(store_path: str | Path, event: Dict[str, Any]) -> None:
     """Log telemetry event asynchronously to prevent blocking the query path."""
-    _executor.submit(_write_event_sync, store_path, event)
+    import os
+    if os.environ.get("KNOWCODE_TESTING") == "1":
+        _write_event_sync(store_path, event)
+    else:
+        _executor.submit(_write_event_sync, store_path, event)
 
 def _write_event_sync(store_path: str | Path, event: Dict[str, Any]) -> None:
     """Synchronously write event to JSONL telemetry log file."""

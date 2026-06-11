@@ -1,6 +1,7 @@
 """Repository interface for code chunks."""
 
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import Optional
 
 from knowcode.data_models import CodeChunk
@@ -13,6 +14,15 @@ class ChunkRepository(ABC):
     def add(self, chunk: CodeChunk) -> None:
         """Add a chunk to the repository."""
         pass
+
+    def add_batch(self, chunks: list[CodeChunk]) -> None:
+        """Add multiple chunks in a single operation.
+
+        The default implementation loops over ``add()``.  Subclasses may
+        override with a more efficient bulk-insert strategy.
+        """
+        for chunk in chunks:
+            self.add(chunk)
 
     @abstractmethod
     def get(self, chunk_id: str) -> Optional[CodeChunk]:
@@ -41,6 +51,33 @@ class ChunkRepository(ABC):
     @abstractmethod
     def clear(self) -> None:
         """Clear all chunks."""
+        pass
+
+    def count(self) -> int:
+        """Return the number of stored chunks."""
+        return 0
+
+    def close(self) -> None:
+        """Release any underlying resources.
+
+        The default is a no-op.  Subclasses with file handles or database
+        connections should override.
+        """
+        pass
+
+    @abstractmethod
+    def save(self, path: Path) -> None:
+        """Persist chunk repository data to disk (if applicable)."""
+        pass
+
+    @abstractmethod
+    def load(self, path: Path) -> None:
+        """Load chunk repository data from disk (if applicable)."""
+        pass
+
+    @abstractmethod
+    def get_all(self) -> list[CodeChunk]:
+        """Get all chunks in the repository."""
         pass
 
 
@@ -97,4 +134,76 @@ class InMemoryChunkRepository(ChunkRepository):
     def clear(self) -> None:
         self._chunks.clear()
         self._by_entity.clear()
+
+    def count(self) -> int:
+        """Return the number of stored chunks."""
+        return len(self._chunks)
+
+    def save(self, path: Path) -> None:
+        """Save chunk metadata to chunks.json."""
+        import json
+        metadata = {
+            "schema_version": 2,
+            "chunks": [
+                {
+                    "id": c.id,
+                    "entity_id": c.entity_id,
+                    "content": c.content,
+                    "tokens": c.tokens,
+                    "metadata": c.metadata,
+                }
+                for c in self._chunks.values()
+            ],
+        }
+        with open(path / "chunks.json", "w", encoding="utf-8") as f:
+            json.dump(metadata, f)
+
+    def load(self, path: Path) -> None:
+        """Load chunk metadata from chunks.json."""
+        import json
+        chunks_file = path / "chunks.json"
+        if not chunks_file.exists():
+            return
+            
+        with open(chunks_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            
+        if not isinstance(data, dict):
+            return
+
+        # Perform schema validation / migration
+        schema_version = data.get("schema_version")
+        if schema_version is not None:
+            # Normalize version
+            norm = None
+            if isinstance(schema_version, int) and not isinstance(schema_version, bool):
+                norm = schema_version
+            elif isinstance(schema_version, str) and schema_version.isdigit():
+                norm = int(schema_version)
+            else:
+                raise ValueError(f"Invalid chunks metadata schema version value: {schema_version!r}")
+                
+            if norm not in (1, 2):
+                raise ValueError(
+                    f"Unsupported chunks metadata schema version {schema_version!r}. "
+                    "Supported versions: [2]. Rebuild with `knowcode build`."
+                )
+            
+        chunk_entries = data.get("chunks", [])
+        if isinstance(chunk_entries, list):
+            for c_data in chunk_entries:
+                if not isinstance(c_data, dict):
+                    continue
+                chunk = CodeChunk(
+                    id=c_data.get("id", ""),
+                    entity_id=c_data.get("entity_id", ""),
+                    content=c_data.get("content", ""),
+                    tokens=c_data.get("tokens", []),
+                    metadata=c_data.get("metadata", {}),
+                )
+                self.add(chunk)
+
+    def get_all(self) -> list[CodeChunk]:
+        """Return all chunks in the repository."""
+        return list(self._chunks.values())
 

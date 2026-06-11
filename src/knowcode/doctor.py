@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import importlib
 import json
 import os
 import sys
@@ -79,6 +80,8 @@ def run_doctor(
     store_file = _resolve_store_file(store_path)
     store_root = store_file.parent
     _check_knowledge_store(store_file, checks)
+
+    _check_dependencies(checks)
 
     resolved_index = Path(index_path) if index_path is not None else store_root / "knowcode_index"
     _check_semantic_index(resolved_index, config, checks)
@@ -206,6 +209,73 @@ def _check_api_keys(config: AppConfig, checks: list[DoctorCheck]) -> None:
             message=f"Found {len(env_names)} configured API key environment variables.",
         )
     )
+
+
+def _check_dependencies(checks: list[DoctorCheck]) -> None:
+    """Check for optional and native dependencies."""
+    from importlib.util import find_spec
+
+    deps = [
+        ("faiss", "knowcode[search]", "Required for fast dense vector retrieval."),
+        ("mcp", "knowcode[mcp]", "Required for Model Context Protocol server."),
+        ("voyageai", "knowcode[voyageai]", "Required for VoyageAI embeddings and reranking."),
+        ("openai", "knowcode[llm]", "Required for OpenAI embeddings."),
+        ("google.genai", "knowcode[llm]", "Required for Google Gemini integration."),
+        ("watchdog", "knowcode[watch]", "Required for background file indexing."),
+    ]
+
+    missing = []
+    for module, extra, reason in deps:
+        try:
+            if find_spec(module) is None:
+                missing.append((module, extra, reason))
+        except (ModuleNotFoundError, ImportError):
+            missing.append((module, extra, reason))
+
+    # FAISS is special - it's a native binary
+    faiss_installed = True
+    try:
+        importlib.import_module("faiss")
+    except (ImportError, RuntimeError):
+        faiss_installed = False
+
+    if not faiss_installed:
+        checks.append(
+            DoctorCheck(
+                name="Native dependencies",
+                status="warn",
+                message="FAISS native binaries not found. Using MockVectorStore fallback.",
+                hint='Install with `pip install "faiss-cpu>=1.7.0"`.',
+            )
+        )
+    else:
+        checks.append(
+            DoctorCheck(
+                name="Native dependencies",
+                status="pass",
+                message="FAISS native binaries are installed and functional.",
+            )
+        )
+
+    if missing:
+        msg = f"Missing {len(missing)} optional dependencies."
+        hint = "Install them using: pip install " + " ".join(f'"{extra}"' for _, extra, _ in missing)
+        checks.append(
+            DoctorCheck(
+                name="Optional dependencies",
+                status="warn",
+                message=msg,
+                hint=hint,
+            )
+        )
+    else:
+        checks.append(
+            DoctorCheck(
+                name="Optional dependencies",
+                status="pass",
+                message="All optional dependencies are installed.",
+            )
+        )
 
 
 def _check_knowledge_store(store_file: Path, checks: list[DoctorCheck]) -> None:

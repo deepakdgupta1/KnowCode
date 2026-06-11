@@ -139,16 +139,17 @@ class KnowCodeService:
         if self._indexer is None:
             from knowcode.llm.embedding import create_embedding_provider
             from knowcode.indexing.indexer import Indexer
+            from knowcode.storage.sqlite_chunk_repository import SqliteChunkRepository
 
             provider = create_embedding_provider(app_config=self.app_config)
-            self._indexer = Indexer(provider)
+            resolved_index_path = Path(index_path) if index_path else self._index_path()
+            db_path = resolved_index_path / "chunks.db"
+            chunk_repo = SqliteChunkRepository(db_path)
 
-            if index_path:
-                self._indexer.load(Path(index_path))
-            else:
-                default_index = self._index_path()
-                if default_index.exists():
-                    self._indexer.load(default_index)
+            self._indexer = Indexer(provider, chunk_repo=chunk_repo)
+
+            if resolved_index_path.exists():
+                self._indexer.load(resolved_index_path)
 
         return self._indexer
 
@@ -294,11 +295,23 @@ class KnowCodeService:
         """Build a semantic index for a directory and persist it."""
         from knowcode.llm.embedding import create_embedding_provider
         from knowcode.indexing.indexer import Indexer
+        from knowcode.storage.sqlite_chunk_repository import SqliteChunkRepository
 
         provider = create_embedding_provider(app_config=self.app_config)
-        indexer = Indexer(provider)
+        resolved_index_path = Path(index_path)
+        
+        # Clear/initialize directory
+        import shutil
+        if resolved_index_path.exists():
+            shutil.rmtree(resolved_index_path)
+        resolved_index_path.mkdir(parents=True, exist_ok=True)
+        
+        db_path = resolved_index_path / "chunks.db"
+        chunk_repo = SqliteChunkRepository(db_path)
+
+        indexer = Indexer(provider, chunk_repo=chunk_repo)
         count = indexer.index_directory(directory)
-        indexer.save(index_path)
+        indexer.save(resolved_index_path)
         self._indexer = indexer
         return count
 
@@ -538,7 +551,7 @@ class KnowCodeService:
 
         # Add index stats if indexer is loaded
         if self._indexer:
-            stats["total_chunks"] = len(self._indexer.chunk_repo._chunks)
+            stats["total_chunks"] = self._indexer.chunk_repo.count()
             if (
                 hasattr(self._indexer.vector_store, "index")
                 and self._indexer.vector_store.index

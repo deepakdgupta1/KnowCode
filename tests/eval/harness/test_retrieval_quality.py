@@ -105,6 +105,13 @@ def golden_records() -> list[dict[str, Any]]:
     return records
 
 
+@pytest.fixture(autouse=True)
+def mock_telemetry(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Disable telemetry logging during quality tests to prevent pollution."""
+    import knowcode.telemetry as telemetry
+    monkeypatch.setattr(telemetry, "log_event", lambda *_args, **_kwargs: None)
+
+
 @pytest.fixture(scope="session")
 def knowcode_service() -> Any:
     """Return an initialised KnowCodeService pointed at the repo root.
@@ -113,12 +120,9 @@ def knowcode_service() -> Any:
     (i.e. ``knowcode analyze`` has not been run).
     """
     try:
-        import knowcode.telemetry as telemetry
         from knowcode.service import KnowCodeService
     except ImportError:
         pytest.skip("knowcode package not importable — check your virtualenv.")
-
-    telemetry.log_event = lambda *_args, **_kwargs: None
 
     repo_root = Path(__file__).parents[3]  # …/KnowCode/
     service = KnowCodeService(store_path=repo_root)

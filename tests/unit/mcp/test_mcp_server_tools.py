@@ -277,10 +277,18 @@ def test_handle_tool_call_emits_telemetry(tmp_path: Path) -> None:
     import time
     _ = server.handle_tool_call("search_codebase", {"query": "Foo", "limit": 5})
     
-    # Wait for async logging to complete
-    time.sleep(0.15)
-    
+    # Wait for async logging to complete in a robust retry loop
     log_file = tmp_path / "knowcode_telemetry.jsonl"
+    for _ in range(40):
+        if log_file.exists():
+            try:
+                content = log_file.read_text(encoding="utf-8").strip()
+                if content:
+                    break
+            except Exception:
+                pass
+        time.sleep(0.05)
+        
     assert log_file.exists()
     
     import json

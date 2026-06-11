@@ -30,14 +30,15 @@ class Reranker:
         """
         self.voyage_client = None
         self.model = "rerank-2.5"
+
+        if config and config.reranking_models:
+            self.model = config.reranking_models[0].name
+            if not api_key_env:
+                api_key_env = config.reranking_models[0].api_key_env
         
         if use_voyageai:
-            # Determine API key env from config or default
-            if config and config.reranking_models:
-                api_key_env = config.reranking_models[0].api_key_env
-                self.model = config.reranking_models[0].name
-            else:
-                api_key_env = api_key_env or "VOYAGE_API_KEY_1"
+            if not api_key_env:
+                api_key_env = "VOYAGE_API_KEY_1"
             
             # Try to initialize VoyageAI client
             try:

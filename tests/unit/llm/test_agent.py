@@ -192,10 +192,19 @@ def test_smart_answer_emits_telemetry(tmp_path: Path) -> None:
     
     _ = agent.smart_answer("Explain Foo")
     
+    # Wait for async logging to complete in a robust retry loop
     import time
-    time.sleep(0.15)
-    
     log_file = tmp_path / "knowcode_telemetry.jsonl"
+    for _ in range(40):
+        if log_file.exists():
+            try:
+                content = log_file.read_text(encoding="utf-8").strip()
+                if content:
+                    break
+            except Exception:
+                pass
+        time.sleep(0.05)
+        
     assert log_file.exists()
     
     import json

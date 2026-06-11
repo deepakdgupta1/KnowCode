@@ -15,8 +15,11 @@ except ImportError:
     faiss = None
 
 
-class SimpleIndex:
-    """Fallback index implementation when FAISS is unavailable."""
+class MockVectorStore:
+    """Fallback index implementation when FAISS is unavailable.
+    
+    Uses numpy for basic cosine similarity search and .npy for persistence.
+    """
 
     def __init__(self, dimension: int) -> None:
         self.dimension = dimension
@@ -28,6 +31,9 @@ class SimpleIndex:
         self.ntotal = self.index.shape[0]
 
     def search(self, x: np.ndarray, k: int) -> tuple[np.ndarray, np.ndarray]:
+        if self.ntotal == 0:
+            return np.array([[]]), np.array([[]])
+            
         # Simple cosine similarity
         norm_a = np.linalg.norm(self.index, axis=1, keepdims=True)
         norm_b = np.linalg.norm(x, axis=1, keepdims=True)
@@ -35,12 +41,23 @@ class SimpleIndex:
         scores = scores.flatten()
 
         # Sort indices by score descending
+        k = min(k, self.ntotal)
         idx = np.argsort(-scores)[:k]
         return scores[idx].reshape(1, -1), idx.reshape(1, -1)
 
+    def save(self, path: Path) -> None:
+        """Save vectors to .npy file."""
+        np.save(str(path), self.index)
+
+    def load(self, path: Path) -> None:
+        """Load vectors from .npy file."""
+        if path.exists():
+            self.index = np.load(str(path))
+            self.ntotal = self.index.shape[0]
+
 
 class VectorStore:
-    """FAISS-based vector store for code embeddings."""
+    """FAISS-based vector store for code embeddings with numpy fallback."""
 
     SCHEMA_VERSION = 2
     LEGACY_SCHEMA_VERSION = 1
@@ -63,7 +80,7 @@ class VectorStore:
             # Task 3.4: Use Inner Product for cosine similarity (with normalized vectors)
             self.index = faiss.IndexFlatIP(dimension)
         else:
-            self.index = SimpleIndex(dimension)
+            self.index = MockVectorStore(dimension)
 
         self.id_map: dict[int, str] = {}  # index -> chunk_id
 
@@ -71,18 +88,11 @@ class VectorStore:
             self.load(index_path)
 
     def add(self, chunk_id: str, embedding: list[float]) -> None:
-        """Add a chunk embedding to the index.
-
-        No-op if FAISS is unavailable.
-        """
-        if not self.index:
-            return
-
+        """Add a chunk embedding to the index."""
         vec = np.array([embedding]).astype("float32")
         # Add the vector first, then capture the new index position
         self.index.add(vec)
         idx = self.index.ntotal - 1  # the index of the newly added vector
-        # self.index.add(vec)  # moved above
         self.id_map[idx] = chunk_id
 
     def search(
@@ -97,30 +107,27 @@ class VectorStore:
         Returns:
             List of (chunk_id, score) tuples.
         """
-        if not self.index:
-            return []
-
         vec = np.array([embedding]).astype("float32")
         distances, indices = self.index.search(vec, limit)
 
         results = []
-        for dist, idx in zip(distances[0], indices[0]):
-            if idx in self.id_map:
-                results.append((self.id_map[int(idx)], float(dist)))
+        if indices.size > 0 and indices[0].size > 0:
+            for dist, idx in zip(distances[0], indices[0]):
+                if idx in self.id_map:
+                    results.append((self.id_map[int(idx)], float(dist)))
 
         return results
 
     def save(self, path: Path) -> None:
         """Save index and ID map to disk."""
-        if not self.index:
-            return
-
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Save index if FAISS is available
+        # Save index
         if faiss:
             faiss.write_index(self.index, str(path.with_suffix(".index")))
+        else:
+            self.index.save(path.with_suffix(".npy"))
 
         # Save ID map
         with open(path.with_suffix(".json"), "w") as f:
@@ -134,19 +141,16 @@ class VectorStore:
             )
 
     def load(self, path: Path) -> None:
-        """Load index and ID map from disk.
-
-        No-op if FAISS is unavailable.
-        """
-        if not faiss:
-            return
-
+        """Load index and ID map from disk."""
         path = Path(path)
         index_file = path.with_suffix(".index")
+        npy_file = path.with_suffix(".npy")
         json_file = path.with_suffix(".json")
 
-        if index_file.exists():
+        if faiss and index_file.exists():
             self.index = faiss.read_index(str(index_file))
+        elif not faiss and npy_file.exists():
+            self.index.load(npy_file)
 
         if json_file.exists():
             with open(json_file) as f:
@@ -173,7 +177,7 @@ class VectorStore:
         if faiss:
             self.index = faiss.IndexFlatIP(self.dimension)
         else:
-            self.index = SimpleIndex(self.dimension)
+            self.index = MockVectorStore(self.dimension)
         self.id_map = {}
 
     @classmethod

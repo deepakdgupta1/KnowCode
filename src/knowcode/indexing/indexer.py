@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Optional
 
-from knowcode.storage.chunk_repository import InMemoryChunkRepository
+from knowcode.storage.chunk_repository import ChunkRepository, InMemoryChunkRepository
 from knowcode.indexing.chunker import Chunker
 from knowcode.indexing.graph_builder import GraphBuilder
 from knowcode.indexing.scanner import Scanner
@@ -26,7 +26,7 @@ class Indexer:
     def __init__(
         self,
         embedding_provider: EmbeddingProviderProtocol,
-        chunk_repo: Optional[InMemoryChunkRepository] = None,
+        chunk_repo: Optional[ChunkRepository] = None,
         vector_store: Optional[VectorStoreProtocol] = None,
     ) -> None:
         """Initialize an indexer with optional storage backends.
@@ -37,7 +37,7 @@ class Indexer:
             vector_store: Optional vector store (defaults to FAISS-backed store).
         """
         self.embedding_provider = embedding_provider
-        self.chunk_repo = chunk_repo or InMemoryChunkRepository()
+        self.chunk_repo: ChunkRepository = chunk_repo or InMemoryChunkRepository()
         self.vector_store = vector_store or VectorStore(dimension=embedding_provider.config.dimension)
         self.chunker = Chunker()
         self.manifest: dict[str, Any] = {}
@@ -93,34 +93,20 @@ class Indexer:
         Args:
             path: Directory path to write index files into.
         """
+        import json
+        import time
+        from dataclasses import asdict
+
         path = Path(path)
         path.mkdir(parents=True, exist_ok=True)
-        
+
         # Save vector store
         self.vector_store.save(path / "vectors")
-        
-        # Save chunk metadata (BM25 tokens and content)
-        import json
-        metadata = {
-            "schema_version": self.SCHEMA_VERSION,
-            "chunks": [
-                {
-                    "id": c.id,
-                    "entity_id": c.entity_id,
-                    "content": c.content,
-                    "tokens": c.tokens,
-                    "metadata": c.metadata
-                }
-                for c in self.chunk_repo._chunks.values()
-            ]
-        }
-        with open(path / "chunks.json", "w") as f:
-            json.dump(metadata, f)
+
+        # Save chunk metadata via repository
+        self.chunk_repo.save(path)
 
         # Save index manifest for compatibility checks at query time.
-        from dataclasses import asdict
-        import time
-
         self.manifest = {
             "schema_version": self.SCHEMA_VERSION,
             "version": 1,
@@ -160,22 +146,8 @@ class Indexer:
                 "version": self.LEGACY_MANIFEST_VERSION,
             }
 
-        # Load chunks
-        from knowcode.models import CodeChunk  # type: ignore
-        
-        chunks_file = path / "chunks.json"
-        if chunks_file.exists():
-            with open(chunks_file) as f:
-                data = json.load(f)
-            if isinstance(data, dict):
-                validated_chunks = self._validate_and_migrate_chunks_payload(data)
-                chunk_entries = validated_chunks.get("chunks", [])
-                if isinstance(chunk_entries, list):
-                    for c_data in chunk_entries:
-                        if not isinstance(c_data, dict):
-                            continue
-                        chunk = CodeChunk(**c_data)
-                        self.chunk_repo.add(chunk)
+        # Load chunks via repository
+        self.chunk_repo.load(path)
 
     @classmethod
     def _validate_and_migrate_manifest(cls, manifest: dict[str, Any]) -> dict[str, Any]:
@@ -260,12 +232,13 @@ class Indexer:
         file_path_str = str(Path(file_path).resolve())
         removed_ids = self.chunk_repo.remove_by_file(file_path_str)
         if removed_ids:
-            # Rebuild vector store with remaining chunks
-            remaining_chunks = list(self.chunk_repo._chunks.values())
-            self.vector_store.clear()
-            for c in remaining_chunks:
-                if c.embedding:
-                    self.vector_store.add(c.id, c.embedding)
+            # Rebuild the vector store from remaining chunks if embeddings are available.
+            remaining_chunks = self.chunk_repo.get_all()
+            if any(c.embedding for c in remaining_chunks):
+                self.vector_store.clear()
+                for c in remaining_chunks:
+                    if c.embedding:
+                        self.vector_store.add(c.id, c.embedding)
 
     def index_file(self, file_path: str | Path) -> int:
 
