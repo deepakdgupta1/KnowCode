@@ -33,7 +33,7 @@ class AppConfig:
         "eval_models",
         "config",
     }
-    KNOWN_CONFIG_KEYS = {"sufficiency_threshold", "hybrid_alpha", "reranker_top_k_multiplier"}
+    KNOWN_CONFIG_KEYS = {"sufficiency_threshold", "hybrid_alpha", "reranker_top_k_multiplier", "vector_backend"}
 
     models: list[ModelConfig] = field(default_factory=list)
     embedding_models: list[ModelConfig] = field(default_factory=list)
@@ -41,6 +41,7 @@ class AppConfig:
     sufficiency_threshold: float = 0.8  # For local-first answering
     hybrid_alpha: float = 0.2
     reranker_top_k_multiplier: int = 5
+    vector_backend: str = "lancedb"
 
     @classmethod
     def load(cls, config_path: Optional[str] = None, strict: bool = False) -> "AppConfig":
@@ -91,6 +92,7 @@ class AppConfig:
             sufficiency_threshold=0.8,
             hybrid_alpha=0.2,
             reranker_top_k_multiplier=5,
+            vector_backend="lancedb",
         )
 
     @classmethod
@@ -165,6 +167,10 @@ class AppConfig:
             if not isinstance(reranker_top_k_multiplier, int):
                 raise ValueError("'config.reranker_top_k_multiplier' must be an integer.")
             
+            vector_backend = config_section.get("vector_backend", "lancedb")
+            if not isinstance(vector_backend, str) or vector_backend not in ("faiss", "lancedb"):
+                raise ValueError("'config.vector_backend' must be 'faiss' or 'lancedb'.")
+            
             if not models:
                 models = cls.default().models
                 
@@ -175,6 +181,7 @@ class AppConfig:
                 sufficiency_threshold=sufficiency_threshold,
                 hybrid_alpha=hybrid_alpha,
                 reranker_top_k_multiplier=reranker_top_k_multiplier,
+                vector_backend=vector_backend,
             )
         except Exception as e:
             message = f"Failed to load config from {path}: {e}"

@@ -7,6 +7,7 @@ from typing import Optional
 from knowcode.data_models import ChunkingConfig, CodeChunk, ParseResult, Entity, EntityKind
 from knowcode.utils.tokenizer import tokenize_code
 from knowcode.utils.logger import get_logger
+import hashlib
 
 logger = get_logger(__name__)
 
@@ -70,7 +71,10 @@ class Chunker:
                 entity_id=f"{file_path}::module",
                 content=header,
                 tokens=tokenize_code(header),
-                metadata={"type": "module_header"}
+                metadata={
+                    "type": "module_header",
+                    "content_hash": hashlib.md5(header.encode("utf-8")).hexdigest()
+                }
             )
             self.chunks.append(module_chunk)
             
@@ -82,7 +86,10 @@ class Chunker:
                 entity_id=f"{file_path}::module",
                 content=imports,
                 tokens=tokenize_code(imports),
-                metadata={"type": "imports"}
+                metadata={
+                    "type": "imports",
+                    "content_hash": hashlib.md5(imports.encode("utf-8")).hexdigest()
+                }
             )
             self.chunks.append(import_chunk)
 
@@ -154,7 +161,11 @@ class Chunker:
         has_docstring = "true" if entity.docstring else "false"
 
         if len(content) <= self.config.max_chunk_size:
-            metadata = {"kind": entity.kind.value, "has_docstring": has_docstring}
+            metadata = {
+                "kind": entity.kind.value,
+                "has_docstring": has_docstring,
+                "content_hash": hashlib.md5(content.encode("utf-8")).hexdigest()
+            }
             if last_modified:
                 metadata["last_modified"] = last_modified
 
@@ -178,6 +189,7 @@ class Chunker:
                     "kind": entity.kind.value,
                     "chunk_index": str(chunk_index),
                     "has_docstring": has_docstring,
+                    "content_hash": hashlib.md5(chunk_content.encode("utf-8")).hexdigest()
                 }
                 if last_modified:
                     metadata["last_modified"] = last_modified

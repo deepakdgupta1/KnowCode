@@ -1,12 +1,12 @@
 """Unit tests for chunk repositories."""
 
 from knowcode.data_models import CodeChunk
-from knowcode.storage.chunk_repository import InMemoryChunkRepository
+from knowcode.storage.sqlite_chunk_repository import SqliteChunkRepository
 
 
 def test_chunk_repository_basic() -> None:
     """Chunks should be retrievable by ID and entity."""
-    repo = InMemoryChunkRepository()
+    repo = SqliteChunkRepository(":memory:")
     chunk = CodeChunk(id="c1", entity_id="e1", content="content 1", tokens=["content", "1"])
     repo.add(chunk)
 
@@ -16,7 +16,7 @@ def test_chunk_repository_basic() -> None:
 
 def test_chunk_repository_token_search_limit() -> None:
     """Token search should respect limit and ordering."""
-    repo = InMemoryChunkRepository()
+    repo = SqliteChunkRepository(":memory:")
     repo.add(CodeChunk(id="c1", entity_id="e1", content="alpha beta", tokens=["alpha", "beta"]))
     repo.add(CodeChunk(id="c2", entity_id="e2", content="alpha gamma", tokens=["alpha", "gamma"]))
 

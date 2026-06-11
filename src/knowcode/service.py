@@ -12,11 +12,14 @@ from knowcode.errors import MissingKnowledgeStoreError, MissingSemanticIndexErro
 from knowcode.indexing.graph_builder import GraphBuilder
 from knowcode.retrieval.orchestrator import RetrievalOrchestrator
 from knowcode.storage.knowledge_store import KnowledgeStore
+from knowcode.storage.sqlite_knowledge_store import SqliteKnowledgeStore
+from knowcode.protocols import VectorStoreProtocol
 
 if TYPE_CHECKING:
     from knowcode.data_models import TaskType
     from knowcode.indexing.indexer import Indexer
     from knowcode.retrieval.search_engine import SearchEngine
+    from knowcode.retrieval.orchestrator import SearchEngineProtocol
 
 
 class KnowCodeService:
@@ -42,17 +45,20 @@ class KnowCodeService:
         self.app_config = app_config or AppConfig.load(
             config_path, strict=strict_config
         )
-        self._store: Optional[KnowledgeStore] = None
+        self._store: Any = None
         self._search_engine: Optional["SearchEngine"] = None
         self._indexer: Optional["Indexer"] = None
         self._retrieval_orchestrator = RetrievalOrchestrator(self)
 
     @property
-    def store(self) -> KnowledgeStore:
+    def store(self) -> Any:
         """Get or load the knowledge store."""
         if self._store is None:
-            self._assert_store_exists()
-            self._store = KnowledgeStore.load(self.store_path)
+            store_file = self._assert_store_exists()
+            if store_file.suffix == ".db":
+                self._store = SqliteKnowledgeStore(store_file)
+            else:
+                self._store = KnowledgeStore.load(self.store_path)
         return self._store
 
     def _store_root(self) -> Path:
@@ -62,6 +68,9 @@ class KnowCodeService:
     def _store_file(self) -> Path:
         """Resolve the knowledge store file path."""
         if self.store_path.is_dir():
+            db_path = self.store_path / "knowledge.db"
+            if db_path.exists():
+                return db_path
             return self.store_path / KnowledgeStore.DEFAULT_FILENAME
         return self.store_path
 
@@ -105,6 +114,9 @@ class KnowCodeService:
             temporal=temporal,
             coverage=coverage,
         )
+        db_path = output_path / "knowledge.db" if output_path.is_dir() else output_path.with_suffix(".db")
+        if db_path.exists():
+            return db_path
         return (
             output_path / KnowledgeStore.DEFAULT_FILENAME
             if output_path.is_dir()
@@ -144,9 +156,19 @@ class KnowCodeService:
             provider = create_embedding_provider(app_config=self.app_config)
             resolved_index_path = Path(index_path) if index_path else self._index_path()
             db_path = resolved_index_path / "chunks.db"
+            vs_path = resolved_index_path / "vectors.lancedb"
             chunk_repo = SqliteChunkRepository(db_path)
 
-            self._indexer = Indexer(provider, chunk_repo=chunk_repo)
+            dimension = provider.config.dimension
+            vector_store: VectorStoreProtocol
+            if self.app_config.vector_backend == "lancedb":
+                from knowcode.storage.lancedb_vector_store import LanceDBVectorStore
+                vector_store = LanceDBVectorStore(dimension=dimension, path=vs_path)
+            else:
+                from knowcode.storage.vector_store import VectorStore
+                vector_store = VectorStore(dimension=dimension, index_path=vs_path)
+
+            self._indexer = Indexer(provider, chunk_repo=chunk_repo, vector_store=vector_store)
 
             if resolved_index_path.exists():
                 self._indexer.load(resolved_index_path)
@@ -184,6 +206,22 @@ class KnowCodeService:
             )
         return self._search_engine
 
+    def get_exact_query_engine(self, index_path: Optional[str | Path] = None) -> "SearchEngineProtocol":
+        """Build and return an ExactQueryEngine.
+        
+        Args:
+            index_path: Directory containing the index. If None, uses default.
+            
+        Returns:
+            ExactQueryEngine instance.
+        """
+        from knowcode.retrieval.exact_query_engine import ExactQueryEngine
+        
+        if index_path is None:
+            index_path = self.ensure_index()
+            
+        return ExactQueryEngine(self.get_indexer(index_path).chunk_repo)
+
     def retrieve_context_for_query(
         self,
         query: str,
@@ -211,6 +249,9 @@ class KnowCodeService:
         Returns:
             Dictionary with context_text, sufficiency_score, evidence, and metadata.
         """
+        freshness = self.get_freshness_metadata()
+        is_stale = freshness.get("is_stale", False)
+
         res = self._retrieval_orchestrator.retrieve_context_for_query(
             query=query,
             max_tokens=max_tokens,
@@ -220,8 +261,9 @@ class KnowCodeService:
             expand_deps=expand_deps,
             verbosity=verbosity,
             include_metadata=include_metadata,
+            is_stale=is_stale,
         )
-        res["freshness"] = self.get_freshness_metadata()
+        res["freshness"] = freshness
 
         # Log query to telemetry
         from knowcode.telemetry import log_event
@@ -270,8 +312,9 @@ class KnowCodeService:
                 files = scanner.scan_all()
                 if files:
                     latest_source_change = max(os.path.getmtime(f.path) for f in files)
-        except Exception:
-            pass
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning("Failed to check source staleness: %s", e)
 
         if last_store_rebuild == 0.0:
             is_stale = True
@@ -295,7 +338,7 @@ class KnowCodeService:
             "stale_reasons": stale_reasons,
         }
 
-    def _build_index(self, directory: str | Path, index_path: str | Path) -> int:
+    def _build_index(self, directory: str | Path, index_path: str | Path, incremental: bool = False) -> int:
         """Build a semantic index for a directory and persist it."""
         from knowcode.llm.embedding import create_embedding_provider
         from knowcode.indexing.indexer import Indexer
@@ -304,17 +347,36 @@ class KnowCodeService:
         provider = create_embedding_provider(app_config=self.app_config)
         resolved_index_path = Path(index_path)
         
-        # Clear/initialize directory
-        import shutil
-        if resolved_index_path.exists():
-            shutil.rmtree(resolved_index_path)
+        if not incremental:
+            # Clear/initialize directory
+            import shutil
+            if resolved_index_path.exists():
+                shutil.rmtree(resolved_index_path)
+        
         resolved_index_path.mkdir(parents=True, exist_ok=True)
         
         db_path = resolved_index_path / "chunks.db"
         chunk_repo = SqliteChunkRepository(db_path)
 
-        indexer = Indexer(provider, chunk_repo=chunk_repo)
-        count = indexer.index_directory(directory)
+        vector_backend = self.app_config.vector_backend
+        dimension = provider.config.dimension
+        vector_store: VectorStoreProtocol
+        if vector_backend == "lancedb":
+            from knowcode.storage.lancedb_vector_store import LanceDBVectorStore
+            vs_path = resolved_index_path / "vectors.lancedb"
+            vector_store = LanceDBVectorStore(dimension=dimension, path=vs_path)
+        else:
+            from knowcode.storage.vector_store import VectorStore
+            vector_store = VectorStore(dimension=dimension)
+
+        indexer = Indexer(provider, chunk_repo=chunk_repo, vector_store=vector_store)
+        
+        if incremental and (resolved_index_path / "index_manifest.json").exists():
+            indexer.load(resolved_index_path)
+            count = indexer.index_incremental(directory)
+        else:
+            count = indexer.index_directory(directory)
+            
         indexer.save(resolved_index_path)
         self._indexer = indexer
         return count
@@ -399,6 +461,8 @@ class KnowCodeService:
         ignore: list[str] | None = None,
         temporal: bool = False,
         coverage: str | Path | None = None,
+        export_json: bool = False,
+        incremental: bool = False,
     ) -> dict[str, Any]:
         """Analyze a codebase and persist the resulting knowledge store.
 
@@ -408,6 +472,7 @@ class KnowCodeService:
             ignore: Additional ignore patterns.
             temporal: Whether to include git history analysis.
             coverage: Optional Cobertura coverage report path.
+            incremental: Whether to use incremental index build.
 
         Returns:
             Statistics from the graph builder.
@@ -420,17 +485,34 @@ class KnowCodeService:
             coverage_path=Path(coverage) if coverage else None,
         )
 
-        store = KnowledgeStore.from_graph_builder(builder)
         output_path = Path(output)
-        store.save(output_path)
-        self._store = store
+        db_path = output_path / "knowledge.db" if output_path.is_dir() else output_path.with_suffix(".db")
+        
+        sqlite_store = SqliteKnowledgeStore(db_path)
+        sqlite_store._conn.execute("BEGIN")
+        try:
+            for entity in builder.entities.values():
+                sqlite_store.add_entity(entity)
+            for rel in builder.relationships:
+                sqlite_store.add_relationship(rel)
+            sqlite_store._conn.execute("COMMIT")
+        except Exception:
+            sqlite_store._conn.execute("ROLLBACK")
+            raise
+            
+        self._store = sqlite_store
+
+        if export_json:
+            store = KnowledgeStore.from_graph_builder(builder)
+            json_path = output_path / KnowledgeStore.DEFAULT_FILENAME if output_path.is_dir() else output_path.with_suffix(".json")
+            store.save(json_path)
 
         store_root = output_path if output_path.is_dir() else output_path.parent
         index_path = store_root / "knowcode_index"
         index_count = 0
         index_error: str | None = None
         try:
-            index_count = self._build_index(Path(directory), index_path)
+            index_count = self._build_index(Path(directory), index_path, incremental=incremental)
         except Exception as e:
             # Keep analyze usable without embedding credentials; semantic
             # indexing can still be built later with `knowcode index`.
@@ -471,6 +553,7 @@ class KnowCodeService:
         max_tokens: int = 2000,
         task_type: Optional["TaskType"] = None,
         summarize: bool = False,
+        is_stale: bool = False,
     ) -> dict[str, Any]:
         """Get a context bundle for an entity.
 
@@ -496,7 +579,12 @@ class KnowCodeService:
         if not entity:
             raise ValueError(f"Entity not found: {target}")
 
-        synthesizer = ContextSynthesizer(self.store, max_tokens=max_tokens)
+        live_loader = None
+        if is_stale:
+            from knowcode.analysis.live_source_loader import LiveSourceLoader
+            live_loader = LiveSourceLoader(self._store_root())
+
+        synthesizer = ContextSynthesizer(self.store, max_tokens=max_tokens, live_loader=live_loader)
 
         # Use task-specific synthesis if task_type provided
         if task_type is not None:
@@ -535,21 +623,36 @@ class KnowCodeService:
         Returns:
             Aggregated counts of entities, relationships, and index state.
         """
-        # This is slightly different from builder.stats() as we might not have the builder
         by_kind: dict[str, int] = {}
-        for entity in self.store.entities.values():
-            kind = entity.kind.value
-            by_kind[kind] = by_kind.get(kind, 0) + 1
-
         rel_types: dict[str, int] = {}
-        for rel in self.store.relationships:
-            kind = rel.kind.value
-            rel_types[kind] = rel_types.get(kind, 0) + 1
+        total_entities = 0
+        total_relationships = 0
+
+        if hasattr(self.store, "entities"):
+            total_entities = len(self.store.entities)
+            for entity in self.store.entities.values():
+                kind = entity.kind.value
+                by_kind[kind] = by_kind.get(kind, 0) + 1
+
+            total_relationships = len(self.store.relationships)
+            for rel in self.store.relationships:
+                kind = rel.kind.value
+                rel_types[kind] = rel_types.get(kind, 0) + 1
+        elif isinstance(self.store, SqliteKnowledgeStore):
+            cursor = self.store._conn.execute("SELECT kind, COUNT(*) as c FROM entities GROUP BY kind")
+            for row in cursor:
+                by_kind[row["kind"]] = row["c"]
+            total_entities = sum(by_kind.values())
+
+            cursor = self.store._conn.execute("SELECT kind, COUNT(*) as c FROM relationships GROUP BY kind")
+            for row in cursor:
+                rel_types[row["kind"]] = row["c"]
+            total_relationships = sum(rel_types.values())
 
         stats = {
-            "total_entities": len(self.store.entities),
+            "total_entities": total_entities,
             "entities_by_kind": by_kind,
-            "total_relationships": len(self.store.relationships),
+            "total_relationships": total_relationships,
             "relationships_by_type": rel_types,
         }
 

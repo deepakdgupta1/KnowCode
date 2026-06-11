@@ -105,11 +105,17 @@ def analyze(directory: str, output: str, ignore: tuple[str, ...], temporal: bool
     type=click.Path(exists=True, dir_okay=False),
     help="Path to configuration file (aimodels.yaml) for embedding models.",
 )
+@click.option(
+    "--incremental",
+    is_flag=True,
+    help="Use incremental indexing to speed up subsequent builds.",
+)
 def build(
     directory: str,
     ignore: tuple[str, ...],
     temporal: bool,
     config: Optional[str],
+    incremental: bool,
 ) -> None:
     """Build the knowledge base and semantic index for a directory.
 
@@ -134,6 +140,7 @@ def build(
         output=str(target),
         ignore=list(ignore),
         temporal=temporal,
+        incremental=incremental,
     )
 
     click.echo("\n✓ Build complete!")
@@ -174,7 +181,12 @@ def build(
     type=click.Path(exists=True, dir_okay=False),
     help="Path to configuration file (aimodels.yaml) for embedding models.",
 )
-def index(directory: str, output: str, config: Optional[str]) -> None:
+@click.option(
+    "--incremental",
+    is_flag=True,
+    help="Use incremental indexing to speed up subsequent builds.",
+)
+def index(directory: str, output: str, config: Optional[str], incremental: bool) -> None:
     """Build semantic search index for a codebase.
 
     DIRECTORY: Path to the codebase to index.
@@ -191,7 +203,27 @@ def index(directory: str, output: str, config: Optional[str]) -> None:
         provider = create_embedding_provider(app_config=app_config)
         indexer = Indexer(provider)
 
-        count = indexer.index_directory(directory)
+        index_path = Path(output)
+        if incremental and (index_path / "index_manifest.json").exists():
+            from knowcode.storage.sqlite_chunk_repository import SqliteChunkRepository
+            db_path = index_path / "chunks.db"
+            indexer.chunk_repo = SqliteChunkRepository(db_path)
+            
+            vector_backend = app_config.vector_backend
+            dimension = provider.config.dimension
+            if vector_backend == "lancedb":
+                from knowcode.storage.lancedb_vector_store import LanceDBVectorStore
+                vs_path = index_path / "vectors.lancedb"
+                indexer.vector_store = LanceDBVectorStore(dimension=dimension, path=vs_path)
+            else:
+                from knowcode.storage.vector_store import VectorStore
+                indexer.vector_store = VectorStore(dimension=dimension, index_path=index_path)
+
+            indexer.load(index_path)
+            count = indexer.index_incremental(directory)
+        else:
+            count = indexer.index_directory(directory)
+            
         indexer.save(output)
 
         click.echo(f"✓ Indexing complete! Created {count} chunks.")
@@ -607,7 +639,7 @@ def history(target: Optional[str], store: str, limit: int) -> None:
         changes = []
         for rel in rels:
             if rel.kind == RelationshipKind.CHANGED_BY:
-                commit = knowledge.get_entity(rel.target_id)  # type: ignore
+                commit = knowledge.get_entity(rel.target_id)
                 if commit:
                     # Get modification stats from edge metadata
                     stats = f"(+{rel.metadata.get('insertions', 0)}/-{rel.metadata.get('deletions', 0)})"
@@ -622,7 +654,7 @@ def history(target: Optional[str], store: str, limit: int) -> None:
             
         for _, commit, stats in changes[:limit]:
             date = commit.metadata.get("date", "")
-            click.echo(f"  {date} {commit.name} {stats}: {commit.docstring.splitlines()[0]}")  # type: ignore
+            click.echo(f"  {date} {commit.name} {stats}: {commit.docstring.splitlines()[0]}")
 
 
 @cli.command()

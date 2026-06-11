@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
-from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Optional
 
@@ -229,6 +228,83 @@ class SqliteKnowledgeStore:
             WHERE r.target_id = ? AND r.kind IN (?, ?)
             """,
             (entity_id, RelationshipKind.CALLS.value, RelationshipKind.IMPORTS.value),
+        )
+        return [self._row_to_entity(row) for row in cursor]
+
+    @property
+    def entities(self) -> dict[str, Entity]:
+        """Get all entities as a dictionary mapping ID to Entity."""
+        cursor = self._conn.execute("SELECT * FROM entities")
+        return {row["entity_id"]: self._row_to_entity(row) for row in cursor}
+
+    @property
+    def relationships(self) -> list[Relationship]:
+        """Get all relationships."""
+        cursor = self._conn.execute("SELECT * FROM relationships")
+        return [self._row_to_relationship(row) for row in cursor]
+
+    def get_parent(self, entity_id: str) -> Optional[Entity]:
+        """Get the parent entity (container) of an entity."""
+        cursor = self._conn.execute(
+            """
+            SELECT e.* FROM entities e
+            JOIN relationships r ON e.entity_id = r.source_id
+            WHERE r.target_id = ? AND r.kind = ?
+            """,
+            (entity_id, RelationshipKind.CONTAINS.value),
+        )
+        row = cursor.fetchone()
+        return self._row_to_entity(row) if row else None
+
+    def get_children(self, entity_id: str) -> list[Entity]:
+        """Get entities contained by the given entity."""
+        cursor = self._conn.execute(
+            """
+            SELECT e.* FROM entities e
+            JOIN relationships r ON e.entity_id = r.target_id
+            WHERE r.source_id = ? AND r.kind = ?
+            """,
+            (entity_id, RelationshipKind.CONTAINS.value),
+        )
+        return [self._row_to_entity(row) for row in cursor]
+
+    def get_imports(self, entity_id: str) -> list[str]:
+        """Get imports for a module entity."""
+        cursor = self._conn.execute(
+            """
+            SELECT target_id FROM relationships
+            WHERE source_id = ? AND kind = ?
+            """,
+            (entity_id, RelationshipKind.IMPORTS.value),
+        )
+        return [row["target_id"] for row in cursor]
+
+    def get_outgoing_relationships(self, entity_id: str) -> list[Relationship]:
+        """Return relationships where the entity is the source."""
+        cursor = self._conn.execute(
+            "SELECT * FROM relationships WHERE source_id = ?",
+            (entity_id,),
+        )
+        return [self._row_to_relationship(row) for row in cursor]
+
+    def get_incoming_relationships(self, entity_id: str) -> list[Relationship]:
+        """Return relationships where the entity is the target."""
+        cursor = self._conn.execute(
+            "SELECT * FROM relationships WHERE target_id = ?",
+            (entity_id,),
+        )
+        return [self._row_to_relationship(row) for row in cursor]
+
+    def list_by_kind(self, kind: EntityKind | str) -> list[Entity]:
+        """List all entities of a given kind."""
+        return self.get_entities_by_kind(kind)
+
+    def get_entities_by_kind(self, kind: EntityKind | str) -> list[Entity]:
+        """Return entities filtered by kind."""
+        kind_str = kind.value if isinstance(kind, EntityKind) else kind
+        cursor = self._conn.execute(
+            "SELECT * FROM entities WHERE kind = ?",
+            (kind_str,),
         )
         return [self._row_to_entity(row) for row in cursor]
 

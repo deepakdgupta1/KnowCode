@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 from knowcode.data_models import EmbeddingConfig
 from knowcode.llm.embedding import EmbeddingProvider
 from knowcode.indexing.indexer import Indexer
-from knowcode.storage.chunk_repository import InMemoryChunkRepository
+from knowcode.storage.sqlite_chunk_repository import SqliteChunkRepository
 from knowcode.storage.vector_store import VectorStore
 from knowcode.retrieval.hybrid_index import HybridIndex
 from knowcode.retrieval.search_engine import SearchEngine
@@ -22,7 +22,7 @@ class MockEmbeddingProvider(EmbeddingProvider):
 def test_indexer_flow(tmp_path) -> None:  # type: ignore
     config = EmbeddingConfig(dimension=8)
     provider = MockEmbeddingProvider(config)
-    repo = InMemoryChunkRepository()
+    repo = SqliteChunkRepository(":memory:")
     vs = VectorStore(dimension=8)
     
     indexer = Indexer(provider, chunk_repo=repo, vector_store=vs)
@@ -37,14 +37,14 @@ def test_indexer_flow(tmp_path) -> None:  # type: ignore
     
     count = indexer.index_file(test_file)
     assert count > 0
-    assert len(repo._chunks) > 0
+    assert repo.count() > 0
     assert vs.index.ntotal > 0
 
 
 def test_search_engine_orchestration() -> None:
     config = EmbeddingConfig(dimension=8)
     provider = MockEmbeddingProvider(config)
-    repo = InMemoryChunkRepository()
+    repo = SqliteChunkRepository(":memory:")
     vs = VectorStore(dimension=8)
     
     # Add a chunk

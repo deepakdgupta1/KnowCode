@@ -5,7 +5,7 @@ from knowcode.indexing.indexer import Indexer
 from knowcode.retrieval.search_engine import SearchEngine
 from knowcode.data_models import EmbeddingConfig
 from knowcode.retrieval.hybrid_index import HybridIndex
-from knowcode.storage.chunk_repository import InMemoryChunkRepository
+from knowcode.storage.sqlite_chunk_repository import SqliteChunkRepository
 from knowcode.storage.vector_store import VectorStore
 from knowcode.storage.knowledge_store import KnowledgeStore
 
@@ -24,7 +24,7 @@ class DeterministicEmbeddingProvider:
 
 @pytest.fixture
 def search_engine(tmp_path):
-    repo = InMemoryChunkRepository()
+    repo = SqliteChunkRepository(":memory:")
     vs = VectorStore(dimension=4)
     provider = DeterministicEmbeddingProvider()
     

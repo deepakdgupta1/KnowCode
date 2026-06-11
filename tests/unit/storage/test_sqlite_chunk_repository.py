@@ -4,7 +4,6 @@ TDD: These tests are written BEFORE the implementation.
 They define the contract for the SQLite-backed chunk repository with FTS5 BM25.
 """
 
-import sqlite3
 import threading
 from pathlib import Path
 from typing import Generator

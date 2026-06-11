@@ -1,7 +1,5 @@
 """Unit tests for SQLite-backed knowledge store."""
 
-import json
-import sqlite3
 import threading
 from pathlib import Path
 
@@ -119,7 +117,10 @@ def test_json_migration(tmp_path: Path) -> None:
     json_path = tmp_path / "knowledge.json"
     legacy_store = KnowledgeStore()
     foo = _make_entity("file.py::foo", EntityKind.FUNCTION, "foo")
-    legacy_store.entities = {foo.id: foo}
+    bar = _make_entity("file.py::bar", EntityKind.FUNCTION, "bar")
+    legacy_store.entities = {foo.id: foo, bar.id: bar}
+    rel = Relationship(source_id=foo.id, target_id=bar.id, kind=RelationshipKind.CALLS)
+    legacy_store.relationships = [rel]
     legacy_store.save(json_path)
     
     db_path = tmp_path / "knowledge.db"
@@ -128,6 +129,8 @@ def test_json_migration(tmp_path: Path) -> None:
     retrieved = store.get_entity(foo.id)
     assert retrieved is not None
     assert retrieved.name == foo.name
+    assert len(store.relationships) == 1
+
 
 
 def test_concurrent_reads(tmp_path: Path) -> None:
@@ -147,3 +150,74 @@ def test_concurrent_reads(tmp_path: Path) -> None:
         t.start()
     for t in threads:
         t.join()
+
+
+def test_sqlite_knowledge_store_helpers(tmp_path: Path) -> None:
+    """Test various helper methods in SqliteKnowledgeStore."""
+    db_path = tmp_path / "knowledge.db"
+    store = SqliteKnowledgeStore(db_path)
+    
+    # Create entities
+    mod = _make_entity("file.py", EntityKind.MODULE, "file")
+    cls = _make_entity("file.py::MyClass", EntityKind.CLASS, "MyClass")
+    func = _make_entity("file.py::func", EntityKind.FUNCTION, "func")
+    other = _make_entity("other.py", EntityKind.MODULE, "other")
+    
+    store.add_entity(mod)
+    store.add_entity(cls)
+    store.add_entity(func)
+    store.add_entity(other)
+    
+    # Create relationships
+    rel_contains = Relationship(source_id=mod.id, target_id=cls.id, kind=RelationshipKind.CONTAINS)
+    rel_calls = Relationship(source_id=cls.id, target_id=func.id, kind=RelationshipKind.CALLS)
+    rel_imports = Relationship(source_id=mod.id, target_id=other.id, kind=RelationshipKind.IMPORTS)
+    
+    store.add_relationship(rel_contains)
+    store.add_relationship(rel_calls)
+    store.add_relationship(rel_imports)
+    
+    # Test parent/children
+    assert store.get_parent(cls.id).id == mod.id
+    assert [c.id for c in store.get_children(mod.id)] == [cls.id]
+    assert store.get_parent(mod.id) is None
+    
+    # Test imports
+    assert store.get_imports(mod.id) == [other.id]
+    
+    # Test dependencies / dependents
+    assert {d.id for d in store.get_dependencies(cls.id)} == {func.id}
+    assert {d.id for d in store.get_dependencies(mod.id)} == {other.id}
+    assert {d.id for d in store.get_dependents(func.id)} == {cls.id}
+    assert {d.id for d in store.get_dependents(other.id)} == {mod.id}
+    
+    # Test outgoing / incoming relationships
+    assert {r.target_id for r in store.get_outgoing_relationships(mod.id)} == {cls.id, other.id}
+    assert {r.source_id for r in store.get_incoming_relationships(cls.id)} == {mod.id}
+    
+    # Test entities_by_kind and list_by_kind
+    assert {e.id for e in store.get_entities_by_kind(EntityKind.MODULE)} == {mod.id, other.id}
+    assert {e.id for e in store.list_by_kind("module")} == {mod.id, other.id}
+    assert store.get_entities_by_kind("invalid_kind") == []
+    
+    # Test entities and relationships property
+    assert len(store.entities) == 4
+    assert len(store.relationships) == 3
+    
+    # Test invalid trace_calls direction
+    with pytest.raises(ValueError, match="direction must be"):
+        store.trace_calls(func.id, direction="invalid")
+        
+    # Test non-existent entity get_impact
+    impact = store.get_impact("non_existent")
+    assert impact["error"] == "Entity not found"
+    
+    # Test impact on class and module for type_score coverage
+    impact_cls = store.get_impact(cls.id)
+    assert impact_cls["risk_score"] > 0
+    impact_mod = store.get_impact(mod.id)
+    assert impact_mod["risk_score"] > 0
+    
+    # Test close
+    store.close()
+

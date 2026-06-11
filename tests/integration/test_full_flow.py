@@ -6,7 +6,7 @@ from knowcode.retrieval.search_engine import SearchEngine
 from knowcode.llm.embedding import OpenAIEmbeddingProvider
 from knowcode.data_models import EmbeddingConfig
 from knowcode.retrieval.hybrid_index import HybridIndex
-from knowcode.storage.chunk_repository import InMemoryChunkRepository
+from knowcode.storage.sqlite_chunk_repository import SqliteChunkRepository
 from knowcode.storage.vector_store import VectorStore
 
 class MockEmbeddingProvider(OpenAIEmbeddingProvider):
@@ -23,7 +23,7 @@ class MockEmbeddingProvider(OpenAIEmbeddingProvider):
 def test_full_search_flow(tmp_path) -> None:  # type: ignore
     """Test full pipeline: Indexing -> Search -> Results."""
     # 1. Setup
-    repo = InMemoryChunkRepository()
+    repo = SqliteChunkRepository(":memory:")
     vs = VectorStore(dimension=8)
     provider = MockEmbeddingProvider()
     

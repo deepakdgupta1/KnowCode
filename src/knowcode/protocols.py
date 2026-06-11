@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from knowcode.retrieval.orchestrator import SearchEngineProtocol
+
 
 from knowcode.data_models import EmbeddingConfig, Entity
 
@@ -31,6 +35,11 @@ class VectorStoreProtocol(Protocol):
     def search(self, embedding: list[float], limit: int = 10) -> list[tuple[str, float]]:
         """Search for similar chunk IDs and similarity scores."""
 
+    def get_embedding(self, chunk_id: str) -> list[float] | None:
+        """Get an embedding by chunk_id."""
+
+
+
     def save(self, path: Path) -> None:
         """Persist vector index artifacts."""
 
@@ -39,6 +48,12 @@ class VectorStoreProtocol(Protocol):
 
     def clear(self) -> None:
         """Reset in-memory vector index data."""
+
+    def remove(self, chunk_id: str) -> None:
+        """Remove a chunk from the index by its ID."""
+
+    def count(self) -> int:
+        """Return the number of vectors in the index."""
 
 
 class KnowledgeStoreProtocol(Protocol):

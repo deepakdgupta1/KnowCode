@@ -364,9 +364,10 @@ def trace_calls(
     up to the specified depth. Each result includes the call_depth indicating
     how many hops from the starting entity.
     """
-    return service.store.trace_calls(
+    from typing import cast
+    return cast(list[dict[str, Any]], service.store.trace_calls(
         entity_id, direction=direction.value, depth=depth, max_results=max_results
-    )
+    ))
 
 
 @router.get("/impact/{entity_id:path}", summary="Impact Analysis")
@@ -387,4 +388,5 @@ def get_impact(
     - affected_files: Files that would need review
     - risk_score: 0.0-1.0 indicating modification risk
     """
-    return service.store.get_impact(entity_id, max_depth=max_depth)
+    from typing import cast
+    return cast(dict[str, Any], service.store.get_impact(entity_id, max_depth=max_depth))

@@ -11,7 +11,6 @@ from typing import Any, Optional
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from knowcode.service import KnowCodeService
-from knowcode.config import AppConfig
 from tests.eval.harness import scorer
 
 
@@ -247,8 +246,8 @@ def main() -> None:
             ("BM25-only (alpha=0.0, no rerank)", 0.0, False, False),
             ("Dense-only (alpha=1.0, no rerank)", 1.0, False, False),
             (f"Hybrid (alpha={args.alpha}, no rerank)", args.alpha, False, False),
-            (f"Hybrid + signal rerank", args.alpha, True, False),
-            (f"Hybrid + VoyageAI rerank", args.alpha, True, True),
+            ("Hybrid + signal rerank", args.alpha, True, False),
+            ("Hybrid + VoyageAI rerank", args.alpha, True, True),
         ]
         
         for name, alpha, use_reranker, use_voyage_rerank in modes:

@@ -39,6 +39,11 @@ class RetrievalServiceProtocol(Protocol):
     ) -> SearchEngineProtocol:
         """Return a search engine instance."""
 
+    def get_exact_query_engine(
+        self, index_path: Optional[str | Path] = None
+    ) -> SearchEngineProtocol:
+        """Return an exact query engine instance."""
+
     def search(self, pattern: str) -> list[dict[str, Any]]:
         """Run lexical search for entities."""
 
@@ -48,6 +53,7 @@ class RetrievalServiceProtocol(Protocol):
         max_tokens: int = 2000,
         task_type: Optional["TaskType"] = None,
         summarize: bool = False,
+        is_stale: bool = False,
     ) -> dict[str, Any]:
         """Build context for a target entity."""
 
@@ -71,6 +77,7 @@ class RetrievalOrchestrator:
         expand_deps: bool = True,
         verbosity: str = "minimal",
         include_metadata: bool = False,
+        is_stale: bool = False,
     ) -> dict[str, Any]:
         """Retrieve an evidence-backed context bundle for a query."""
         from knowcode.llm.query_classifier import classify_query
@@ -104,17 +111,22 @@ class RetrievalOrchestrator:
 
         selected_entity_ids: list[str] = []
         evidence: list[dict[str, Any]] = []
-        retrieval_mode = "lexical"
+        retrieval_mode = "semantic"
 
         try:
-            engine = self._service.get_search_engine(index_path)
             self._service._validate_index_compatibility(index_path)
+            
+            if query.startswith('"') and query.endswith('"') and len(query) >= 2:
+                engine = self._service.get_exact_query_engine(index_path)
+                retrieval_mode = "exact"
+            else:
+                engine = self._service.get_search_engine(index_path)
+                
             scored = engine.search_scored(
                 query,
                 limit=max(10, limit_entities * 5),
                 expand_deps=expand_deps,
             )
-            retrieval_mode = "semantic"
 
             primary = [s for s in scored if s.source == "retrieved"]
             seen_entities: set[str] = set()
@@ -179,6 +191,7 @@ class RetrievalOrchestrator:
                     max_tokens=per_entity_max_tokens,
                     task_type=resolved_task_type,
                     summarize=(verbosity == "minimal"),
+                    is_stale=is_stale,
                 )
             except Exception as exc:
                 errors.append(f"Failed to synthesize context for {entity_id}: {exc}")
@@ -245,8 +258,9 @@ class RetrievalOrchestrator:
                     ],
                 },
             )
-        except Exception:
-            pass
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning("Failed to log telemetry: %s", e)
 
         if verbosity == "diagnostic":
             return full_response

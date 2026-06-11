@@ -258,29 +258,52 @@ class SqliteChunkRepository(ChunkRepository):
             logger.warning("FTS5 MATCH failed for expression '%s': %s", match_expr, e)
             return []
 
+    def search_exact(self, pattern: str, limit: int = 10) -> list[CodeChunk]:
+        """Search chunks by exact substring match using LIKE."""
+        if not pattern:
+            return []
+            
+        cursor = self._conn.execute(
+            """SELECT chunk_id, entity_id, content, tokens_text, metadata_json
+               FROM chunks
+               WHERE content LIKE ?
+               LIMIT ?""",
+            (f"%{pattern}%", limit),
+        )
+        return [self._row_to_chunk(row) for row in cursor]
+
     def remove_by_file(self, file_path: str) -> list[str]:
-        """Remove all chunks whose entity_id starts with ``file_path``.
-
-        Returns the list of removed chunk IDs.
-        """
+        """Remove all chunks associated with a file path."""
+        file_path_str = str(file_path)
         with self._write_lock:
-            # Identify chunks to remove.
-            cursor = self._conn.execute(
-                """SELECT chunk_id FROM chunks
-                   WHERE entity_id = ? OR entity_id LIKE ?""",
-                (file_path, file_path + "::%"),
-            )
-            removed_ids = [row[0] for row in cursor]
+            with self._conn:
+                cursor = self._conn.execute(
+                    "SELECT chunk_id FROM chunks WHERE file_path = ?",
+                    (file_path_str,)
+                )
+                removed_ids = [row[0] for row in cursor]
 
-            if removed_ids:
-                with self._conn:
-                    self._conn.execute(
-                        """DELETE FROM chunks
-                           WHERE entity_id = ? OR entity_id LIKE ?""",
-                        (file_path, file_path + "::%"),
-                    )
+                self._conn.execute(
+                    "DELETE FROM chunks WHERE file_path = ?",
+                    (file_path_str,)
+                )
+                return removed_ids
 
-        return removed_ids
+    def get_chunk_id_by_hash(self, content_hash: str) -> Optional[str]:
+        """Find a chunk_id given a content_hash (from metadata)."""
+        cursor = self._conn.execute(
+            """SELECT chunk_id FROM chunks 
+               WHERE json_extract(metadata_json, '$.content_hash') = ?
+               LIMIT 1""",
+            (content_hash,)
+        )
+        row = cursor.fetchone()
+        return row[0] if row else None
+
+    def get_all_file_paths(self) -> set[str]:
+        """Return a set of all file paths currently in the repository."""
+        cursor = self._conn.execute("SELECT DISTINCT file_path FROM chunks WHERE file_path != ''")
+        return {row[0] for row in cursor}
 
     def clear(self) -> None:
         """Remove all chunks and reset the FTS index."""
@@ -295,7 +318,7 @@ class SqliteChunkRepository(ChunkRepository):
     def count(self) -> int:
         """Return the number of stored chunks."""
         cursor = self._conn.execute("SELECT COUNT(*) FROM chunks")
-        return cursor.fetchone()[0]  # type: ignore[index]
+        return int(cursor.fetchone()[0])
 
     # ------------------------------------------------------------------
     # FAISS index mapping
@@ -353,49 +376,6 @@ class SqliteChunkRepository(ChunkRepository):
                 )
                 self._conn.execute("PRAGMA journal_mode=WAL")
                 self._conn.execute("PRAGMA synchronous=NORMAL")
-
-        # Automatic migration from chunks.json if the database is empty and chunks.json exists
-        chunks_json = path / "chunks.json"
-        if chunks_json.exists() and self.count() == 0:
-            logger.info("Migrating legacy chunks.json to SQLite database...")
-            import json
-            try:
-                with open(chunks_json, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-            except Exception as e:
-                logger.error("Failed to read chunks.json for migration: %s", e)
-                return
-
-            if isinstance(data, dict):
-                # Validate schema version
-                schema_version = data.get("schema_version")
-                if schema_version is not None:
-                    norm = None
-                    if isinstance(schema_version, int) and not isinstance(schema_version, bool):
-                        norm = schema_version
-                    elif isinstance(schema_version, str) and schema_version.isdigit():
-                        norm = int(schema_version)
-                    if norm not in (1, 2):
-                        raise ValueError(
-                            f"Unsupported chunks metadata schema version {schema_version!r}. "
-                            "Supported versions: [2]. Rebuild with `knowcode build`."
-                        )
-
-                chunk_entries = data.get("chunks", [])
-                if isinstance(chunk_entries, list):
-                    chunks_to_add = []
-                    for c_data in chunk_entries:
-                        if not isinstance(c_data, dict):
-                            continue
-                        chunks_to_add.append(CodeChunk(
-                            id=c_data.get("id", ""),
-                            entity_id=c_data.get("entity_id", ""),
-                            content=c_data.get("content", ""),
-                            tokens=c_data.get("tokens", []),
-                            metadata=c_data.get("metadata", {}),
-                        ))
-                    if chunks_to_add:
-                        self.add_batch(chunks_to_add)
 
     def get_all(self) -> list[CodeChunk]:
         """Fetch all chunks from the database."""

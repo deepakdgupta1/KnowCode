@@ -2,13 +2,13 @@
 
 from knowcode.data_models import CodeChunk, Entity, EntityKind, Location, Relationship, RelationshipKind
 from knowcode.retrieval.completeness import expand_dependencies
-from knowcode.storage.chunk_repository import InMemoryChunkRepository
+from knowcode.storage.sqlite_chunk_repository import SqliteChunkRepository
 from knowcode.storage.knowledge_store import KnowledgeStore
 
 
 def test_expand_dependencies_dedupes() -> None:
     """Dependency expansion should include each chunk once."""
-    repo = InMemoryChunkRepository()
+    repo = SqliteChunkRepository(":memory:")
     chunk_a = CodeChunk(id="c1", entity_id="e1", content="A", tokens=["a"])
     chunk_b = CodeChunk(id="c2", entity_id="e2", content="B", tokens=["b"])
     repo.add(chunk_a)

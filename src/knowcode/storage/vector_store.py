@@ -118,6 +118,24 @@ class VectorStore:
 
         return results
 
+    def get_embedding(self, chunk_id: str) -> list[float] | None:
+        """Fetch the embedding for a chunk ID."""
+        for idx, cid in self.id_map.items():
+            if cid == chunk_id:
+                if faiss:
+                    try:
+                        return [float(x) for x in self.index.reconstruct(idx).tolist()]
+                    except Exception as e:
+                        import logging
+                        logging.getLogger(__name__).warning("Ignored exception: %s", e)
+                else:
+                    try:
+                        return [float(x) for x in self.index.index[idx].tolist()]
+                    except Exception as e:
+                        import logging
+                        logging.getLogger(__name__).warning("Ignored exception: %s", e)
+        return None
+
     def save(self, path: Path) -> None:
         """Save index and ID map to disk."""
         path = Path(path)
@@ -179,6 +197,16 @@ class VectorStore:
         else:
             self.index = MockVectorStore(self.dimension)
         self.id_map = {}
+
+    def remove(self, chunk_id: str) -> None:
+        """Remove a chunk from the index."""
+        keys_to_delete = [k for k, v in self.id_map.items() if v == chunk_id]
+        for k in keys_to_delete:
+            del self.id_map[k]
+
+    def count(self) -> int:
+        """Return the number of vectors in the index."""
+        return len(self.id_map)
 
     @classmethod
     def _validate_and_migrate_metadata(cls, data: dict[str, Any]) -> dict[str, Any]:

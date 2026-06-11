@@ -3,7 +3,7 @@
 import pytest
 import numpy as np
 from pathlib import Path
-from knowcode.storage.vector_store import MockVectorStore, VectorStore
+from knowcode.storage.vector_store import MockVectorStore
 
 
 def test_mock_vector_store_search() -> None:

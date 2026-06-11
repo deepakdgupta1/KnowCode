@@ -79,29 +79,7 @@ def test_indexer_load_rejects_unsupported_manifest_schema(tmp_path: Path) -> Non
         indexer.load(out_dir)
 
 
-def test_indexer_load_rejects_unsupported_chunks_schema(tmp_path: Path) -> None:
-    """Unsupported chunk metadata schema should fail clearly."""
-    provider = DummyEmbeddingProvider(EmbeddingConfig(provider="openai", model_name="x", dimension=8))
-    out_dir = tmp_path / "idx"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "index_manifest.json").write_text(
-        json.dumps(
-            {
-                "schema_version": Indexer.SCHEMA_VERSION,
-                "embedding": {"dimension": 8},
-                "chunking": {"max_chunk_size": 1000},
-            }
-        ),
-        encoding="utf-8",
-    )
-    (out_dir / "chunks.json").write_text(
-        json.dumps({"schema_version": 999, "chunks": []}),
-        encoding="utf-8",
-    )
 
-    indexer = Indexer(provider)
-    with pytest.raises(ValueError, match="chunks metadata schema version"):
-        indexer.load(out_dir)
 
 
 def test_indexer_manifest_migrates_schema_version_one() -> None:
@@ -110,9 +88,4 @@ def test_indexer_manifest_migrates_schema_version_one() -> None:
     assert migrated["schema_version"] == Indexer.SCHEMA_VERSION
 
 
-def test_indexer_chunks_payload_migrates_schema_version_one() -> None:
-    """Chunk payload schema_version=1 should migrate to current schema."""
-    migrated = Indexer._validate_and_migrate_chunks_payload(
-        {"schema_version": 1, "chunks": []}
-    )
-    assert migrated["schema_version"] == Indexer.SCHEMA_VERSION
+

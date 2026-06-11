@@ -237,8 +237,9 @@ class Agent:
                     "llm_tokens_saved": res["llm_tokens_saved"],
                 }
             )
-        except Exception:
-            pass
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning("Ignored exception: %s", e)
 
         return res
 

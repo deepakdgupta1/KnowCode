@@ -17,9 +17,11 @@ def test_cli_analyze_query_stats_context(tmp_path) -> None:  # type: ignore
     analyze = runner.invoke(cli_module.cli, ["analyze", str(tmp_path), "--output", str(tmp_path)])
     assert analyze.exit_code == 0
 
-    store_path = tmp_path / "knowcode_knowledge.json"
-    data = json.loads(store_path.read_text(encoding="utf-8"))
-    entity_id = next(iter(data["entities"].keys()))
+    store_path = tmp_path / "knowledge.db"
+    import sqlite3
+    conn = sqlite3.connect(store_path)
+    entity_id = conn.execute("SELECT entity_id FROM entities LIMIT 1").fetchone()[0]
+    conn.close()
 
     query = runner.invoke(cli_module.cli, ["query", "search", "foo", "--store", str(tmp_path)])
     assert query.exit_code == 0
@@ -60,10 +62,13 @@ def test_cli_build_defaults_to_current_directory(tmp_path, monkeypatch) -> None:
 
     assert result.exit_code == 0, result.output
     assert "Build complete" in result.output
-    store_path = tmp_path / "knowcode_knowledge.json"
+    store_path = tmp_path / "knowledge.db"
     assert store_path.exists()
-    data = json.loads(store_path.read_text(encoding="utf-8"))
-    assert data["entities"]
+    import sqlite3
+    conn = sqlite3.connect(store_path)
+    count = conn.execute("SELECT COUNT(*) FROM entities").fetchone()[0]
+    assert count > 0
+    conn.close()
 
 
 @pytest.mark.parametrize(

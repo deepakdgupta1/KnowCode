@@ -1,7 +1,10 @@
 """Context synthesizer for generating AI-ready context bundles."""
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from knowcode.analysis.live_source_loader import LiveSourceLoader
 
 from knowcode.storage.knowledge_store import KnowledgeStore
 from knowcode.data_models import Entity, EntityKind, TaskType
@@ -74,6 +77,7 @@ class ContextSynthesizer:
         store: KnowledgeStore,
         max_tokens: int = DEFAULT_MAX_TOKENS,
         model: str = "gpt-4",
+        live_loader: Optional["LiveSourceLoader"] = None,
     ) -> None:
         """Initialize context synthesizer.
 
@@ -85,6 +89,15 @@ class ContextSynthesizer:
         self.store = store
         self.max_tokens = max_tokens
         self.tokenizer = TokenCounter(model)
+        self.live_loader = live_loader
+
+    def _get_entity_source(self, entity: Entity) -> str:
+        """Get entity source code, preferring live file if available."""
+        if self.live_loader:
+            live_source = self.live_loader.load_source(entity)
+            if live_source is not None:
+                return live_source
+        return entity.source_code or ""
 
     def synthesize(self, entity_id: str, summarize: bool = False) -> Optional[ContextBundle]:
         """Synthesize context bundle for an entity.
@@ -146,14 +159,15 @@ class ContextSynthesizer:
                 current_tokens += t
 
         # Priority 2: Source Code (Huge consumer, often truncated)
-        if entity.source_code and not summarize:
+        source_code = self._get_entity_source(entity)
+        if source_code and not summarize:
             code_header = "## Source Code\n\n```python\n"
             code_footer = "\n```"
             overhead = self.tokenizer.count_tokens(code_header + code_footer)
             remaining = self.max_tokens - current_tokens - overhead
             
             if remaining > 100: # Only add if we have decent space
-                code_body = entity.source_code
+                code_body = source_code
                 code_tokens = self.tokenizer.count_tokens(code_body)
                 
                 if code_tokens > remaining:
@@ -211,7 +225,7 @@ class ContextSynthesizer:
         context_text = "\n\n---\n\n".join(sections)
         
         # Check if we skipped source code but had it
-        if entity.source_code and "## Source Code" not in context_text:
+        if source_code and "## Source Code" not in context_text:
              is_truncated = True
 
         return ContextBundle(
@@ -403,10 +417,11 @@ class ContextSynthesizer:
         if entity.docstring:
             content_sections["docstring"] = f"## Description\n\n{entity.docstring}"
             
-        if entity.source_code and not summarize:
+        source_code = self._get_entity_source(entity)
+        if source_code and not summarize:
             code_header = "## Source Code\n\n```python\n"
             code_footer = "\n```"
-            code_body = entity.source_code
+            code_body = source_code
             # Pre-truncate if too long
             max_code_tokens = int(self.max_tokens * 0.5)  # Reserve half for code max
             code_tokens = self.tokenizer.count_tokens(code_body)
@@ -518,7 +533,8 @@ class ContextSynthesizer:
                 score += weight
         
         # Bonus for having source code (always valuable)
-        if entity.source_code and "## Source Code" in context_text:
+        source_code = self._get_entity_source(entity)
+        if source_code and "## Source Code" in context_text:
             score += 0.2
             max_score += 0.2
             

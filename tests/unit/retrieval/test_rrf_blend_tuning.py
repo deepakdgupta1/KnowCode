@@ -1,8 +1,7 @@
 """Tests for RRF blend tuning and alpha configuration."""
 
-import pytest
 from knowcode.retrieval.hybrid_index import HybridIndex
-from knowcode.data_models import CodeChunk, Location
+from knowcode.data_models import CodeChunk
 from enum import Enum
 
 class MockKind(Enum):

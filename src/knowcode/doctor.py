@@ -364,7 +364,6 @@ def _check_semantic_index(
     warnings: list[str] = []
 
     manifest_file = index_path / "index_manifest.json"
-    chunks_file = index_path / "chunks.json"
     vectors_file = index_path / "vectors.json"
     vector_index_file = index_path / "vectors.index"
 
@@ -379,15 +378,7 @@ def _check_semantic_index(
     else:
         failures.append("missing index_manifest.json")
 
-    raw_chunks: dict[str, Any] = {}
-    if chunks_file.exists():
-        try:
-            raw_chunks = _read_json_object(chunks_file)
-            Indexer._validate_and_migrate_chunks_payload(raw_chunks)
-        except Exception as exc:
-            failures.append(f"invalid chunks.json: {exc}")
-    else:
-        failures.append("missing chunks.json")
+
 
     vector_metadata: dict[str, Any] = {}
     raw_vector_metadata: dict[str, Any] = {}
@@ -431,8 +422,6 @@ def _check_semantic_index(
 
     if raw_manifest and not _schema_is_current(raw_manifest, Indexer.SCHEMA_VERSION):
         warnings.append("manifest was migrated in memory")
-    if raw_chunks and not _schema_is_current(raw_chunks, Indexer.SCHEMA_VERSION):
-        warnings.append("chunks metadata was migrated in memory")
     if raw_vector_metadata and not _schema_is_current(
         raw_vector_metadata,
         VectorStore.SCHEMA_VERSION,
@@ -662,7 +651,7 @@ def _voyage_dimension(model_name: str) -> int:
     """Return known VoyageAI embedding dimension."""
     try:
         from knowcode.llm.embedding import _VOYAGE_EMBED_DIMENSIONS
-    except Exception:
+    except ImportError:
         return 1024
     return int(_VOYAGE_EMBED_DIMENSIONS.get(model_name, 1024))
 
@@ -671,7 +660,7 @@ def _openai_dimension(model_name: str) -> int:
     """Return known OpenAI-compatible embedding dimension."""
     try:
         from knowcode.llm.embedding import _OPENAI_EMBED_DIMENSIONS
-    except Exception:
+    except ImportError:
         return 1536
     return int(_OPENAI_EMBED_DIMENSIONS.get(model_name, 1536))
 
@@ -756,8 +745,9 @@ def _check_unsupported_languages(store_path: str | Path, checks: list[DoctorChec
                 ext = Path(f).suffix.lower()
                 if ext in unsupported_map:
                     unsupported_exts.add(unsupported_map[ext])
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("Failed to scan for unsupported languages: %s", e)
 
     if unsupported_exts:
         checks.append(

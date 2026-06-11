@@ -3,7 +3,7 @@
 import pytest
 from unittest.mock import MagicMock
 from knowcode.retrieval.search_engine import SearchEngine
-from knowcode.storage.chunk_repository import InMemoryChunkRepository
+from knowcode.storage.sqlite_chunk_repository import SqliteChunkRepository
 from knowcode.storage.knowledge_store import KnowledgeStore
 
 
@@ -14,7 +14,7 @@ class FailingEmbeddingProvider:
 
 def test_search_engine_handles_embedding_failure() -> None:
     """SearchEngine should propagate or handle embedding failures."""
-    repo = InMemoryChunkRepository()
+    repo = SqliteChunkRepository(":memory:")
     hybrid = MagicMock()
     store = KnowledgeStore()
     
@@ -27,7 +27,7 @@ def test_search_engine_handles_embedding_failure() -> None:
 
 def test_search_engine_empty_hybrid_results() -> None:
     """SearchEngine should handle case where hybrid index returns nothing."""
-    repo = InMemoryChunkRepository()
+    repo = SqliteChunkRepository(":memory:")
     embedding = MagicMock()
     embedding.embed_single.return_value = [0.0] * 1024
     

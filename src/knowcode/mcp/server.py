@@ -32,7 +32,7 @@ from knowcode.errors import MissingKnowledgeStoreError, KnowCodePrerequisiteErro
 
 
 # Tool definitions for MCP
-TOOL_DEFINITIONS = [
+TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "name": "search_codebase",
         "description": "Search for code entities (functions, classes, modules) by name or pattern. Returns matching entities with their locations.",
@@ -267,12 +267,13 @@ class KnowCodeMCPServer:
             List of entities with call_depth.
         """
         service = self._ensure_service()
-        return service.store.trace_calls(
+        from typing import cast
+        return cast(list[dict[str, Any]], service.store.trace_calls(
             entity_id,
             direction=direction,
             depth=min(depth, 5),
             max_results=50,
-        )
+        ))
 
     def retrieve_context_for_query(
         self,
@@ -321,8 +322,9 @@ class KnowCodeMCPServer:
                     "arguments": arguments,
                 }
             )
-        except Exception:
-            pass
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning("Ignored exception: %s", e)
 
         try:
             if name == "search_codebase":

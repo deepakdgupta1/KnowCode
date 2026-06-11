@@ -34,12 +34,16 @@ class DummyService(KnowCodeService):
     def get_search_engine(self, _index_path=None):  # type: ignore
         return self._engine
 
+    def get_exact_query_engine(self, _index_path=None):  # type: ignore
+        return self._engine
+
     def get_context(
         self,
         target: str,
         max_tokens: int = 2000,
         task_type: TaskType | None = None,
         summarize: bool = False,
+        is_stale: bool = False,
     ):  # type: ignore
         assert task_type is not None
         self.context_calls.append((target, max_tokens, task_type))
@@ -200,3 +204,32 @@ def test_ensure_index_builds_only_when_missing(tmp_path: Path) -> None:
 
     service.ensure_index()
     assert service.build_index_calls == 1
+
+def test_retrieve_context_routes_quoted_query_to_exact_engine(tmp_path: Path) -> None:
+    _write_store_file(tmp_path)
+    (tmp_path / "knowcode_index").mkdir()
+
+    class TrackedDummyService(DummyService):
+        def __init__(self, store_path: Path, engine: DummySearchEngine) -> None:
+            super().__init__(store_path, engine)
+            self.exact_engine_calls = 0
+
+        def get_exact_query_engine(self, _index_path=None):  # type: ignore
+            self.exact_engine_calls += 1
+            return self._engine
+
+    chunk = CodeChunk(id="c1", entity_id="e1", content="one", tokens=["one"])
+    service = TrackedDummyService(
+        tmp_path,
+        engine=DummySearchEngine(
+            [ScoredChunk(chunk=chunk, score=0.9, source="retrieved")]
+        ),
+    )
+
+    result = service.retrieve_context_for_query(
+        '"exact query"', limit_entities=1, verbosity="diagnostic"
+    )
+
+    assert result["retrieval_mode"] == "exact"
+    assert service.exact_engine_calls == 1
+    assert result["selected_entities"][0]["entity_id"] == "e1"

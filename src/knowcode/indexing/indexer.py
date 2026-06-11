@@ -5,7 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Optional
 
-from knowcode.storage.chunk_repository import ChunkRepository, InMemoryChunkRepository
+from knowcode.storage.chunk_repository import ChunkRepository
+from knowcode.storage.sqlite_chunk_repository import SqliteChunkRepository
 from knowcode.indexing.chunker import Chunker
 from knowcode.indexing.graph_builder import GraphBuilder
 from knowcode.indexing.scanner import Scanner
@@ -37,7 +38,7 @@ class Indexer:
             vector_store: Optional vector store (defaults to FAISS-backed store).
         """
         self.embedding_provider = embedding_provider
-        self.chunk_repo: ChunkRepository = chunk_repo or InMemoryChunkRepository()
+        self.chunk_repo: ChunkRepository = chunk_repo or SqliteChunkRepository(":memory:")
         self.vector_store = vector_store or VectorStore(dimension=embedding_provider.config.dimension)
         self.chunker = Chunker()
         self.manifest: dict[str, Any] = {}
@@ -85,6 +86,127 @@ class Indexer:
                 self.vector_store.add(chunk.id, emb)
                 total_chunks += 1
                 
+        # Store current commit hash for future incremental indexing
+        import subprocess
+        try:
+            res = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(root_path), capture_output=True, text=True, check=True)
+            self.manifest["last_indexed_commit"] = res.stdout.strip()
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning("Ignored exception: %s", e)
+            
+        return total_chunks
+
+    def index_incremental(self, root_dir: str | Path) -> int:
+        """Incrementally index only changed files and skip re-embedding unchanged chunks.
+
+        Args:
+            root_dir: Root directory of the repository.
+
+        Returns:
+            Number of new chunks added.
+        """
+        import subprocess
+        root_path = Path(root_dir).resolve()
+        
+        # Determine last indexed commit
+        last_commit = self.manifest.get("last_indexed_commit")
+        
+        # Get current commit
+        try:
+            res = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(root_path), capture_output=True, text=True, check=True)
+            current_commit = res.stdout.strip()
+        except Exception as e:
+            logger.warning(f"Failed to get current git commit: {e}. Incremental indexer falling back to full index.")
+            return self.index_directory(root_dir)
+
+        if not last_commit:
+            logger.info("No last_indexed_commit found in manifest. Falling back to full index.")
+            self.manifest["last_indexed_commit"] = current_commit
+            return self.index_directory(root_dir)
+
+        if current_commit == last_commit:
+            logger.info("Current commit matches last indexed commit. No changes to index.")
+            return 0
+
+        # Get changed files
+        try:
+            diff_res = subprocess.run(
+                ["git", "diff", "--name-only", last_commit, current_commit],
+                cwd=str(root_path), capture_output=True, text=True, check=True
+            )
+            untracked_res = subprocess.run(
+                ["git", "ls-files", "--others", "--exclude-standard"],
+                cwd=str(root_path), capture_output=True, text=True, check=True
+            )
+        except Exception as e:
+            logger.warning(f"Failed to get git diff: {e}. Falling back to full index.")
+            self.manifest["last_indexed_commit"] = current_commit
+            return self.index_directory(root_dir)
+
+        changed_files_rel = diff_res.stdout.splitlines() + untracked_res.stdout.splitlines()
+        changed_files = [str(root_path / f) for f in set(changed_files_rel) if f.strip()]
+
+        if not changed_files:
+            self.manifest["last_indexed_commit"] = current_commit
+            return 0
+
+        total_chunks = 0
+
+        builder = GraphBuilder()
+        builder.build_from_directory(root_path)
+
+        from knowcode.indexing.scanner import Scanner
+        scanner = Scanner(root_path)
+        all_files = scanner.scan_all()
+
+        # Map to quickly find scanner FileInfo
+        file_map = {f.path.resolve(): f for f in all_files}
+
+        for file_path_str in changed_files:
+            file_path = Path(file_path_str).resolve()
+            
+            file_info = file_map.get(file_path)
+            if not file_info:
+                # File was deleted or ignored
+                if hasattr(self, "remove_file"):
+                    self.remove_file(file_path_str)
+                continue
+            
+            parse_result = builder._parse_file(file_info)
+            chunks = self.chunker.process_parse_result(parse_result)
+            if not chunks:
+                if hasattr(self, "remove_file"):
+                    self.remove_file(file_path_str)
+                continue
+
+            for chunk in chunks:
+                # Try to reuse embedding if content_hash matches
+                c_hash = chunk.metadata.get("content_hash")
+                cached_chunk_id = None
+                if c_hash and hasattr(self.chunk_repo, "get_chunk_id_by_hash"):
+                    cached_chunk_id = self.chunk_repo.get_chunk_id_by_hash(c_hash)
+                    
+                emb = None
+                if cached_chunk_id and hasattr(self.vector_store, "get_embedding"):
+                    emb = self.vector_store.get_embedding(cached_chunk_id)
+
+                if emb is not None:
+                    chunk.embedding = emb
+
+            # Remove old chunks for this file BEFORE inserting new ones
+            if hasattr(self, "remove_file"):
+                self.remove_file(file_path_str)
+
+            for chunk in chunks:
+                if chunk.embedding is None:
+                    chunk.embedding = self.embedding_provider.embed_single(chunk.content)
+                
+                self.chunk_repo.add(chunk)
+                self.vector_store.add(chunk.id, chunk.embedding)
+                total_chunks += 1
+
+        self.manifest["last_indexed_commit"] = current_commit
         return total_chunks
 
     def save(self, path: str | Path) -> None:
@@ -107,13 +229,13 @@ class Indexer:
         self.chunk_repo.save(path)
 
         # Save index manifest for compatibility checks at query time.
-        self.manifest = {
+        self.manifest.update({
             "schema_version": self.SCHEMA_VERSION,
             "version": 1,
             "created_at": int(time.time()),
             "embedding": asdict(self.embedding_provider.config),
             "chunking": asdict(self.chunker.config),
-        }
+        })
         with open(path / "index_manifest.json", "w", encoding="utf-8") as f:
             json.dump(self.manifest, f, indent=2)
 
@@ -159,16 +281,7 @@ class Indexer:
             legacy_version=cls.LEGACY_MANIFEST_VERSION,
         )
 
-    @classmethod
-    def _validate_and_migrate_chunks_payload(
-        cls, payload: dict[str, Any]
-    ) -> dict[str, Any]:
-        """Validate chunks payload schema and migrate legacy payloads."""
-        return cls._validate_and_migrate_payload_schema(
-            payload,
-            payload_name="chunks metadata",
-            legacy_version=cls.LEGACY_MANIFEST_VERSION,
-        )
+
 
     @classmethod
     def _validate_and_migrate_payload_schema(
