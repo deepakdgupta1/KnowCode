@@ -113,9 +113,12 @@ def knowcode_service() -> Any:
     (i.e. ``knowcode analyze`` has not been run).
     """
     try:
+        import knowcode.telemetry as telemetry
         from knowcode.service import KnowCodeService
     except ImportError:
         pytest.skip("knowcode package not importable — check your virtualenv.")
+
+    telemetry.log_event = lambda *_args, **_kwargs: None
 
     repo_root = Path(__file__).parents[3]  # …/KnowCode/
     service = KnowCodeService(store_path=repo_root)

@@ -1,11 +1,11 @@
 {
   "scores": [
     {
-      "query_id": "q1",
+      "query_id": "q001",
       "task_type": "locate",
       "difficulty": "easy",
       "precision_at_1": 1.0,
-      "precision_at_5": 0.4,
+      "precision_at_5": 0.2,
       "recall_at_10": 1.0,
       "mrr": 1.0,
       "file_coverage_at_1": 1.0,
@@ -16,64 +16,11 @@
         "must_mention_verdicts": [],
         "must_not_mention_verdicts": [],
         "narrative_score": null
-      }
+      },
+      "correct": true
     },
     {
-      "query_id": "q2",
-      "task_type": "explain",
-      "difficulty": "medium",
-      "precision_at_1": 1.0,
-      "precision_at_5": 0.2,
-      "recall_at_10": 1.0,
-      "mrr": 1.0,
-      "file_coverage_at_1": 1.0,
-      "file_coverage_at_5": 1.0,
-      "sufficiency_score": 0.65,
-      "routed_local": false,
-      "narrative": {
-        "must_mention_verdicts": [],
-        "must_not_mention_verdicts": [],
-        "narrative_score": null
-      }
-    },
-    {
-      "query_id": "q3",
-      "task_type": "debug",
-      "difficulty": "hard",
-      "precision_at_1": 0.0,
-      "precision_at_5": 0.4,
-      "recall_at_10": 1.0,
-      "mrr": 0.3333333333333333,
-      "file_coverage_at_1": 0.0,
-      "file_coverage_at_5": 1.0,
-      "sufficiency_score": 0.26,
-      "routed_local": false,
-      "narrative": {
-        "must_mention_verdicts": [],
-        "must_not_mention_verdicts": [],
-        "narrative_score": null
-      }
-    },
-    {
-      "query_id": "q4",
-      "task_type": "dependency-traversal",
-      "difficulty": "medium",
-      "precision_at_1": 1.0,
-      "precision_at_5": 0.2,
-      "recall_at_10": 0.5,
-      "mrr": 1.0,
-      "file_coverage_at_1": 0.5,
-      "file_coverage_at_5": 0.5,
-      "sufficiency_score": 0.73,
-      "routed_local": false,
-      "narrative": {
-        "must_mention_verdicts": [],
-        "must_not_mention_verdicts": [],
-        "narrative_score": null
-      }
-    },
-    {
-      "query_id": "q5",
+      "query_id": "q002",
       "task_type": "locate",
       "difficulty": "easy",
       "precision_at_1": 1.0,
@@ -82,7 +29,7 @@
       "mrr": 1.0,
       "file_coverage_at_1": 1.0,
       "file_coverage_at_5": 1.0,
-      "sufficiency_score": 0.96,
+      "sufficiency_score": 0.88,
       "routed_local": true,
       "narrative": {
         "must_mention_verdicts": [
@@ -106,7 +53,254 @@
       "correct": true
     },
     {
-      "query_id": "q6",
+      "query_id": "q003",
+      "task_type": "locate",
+      "difficulty": "easy",
+      "precision_at_1": 1.0,
+      "precision_at_5": 0.2,
+      "recall_at_10": 1.0,
+      "mrr": 1.0,
+      "file_coverage_at_1": 1.0,
+      "file_coverage_at_5": 1.0,
+      "sufficiency_score": 0.73,
+      "routed_local": false,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": true
+    },
+    {
+      "query_id": "q004",
+      "task_type": "locate",
+      "difficulty": "easy",
+      "precision_at_1": 1.0,
+      "precision_at_5": 0.2,
+      "recall_at_10": 1.0,
+      "mrr": 1.0,
+      "file_coverage_at_1": 1.0,
+      "file_coverage_at_5": 1.0,
+      "sufficiency_score": 0.85,
+      "routed_local": true,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": true
+    },
+    {
+      "query_id": "q005",
+      "task_type": "locate",
+      "difficulty": "easy",
+      "precision_at_1": 1.0,
+      "precision_at_5": 0.2,
+      "recall_at_10": 1.0,
+      "mrr": 1.0,
+      "file_coverage_at_1": 1.0,
+      "file_coverage_at_5": 1.0,
+      "sufficiency_score": 0.39,
+      "routed_local": false,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": true
+    },
+    {
+      "query_id": "q006",
+      "task_type": "locate",
+      "difficulty": "easy",
+      "precision_at_1": 1.0,
+      "precision_at_5": 0.2,
+      "recall_at_10": 1.0,
+      "mrr": 1.0,
+      "file_coverage_at_1": 1.0,
+      "file_coverage_at_5": 1.0,
+      "sufficiency_score": 0.82,
+      "routed_local": true,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": true
+    },
+    {
+      "query_id": "q007",
+      "task_type": "locate",
+      "difficulty": "medium",
+      "precision_at_1": 0.0,
+      "precision_at_5": 0.2,
+      "recall_at_10": 0.5,
+      "mrr": 0.5,
+      "file_coverage_at_1": 0.0,
+      "file_coverage_at_5": 1.0,
+      "sufficiency_score": 0.86,
+      "routed_local": true,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": false
+    },
+    {
+      "query_id": "q008",
+      "task_type": "locate",
+      "difficulty": "medium",
+      "precision_at_1": 1.0,
+      "precision_at_5": 0.4,
+      "recall_at_10": 0.6666666666666666,
+      "mrr": 1.0,
+      "file_coverage_at_1": 0.5,
+      "file_coverage_at_5": 1.0,
+      "sufficiency_score": 0.52,
+      "routed_local": false,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": false
+    },
+    {
+      "query_id": "q009",
+      "task_type": "locate",
+      "difficulty": "medium",
+      "precision_at_1": 0.0,
+      "precision_at_5": 0.4,
+      "recall_at_10": 1.0,
+      "mrr": 0.25,
+      "file_coverage_at_1": 0.5,
+      "file_coverage_at_5": 1.0,
+      "sufficiency_score": 0.61,
+      "routed_local": false,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": true
+    },
+    {
+      "query_id": "q010",
+      "task_type": "locate",
+      "difficulty": "medium",
+      "precision_at_1": 1.0,
+      "precision_at_5": 0.2,
+      "recall_at_10": 0.5,
+      "mrr": 1.0,
+      "file_coverage_at_1": 0.5,
+      "file_coverage_at_5": 1.0,
+      "sufficiency_score": 0.82,
+      "routed_local": true,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": false
+    },
+    {
+      "query_id": "q011",
+      "task_type": "explain",
+      "difficulty": "easy",
+      "precision_at_1": 1.0,
+      "precision_at_5": 0.2,
+      "recall_at_10": 1.0,
+      "mrr": 1.0,
+      "file_coverage_at_1": 1.0,
+      "file_coverage_at_5": 1.0,
+      "sufficiency_score": 0.65,
+      "routed_local": false,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": true
+    },
+    {
+      "query_id": "q012",
+      "task_type": "explain",
+      "difficulty": "easy",
+      "precision_at_1": 1.0,
+      "precision_at_5": 0.2,
+      "recall_at_10": 1.0,
+      "mrr": 1.0,
+      "file_coverage_at_1": 1.0,
+      "file_coverage_at_5": 1.0,
+      "sufficiency_score": 0.51,
+      "routed_local": false,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": true
+    },
+    {
+      "query_id": "q013",
+      "task_type": "explain",
+      "difficulty": "medium",
+      "precision_at_1": 0.0,
+      "precision_at_5": 0.4,
+      "recall_at_10": 1.0,
+      "mrr": 0.5,
+      "file_coverage_at_1": 0.5,
+      "file_coverage_at_5": 1.0,
+      "sufficiency_score": 0.52,
+      "routed_local": false,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": true
+    },
+    {
+      "query_id": "q014",
+      "task_type": "explain",
+      "difficulty": "medium",
+      "precision_at_1": 0.0,
+      "precision_at_5": 0.4,
+      "recall_at_10": 0.6666666666666666,
+      "mrr": 0.5,
+      "file_coverage_at_1": 1.0,
+      "file_coverage_at_5": 1.0,
+      "sufficiency_score": 0.75,
+      "routed_local": false,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": false
+    },
+    {
+      "query_id": "q015",
+      "task_type": "explain",
+      "difficulty": "medium",
+      "precision_at_1": 0.0,
+      "precision_at_5": 0.2,
+      "recall_at_10": 1.0,
+      "mrr": 0.5,
+      "file_coverage_at_1": 0.5,
+      "file_coverage_at_5": 0.5,
+      "sufficiency_score": 0.69,
+      "routed_local": false,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": false
+    },
+    {
+      "query_id": "q016",
       "task_type": "explain",
       "difficulty": "medium",
       "precision_at_1": 1.0,
@@ -137,97 +331,955 @@
         "narrative_score": null
       },
       "correct": true
+    },
+    {
+      "query_id": "q017",
+      "task_type": "explain",
+      "difficulty": "medium",
+      "precision_at_1": 1.0,
+      "precision_at_5": 0.2,
+      "recall_at_10": 0.5,
+      "mrr": 1.0,
+      "file_coverage_at_1": 1.0,
+      "file_coverage_at_5": 1.0,
+      "sufficiency_score": 0.74,
+      "routed_local": false,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": false
+    },
+    {
+      "query_id": "q018",
+      "task_type": "explain",
+      "difficulty": "medium",
+      "precision_at_1": 1.0,
+      "precision_at_5": 0.2,
+      "recall_at_10": 0.5,
+      "mrr": 1.0,
+      "file_coverage_at_1": 1.0,
+      "file_coverage_at_5": 1.0,
+      "sufficiency_score": 0.71,
+      "routed_local": false,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": false
+    },
+    {
+      "query_id": "q019",
+      "task_type": "explain",
+      "difficulty": "hard",
+      "precision_at_1": 0.0,
+      "precision_at_5": 0.4,
+      "recall_at_10": 0.4,
+      "mrr": 0.5,
+      "file_coverage_at_1": 0.25,
+      "file_coverage_at_5": 0.5,
+      "sufficiency_score": 0.78,
+      "routed_local": false,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": false
+    },
+    {
+      "query_id": "q020",
+      "task_type": "explain",
+      "difficulty": "hard",
+      "precision_at_1": 0.0,
+      "precision_at_5": 0.2,
+      "recall_at_10": 0.25,
+      "mrr": 0.3333333333333333,
+      "file_coverage_at_1": 0.0,
+      "file_coverage_at_5": 0.5,
+      "sufficiency_score": 0.7,
+      "routed_local": false,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": false
+    },
+    {
+      "query_id": "q021",
+      "task_type": "explain",
+      "difficulty": "hard",
+      "precision_at_1": 0.0,
+      "precision_at_5": 0.2,
+      "recall_at_10": 1.0,
+      "mrr": 0.5,
+      "file_coverage_at_1": 1.0,
+      "file_coverage_at_5": 1.0,
+      "sufficiency_score": 0.72,
+      "routed_local": false,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": true
+    },
+    {
+      "query_id": "q022",
+      "task_type": "explain",
+      "difficulty": "hard",
+      "precision_at_1": 0.0,
+      "precision_at_5": 0.2,
+      "recall_at_10": 0.25,
+      "mrr": 0.5,
+      "file_coverage_at_1": 0.5,
+      "file_coverage_at_5": 1.0,
+      "sufficiency_score": 0.58,
+      "routed_local": false,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": false
+    },
+    {
+      "query_id": "q023",
+      "task_type": "debug",
+      "difficulty": "easy",
+      "precision_at_1": 1.0,
+      "precision_at_5": 0.2,
+      "recall_at_10": 1.0,
+      "mrr": 1.0,
+      "file_coverage_at_1": 1.0,
+      "file_coverage_at_5": 1.0,
+      "sufficiency_score": 0.28,
+      "routed_local": false,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": true
+    },
+    {
+      "query_id": "q024",
+      "task_type": "debug",
+      "difficulty": "easy",
+      "precision_at_1": 1.0,
+      "precision_at_5": 0.2,
+      "recall_at_10": 1.0,
+      "mrr": 1.0,
+      "file_coverage_at_1": 1.0,
+      "file_coverage_at_5": 1.0,
+      "sufficiency_score": 0.34,
+      "routed_local": false,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": true
+    },
+    {
+      "query_id": "q025",
+      "task_type": "debug",
+      "difficulty": "medium",
+      "precision_at_1": 1.0,
+      "precision_at_5": 0.2,
+      "recall_at_10": 1.0,
+      "mrr": 1.0,
+      "file_coverage_at_1": 1.0,
+      "file_coverage_at_5": 1.0,
+      "sufficiency_score": 0.25,
+      "routed_local": false,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": true
+    },
+    {
+      "query_id": "q026",
+      "task_type": "debug",
+      "difficulty": "medium",
+      "precision_at_1": 0.0,
+      "precision_at_5": 0.2,
+      "recall_at_10": 1.0,
+      "mrr": 0.3333333333333333,
+      "file_coverage_at_1": 0.0,
+      "file_coverage_at_5": 0.5,
+      "sufficiency_score": 0.37,
+      "routed_local": false,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": false
+    },
+    {
+      "query_id": "q027",
+      "task_type": "debug",
+      "difficulty": "medium",
+      "precision_at_1": 0.0,
+      "precision_at_5": 0.2,
+      "recall_at_10": 0.3333333333333333,
+      "mrr": 0.25,
+      "file_coverage_at_1": 0.0,
+      "file_coverage_at_5": 0.3333333333333333,
+      "sufficiency_score": 0.32,
+      "routed_local": false,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": false
+    },
+    {
+      "query_id": "q028",
+      "task_type": "debug",
+      "difficulty": "medium",
+      "precision_at_1": 1.0,
+      "precision_at_5": 0.4,
+      "recall_at_10": 1.0,
+      "mrr": 1.0,
+      "file_coverage_at_1": 1.0,
+      "file_coverage_at_5": 1.0,
+      "sufficiency_score": 0.35,
+      "routed_local": false,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": true
+    },
+    {
+      "query_id": "q029",
+      "task_type": "debug",
+      "difficulty": "medium",
+      "precision_at_1": 0.0,
+      "precision_at_5": 0.2,
+      "recall_at_10": 0.5,
+      "mrr": 0.5,
+      "file_coverage_at_1": 0.0,
+      "file_coverage_at_5": 1.0,
+      "sufficiency_score": 0.38,
+      "routed_local": false,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": false
+    },
+    {
+      "query_id": "q030",
+      "task_type": "debug",
+      "difficulty": "medium",
+      "precision_at_1": 0.0,
+      "precision_at_5": 0.2,
+      "recall_at_10": 0.5,
+      "mrr": 0.5,
+      "file_coverage_at_1": 1.0,
+      "file_coverage_at_5": 1.0,
+      "sufficiency_score": 0.36,
+      "routed_local": false,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": false
+    },
+    {
+      "query_id": "q031",
+      "task_type": "debug",
+      "difficulty": "hard",
+      "precision_at_1": 0.0,
+      "precision_at_5": 0.4,
+      "recall_at_10": 0.6666666666666666,
+      "mrr": 0.5,
+      "file_coverage_at_1": 0.0,
+      "file_coverage_at_5": 0.5,
+      "sufficiency_score": 0.41,
+      "routed_local": false,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": false
+    },
+    {
+      "query_id": "q032",
+      "task_type": "debug",
+      "difficulty": "hard",
+      "precision_at_1": 0.0,
+      "precision_at_5": 0.2,
+      "recall_at_10": 0.5,
+      "mrr": 0.2,
+      "file_coverage_at_1": 0.3333333333333333,
+      "file_coverage_at_5": 0.6666666666666666,
+      "sufficiency_score": 0.29,
+      "routed_local": false,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": false
+    },
+    {
+      "query_id": "q033",
+      "task_type": "debug",
+      "difficulty": "hard",
+      "precision_at_1": 1.0,
+      "precision_at_5": 0.4,
+      "recall_at_10": 0.6666666666666666,
+      "mrr": 1.0,
+      "file_coverage_at_1": 0.3333333333333333,
+      "file_coverage_at_5": 0.6666666666666666,
+      "sufficiency_score": 0.29,
+      "routed_local": false,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": false
+    },
+    {
+      "query_id": "q034",
+      "task_type": "debug",
+      "difficulty": "hard",
+      "precision_at_1": 1.0,
+      "precision_at_5": 0.4,
+      "recall_at_10": 1.0,
+      "mrr": 1.0,
+      "file_coverage_at_1": 0.3333333333333333,
+      "file_coverage_at_5": 1.0,
+      "sufficiency_score": 0.33,
+      "routed_local": false,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": true
+    },
+    {
+      "query_id": "q035",
+      "task_type": "extend",
+      "difficulty": "easy",
+      "precision_at_1": 1.0,
+      "precision_at_5": 0.2,
+      "recall_at_10": 1.0,
+      "mrr": 1.0,
+      "file_coverage_at_1": 1.0,
+      "file_coverage_at_5": 1.0,
+      "sufficiency_score": 0.72,
+      "routed_local": false,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": true
+    },
+    {
+      "query_id": "q036",
+      "task_type": "extend",
+      "difficulty": "easy",
+      "precision_at_1": 1.0,
+      "precision_at_5": 0.2,
+      "recall_at_10": 1.0,
+      "mrr": 1.0,
+      "file_coverage_at_1": 1.0,
+      "file_coverage_at_5": 1.0,
+      "sufficiency_score": 0.66,
+      "routed_local": false,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": true
+    },
+    {
+      "query_id": "q037",
+      "task_type": "extend",
+      "difficulty": "medium",
+      "precision_at_1": 1.0,
+      "precision_at_5": 0.4,
+      "recall_at_10": 0.6666666666666666,
+      "mrr": 1.0,
+      "file_coverage_at_1": 0.3333333333333333,
+      "file_coverage_at_5": 0.6666666666666666,
+      "sufficiency_score": 0.55,
+      "routed_local": false,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": false
+    },
+    {
+      "query_id": "q038",
+      "task_type": "extend",
+      "difficulty": "medium",
+      "precision_at_1": 0.0,
+      "precision_at_5": 0.2,
+      "recall_at_10": 0.3333333333333333,
+      "mrr": 0.3333333333333333,
+      "file_coverage_at_1": 0.0,
+      "file_coverage_at_5": 0.3333333333333333,
+      "sufficiency_score": 0.61,
+      "routed_local": false,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": false
+    },
+    {
+      "query_id": "q039",
+      "task_type": "extend",
+      "difficulty": "medium",
+      "precision_at_1": 1.0,
+      "precision_at_5": 0.2,
+      "recall_at_10": 0.3333333333333333,
+      "mrr": 1.0,
+      "file_coverage_at_1": 0.5,
+      "file_coverage_at_5": 0.5,
+      "sufficiency_score": 0.33,
+      "routed_local": false,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": false
+    },
+    {
+      "query_id": "q040",
+      "task_type": "extend",
+      "difficulty": "medium",
+      "precision_at_1": 0.0,
+      "precision_at_5": 0.0,
+      "recall_at_10": 0.0,
+      "mrr": 0.0,
+      "file_coverage_at_1": 0.0,
+      "file_coverage_at_5": 0.0,
+      "sufficiency_score": 0.53,
+      "routed_local": false,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": false
+    },
+    {
+      "query_id": "q041",
+      "task_type": "extend",
+      "difficulty": "medium",
+      "precision_at_1": 0.0,
+      "precision_at_5": 0.2,
+      "recall_at_10": 0.3333333333333333,
+      "mrr": 0.25,
+      "file_coverage_at_1": 0.0,
+      "file_coverage_at_5": 1.0,
+      "sufficiency_score": 0.59,
+      "routed_local": false,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": false
+    },
+    {
+      "query_id": "q042",
+      "task_type": "extend",
+      "difficulty": "medium",
+      "precision_at_1": 1.0,
+      "precision_at_5": 0.2,
+      "recall_at_10": 0.6666666666666666,
+      "mrr": 1.0,
+      "file_coverage_at_1": 0.3333333333333333,
+      "file_coverage_at_5": 0.3333333333333333,
+      "sufficiency_score": 0.59,
+      "routed_local": false,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": false
+    },
+    {
+      "query_id": "q043",
+      "task_type": "extend",
+      "difficulty": "hard",
+      "precision_at_1": 1.0,
+      "precision_at_5": 0.2,
+      "recall_at_10": 0.25,
+      "mrr": 1.0,
+      "file_coverage_at_1": 0.25,
+      "file_coverage_at_5": 0.25,
+      "sufficiency_score": 0.66,
+      "routed_local": false,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": false
+    },
+    {
+      "query_id": "q044",
+      "task_type": "extend",
+      "difficulty": "hard",
+      "precision_at_1": 1.0,
+      "precision_at_5": 0.2,
+      "recall_at_10": 0.3333333333333333,
+      "mrr": 1.0,
+      "file_coverage_at_1": 0.3333333333333333,
+      "file_coverage_at_5": 0.3333333333333333,
+      "sufficiency_score": 0.54,
+      "routed_local": false,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": false
+    },
+    {
+      "query_id": "q045",
+      "task_type": "extend",
+      "difficulty": "hard",
+      "precision_at_1": 1.0,
+      "precision_at_5": 0.4,
+      "recall_at_10": 0.6666666666666666,
+      "mrr": 1.0,
+      "file_coverage_at_1": 0.3333333333333333,
+      "file_coverage_at_5": 0.6666666666666666,
+      "sufficiency_score": 0.65,
+      "routed_local": false,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": false
+    },
+    {
+      "query_id": "q046",
+      "task_type": "extend",
+      "difficulty": "hard",
+      "precision_at_1": 0.0,
+      "precision_at_5": 0.0,
+      "recall_at_10": 0.3333333333333333,
+      "mrr": 0.1111111111111111,
+      "file_coverage_at_1": 0.0,
+      "file_coverage_at_5": 0.0,
+      "sufficiency_score": 0.48,
+      "routed_local": false,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": false
+    },
+    {
+      "query_id": "q047",
+      "task_type": "review",
+      "difficulty": "easy",
+      "precision_at_1": 1.0,
+      "precision_at_5": 0.2,
+      "recall_at_10": 1.0,
+      "mrr": 1.0,
+      "file_coverage_at_1": 1.0,
+      "file_coverage_at_5": 1.0,
+      "sufficiency_score": 0.34,
+      "routed_local": false,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": true
+    },
+    {
+      "query_id": "q048",
+      "task_type": "review",
+      "difficulty": "medium",
+      "precision_at_1": 0.0,
+      "precision_at_5": 0.0,
+      "recall_at_10": 0.6666666666666666,
+      "mrr": 0.14285714285714285,
+      "file_coverage_at_1": 0.0,
+      "file_coverage_at_5": 0.3333333333333333,
+      "sufficiency_score": 0.29,
+      "routed_local": false,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": false
+    },
+    {
+      "query_id": "q049",
+      "task_type": "review",
+      "difficulty": "medium",
+      "precision_at_1": 0.0,
+      "precision_at_5": 0.2,
+      "recall_at_10": 0.25,
+      "mrr": 0.3333333333333333,
+      "file_coverage_at_1": 0.0,
+      "file_coverage_at_5": 0.5,
+      "sufficiency_score": 0.22,
+      "routed_local": false,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": false
+    },
+    {
+      "query_id": "q050",
+      "task_type": "review",
+      "difficulty": "medium",
+      "precision_at_1": 0.0,
+      "precision_at_5": 0.4,
+      "recall_at_10": 0.6666666666666666,
+      "mrr": 0.5,
+      "file_coverage_at_1": 0.0,
+      "file_coverage_at_5": 0.6666666666666666,
+      "sufficiency_score": 0.38,
+      "routed_local": false,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": false
+    },
+    {
+      "query_id": "q051",
+      "task_type": "review",
+      "difficulty": "medium",
+      "precision_at_1": 0.0,
+      "precision_at_5": 0.2,
+      "recall_at_10": 0.3333333333333333,
+      "mrr": 0.3333333333333333,
+      "file_coverage_at_1": 0.5,
+      "file_coverage_at_5": 0.5,
+      "sufficiency_score": 0.28,
+      "routed_local": false,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": false
+    },
+    {
+      "query_id": "q052",
+      "task_type": "review",
+      "difficulty": "medium",
+      "precision_at_1": 0.0,
+      "precision_at_5": 0.2,
+      "recall_at_10": 0.3333333333333333,
+      "mrr": 0.2,
+      "file_coverage_at_1": 0.0,
+      "file_coverage_at_5": 1.0,
+      "sufficiency_score": 0.25,
+      "routed_local": false,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": false
+    },
+    {
+      "query_id": "q053",
+      "task_type": "review",
+      "difficulty": "hard",
+      "precision_at_1": 0.0,
+      "precision_at_5": 0.4,
+      "recall_at_10": 0.5,
+      "mrr": 0.5,
+      "file_coverage_at_1": 0.0,
+      "file_coverage_at_5": 0.5,
+      "sufficiency_score": 0.31,
+      "routed_local": false,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": false
+    },
+    {
+      "query_id": "q054",
+      "task_type": "review",
+      "difficulty": "hard",
+      "precision_at_1": 0.0,
+      "precision_at_5": 0.2,
+      "recall_at_10": 0.5,
+      "mrr": 0.5,
+      "file_coverage_at_1": 0.25,
+      "file_coverage_at_5": 0.25,
+      "sufficiency_score": 0.27,
+      "routed_local": false,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": false
+    },
+    {
+      "query_id": "q055",
+      "task_type": "general",
+      "difficulty": "easy",
+      "precision_at_1": 1.0,
+      "precision_at_5": 0.2,
+      "recall_at_10": 1.0,
+      "mrr": 1.0,
+      "file_coverage_at_1": 1.0,
+      "file_coverage_at_5": 1.0,
+      "sufficiency_score": 0.75,
+      "routed_local": false,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": true
+    },
+    {
+      "query_id": "q056",
+      "task_type": "general",
+      "difficulty": "easy",
+      "precision_at_1": 1.0,
+      "precision_at_5": 0.2,
+      "recall_at_10": 1.0,
+      "mrr": 1.0,
+      "file_coverage_at_1": 1.0,
+      "file_coverage_at_5": 1.0,
+      "sufficiency_score": 0.2,
+      "routed_local": false,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": true
+    },
+    {
+      "query_id": "q057",
+      "task_type": "general",
+      "difficulty": "medium",
+      "precision_at_1": 0.0,
+      "precision_at_5": 0.4,
+      "recall_at_10": 1.0,
+      "mrr": 0.5,
+      "file_coverage_at_1": 0.5,
+      "file_coverage_at_5": 1.0,
+      "sufficiency_score": 0.62,
+      "routed_local": false,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": true
+    },
+    {
+      "query_id": "q058",
+      "task_type": "general",
+      "difficulty": "medium",
+      "precision_at_1": 1.0,
+      "precision_at_5": 0.6,
+      "recall_at_10": 1.0,
+      "mrr": 1.0,
+      "file_coverage_at_1": 0.3333333333333333,
+      "file_coverage_at_5": 1.0,
+      "sufficiency_score": 0.65,
+      "routed_local": false,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": true
+    },
+    {
+      "query_id": "q059",
+      "task_type": "general",
+      "difficulty": "hard",
+      "precision_at_1": 0.0,
+      "precision_at_5": 0.0,
+      "recall_at_10": 0.0,
+      "mrr": 0.0,
+      "file_coverage_at_1": 0.0,
+      "file_coverage_at_5": 0.0,
+      "sufficiency_score": 1.0,
+      "routed_local": true,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": false
+    },
+    {
+      "query_id": "q060",
+      "task_type": "general",
+      "difficulty": "hard",
+      "precision_at_1": 0.0,
+      "precision_at_5": 0.4,
+      "recall_at_10": 0.5,
+      "mrr": 0.5,
+      "file_coverage_at_1": 0.3333333333333333,
+      "file_coverage_at_5": 0.6666666666666666,
+      "sufficiency_score": 0.77,
+      "routed_local": false,
+      "narrative": {
+        "must_mention_verdicts": [],
+        "must_not_mention_verdicts": [],
+        "narrative_score": null
+      },
+      "correct": false
     }
   ],
   "summary": {
-    "n": 6,
-    "mean_precision_at_1": 0.8333333333333334,
-    "mean_precision_at_5": 0.3,
-    "mean_recall_at_10": 0.9166666666666666,
-    "mean_mrr": 0.888888888888889,
-    "mean_file_coverage_at_1": 0.75,
-    "mean_file_coverage_at_5": 0.9166666666666666,
-    "mean_sufficiency_score": 0.6833333333333335,
-    "local_routing_rate": 0.3333333333333333,
+    "n": 60,
+    "mean_precision_at_1": 0.5166666666666667,
+    "mean_precision_at_5": 0.2466666666666666,
+    "mean_recall_at_10": 0.6844444444444445,
+    "mean_mrr": 0.6928439153439155,
+    "mean_file_coverage_at_1": 0.5208333333333331,
+    "mean_file_coverage_at_5": 0.7611111111111112,
+    "mean_sufficiency_score": 0.5423333333333332,
+    "local_routing_rate": 0.11666666666666667,
     "by_task_type": {
       "locate": {
-        "n": 2,
-        "mean_precision_at_1": 1.0,
-        "mean_precision_at_5": 0.30000000000000004,
-        "mean_recall_at_10": 1.0,
-        "mean_mrr": 1.0,
-        "mean_file_coverage_at_1": 1.0,
+        "n": 10,
+        "mean_precision_at_1": 0.8,
+        "mean_precision_at_5": 0.24,
+        "mean_recall_at_10": 0.8666666666666668,
+        "mean_mrr": 0.875,
+        "mean_file_coverage_at_1": 0.75,
         "mean_file_coverage_at_5": 1.0,
-        "mean_sufficiency_score": 0.8,
+        "mean_sufficiency_score": 0.7120000000000002,
         "local_routing_rate": 0.5
       },
       "explain": {
-        "n": 2,
-        "mean_precision_at_1": 1.0,
-        "mean_precision_at_5": 0.30000000000000004,
-        "mean_recall_at_10": 1.0,
-        "mean_mrr": 1.0,
-        "mean_file_coverage_at_1": 1.0,
-        "mean_file_coverage_at_5": 1.0,
-        "mean_sufficiency_score": 0.755,
-        "local_routing_rate": 0.5
+        "n": 12,
+        "mean_precision_at_1": 0.4166666666666667,
+        "mean_precision_at_5": 0.2666666666666668,
+        "mean_recall_at_10": 0.7138888888888889,
+        "mean_mrr": 0.6944444444444443,
+        "mean_file_coverage_at_1": 0.7291666666666666,
+        "mean_file_coverage_at_5": 0.875,
+        "mean_sufficiency_score": 0.6841666666666666,
+        "local_routing_rate": 0.08333333333333333
       },
       "debug": {
-        "n": 1,
-        "mean_precision_at_1": 0.0,
-        "mean_precision_at_5": 0.4,
-        "mean_recall_at_10": 1.0,
-        "mean_mrr": 0.3333333333333333,
-        "mean_file_coverage_at_1": 0.0,
-        "mean_file_coverage_at_5": 1.0,
-        "mean_sufficiency_score": 0.26,
+        "n": 12,
+        "mean_precision_at_1": 0.5,
+        "mean_precision_at_5": 0.26666666666666666,
+        "mean_recall_at_10": 0.7638888888888888,
+        "mean_mrr": 0.6902777777777779,
+        "mean_file_coverage_at_1": 0.49999999999999994,
+        "mean_file_coverage_at_5": 0.8055555555555555,
+        "mean_sufficiency_score": 0.33083333333333337,
         "local_routing_rate": 0.0
       },
-      "dependency-traversal": {
-        "n": 1,
-        "mean_precision_at_1": 1.0,
-        "mean_precision_at_5": 0.2,
-        "mean_recall_at_10": 0.5,
-        "mean_mrr": 1.0,
-        "mean_file_coverage_at_1": 0.5,
-        "mean_file_coverage_at_5": 0.5,
-        "mean_sufficiency_score": 0.73,
+      "extend": {
+        "n": 12,
+        "mean_precision_at_1": 0.6666666666666666,
+        "mean_precision_at_5": 0.19999999999999998,
+        "mean_recall_at_10": 0.4930555555555556,
+        "mean_mrr": 0.7245370370370371,
+        "mean_file_coverage_at_1": 0.34027777777777785,
+        "mean_file_coverage_at_5": 0.5069444444444444,
+        "mean_sufficiency_score": 0.5758333333333333,
         "local_routing_rate": 0.0
+      },
+      "review": {
+        "n": 8,
+        "mean_precision_at_1": 0.125,
+        "mean_precision_at_5": 0.225,
+        "mean_recall_at_10": 0.53125,
+        "mean_mrr": 0.4386904761904762,
+        "mean_file_coverage_at_1": 0.21875,
+        "mean_file_coverage_at_5": 0.59375,
+        "mean_sufficiency_score": 0.2925,
+        "local_routing_rate": 0.0
+      },
+      "general": {
+        "n": 6,
+        "mean_precision_at_1": 0.5,
+        "mean_precision_at_5": 0.3,
+        "mean_recall_at_10": 0.75,
+        "mean_mrr": 0.6666666666666666,
+        "mean_file_coverage_at_1": 0.5277777777777778,
+        "mean_file_coverage_at_5": 0.7777777777777778,
+        "mean_sufficiency_score": 0.6649999999999999,
+        "local_routing_rate": 0.16666666666666666
       }
     },
     "by_difficulty": {
       "easy": {
-        "n": 2,
+        "n": 15,
         "mean_precision_at_1": 1.0,
-        "mean_precision_at_5": 0.30000000000000004,
+        "mean_precision_at_5": 0.20000000000000004,
         "mean_recall_at_10": 1.0,
         "mean_mrr": 1.0,
         "mean_file_coverage_at_1": 1.0,
         "mean_file_coverage_at_5": 1.0,
-        "mean_sufficiency_score": 0.8,
-        "local_routing_rate": 0.5
+        "mean_sufficiency_score": 0.584,
+        "local_routing_rate": 0.2
       },
       "medium": {
-        "n": 3,
-        "mean_precision_at_1": 1.0,
-        "mean_precision_at_5": 0.26666666666666666,
-        "mean_recall_at_10": 0.8333333333333334,
-        "mean_mrr": 1.0,
-        "mean_file_coverage_at_1": 0.8333333333333334,
-        "mean_file_coverage_at_5": 0.8333333333333334,
-        "mean_sufficiency_score": 0.7466666666666666,
-        "local_routing_rate": 0.3333333333333333
+        "n": 29,
+        "mean_precision_at_1": 0.3793103448275862,
+        "mean_precision_at_5": 0.2620689655172415,
+        "mean_recall_at_10": 0.6293103448275862,
+        "mean_mrr": 0.6009031198686372,
+        "mean_file_coverage_at_1": 0.4137931034482759,
+        "mean_file_coverage_at_5": 0.764367816091954,
+        "mean_sufficiency_score": 0.5172413793103448,
+        "local_routing_rate": 0.10344827586206896
       },
       "hard": {
-        "n": 1,
-        "mean_precision_at_1": 0.0,
-        "mean_precision_at_5": 0.4,
-        "mean_recall_at_10": 1.0,
-        "mean_mrr": 0.3333333333333333,
-        "mean_file_coverage_at_1": 0.0,
-        "mean_file_coverage_at_5": 1.0,
-        "mean_sufficiency_score": 0.26,
-        "local_routing_rate": 0.0
+        "n": 16,
+        "mean_precision_at_1": 0.3125,
+        "mean_precision_at_5": 0.2625,
+        "mean_recall_at_10": 0.4885416666666666,
+        "mean_mrr": 0.5715277777777777,
+        "mean_file_coverage_at_1": 0.26562500000000006,
+        "mean_file_coverage_at_5": 0.53125,
+        "mean_sufficiency_score": 0.5487500000000001,
+        "local_routing_rate": 0.0625
       }
     }
   }

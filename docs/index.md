@@ -366,7 +366,7 @@ See [reference_architecture.md](file:///Users/deepg/Desktop/KnowCode/docs/archit
 - ✅ Fix `metadata` type restriction (`dict[str, str]` → `dict[str, Any]`)
 - ✅ Harden configuration loading (logging, validation, strict server mode)
 - ✅ Decompose `KnowCodeService` and introduce `Protocol` interfaces
-- ✅ Add layer contract tests and harden retrieval evals (parser, store roundtrip, golden-query smoke baseline — see [docs/retrieval-evals.md](retrieval-evals.md))
+- ✅ Add layer contract tests and harden retrieval evals (parser, store roundtrip, 60-query agent-curated baseline pending human review — see [docs/retrieval-evals.md](retrieval-evals.md))
 
 **Future releases:**
 - v2.4: Multi-level documentation synthesis (in progress: architecture/module/function export + freshness manifest)

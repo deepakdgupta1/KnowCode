@@ -24,12 +24,16 @@ The golden dataset is stored in [golden_v1.0.json](file:///Users/deepg/Desktop/K
 
 Metadata for the dataset version is stored in [golden_v1.0.meta.json](file:///Users/deepg/Desktop/KnowCode/tests/eval/golden/golden_v1.0.meta.json) to guard against codebase line range drift.
 
-**Current status:** `golden_v1.0.json` is a committed smoke baseline, not the
-full Phase 1 dataset. Its metadata is marked with
-`"dataset_status": "smoke_baseline"` and includes per-source-file hashes so
-unrelated commits do not invalidate the eval gate. The full 60-record sampling
-plan is committed at
-[phase1_plan.json](file:///Users/deepg/Desktop/KnowCode/tests/eval/pipeline/phase1_plan.json).
+**Current status:** `golden_v1.0.json` now contains the full 60-record Phase 1
+strata. Its metadata is marked with
+`"dataset_status": "agent_curated_pending_human_review"` and includes
+per-source-file hashes so unrelated commits do not invalidate the eval gate.
+The records are source-verified, but the human spot-check gate has not yet been
+completed, so this is not a blessed Phase 1 release.
+
+The committed baseline currently shows the first product finding:
+`sufficiency_score` is over-confident on this corpus. At the default `0.8`
+routing threshold, `answer_correctness@0.8` is `0.571` across 7 routed records.
 
 ### How to Add a New Query
 1. Open [golden_v1.0.json](file:///Users/deepg/Desktop/KnowCode/tests/eval/golden/golden_v1.0.json).
@@ -87,8 +91,8 @@ The output contains:
 ## Appendix A: Golden Dataset Pipeline Design Spec
 
 
-**Status:** Design spec — Phase 1 not yet executed
-**Owner:** TBD
+**Status:** Phase 1 agent-curated draft assembled; human spot-check pending
+**Owner:** Solo
 **Schema version:** `1.0.0`
 **Target artifact:** `tests/eval/golden/golden_v1.0.json`
 
@@ -753,11 +757,11 @@ Oracle answer to review:
 ## 11. Metrics & Success Criteria
 
 **Phase 1 is "done" when all of:**
-- ≥ 56 of 60 records make it to `golden_v1.0.json` (< 7% attrition).
+- ≥ 56 of 60 records make it to `golden_v1.0.json` (< 7% attrition). ✅
 - Human spot-check passes both ceilings in §8.
-- Every (task_type, difficulty) cell has ≥ 80% of its target count filled.
-- `tests/eval/harness/test_retrieval_quality.py` runs green on `main` and produces a committed baseline in `tests/eval/golden/baseline_v1.0.json`.
-- The calibration curve for `sufficiency_score` is published (even if it reveals the score is poorly calibrated — that's the point).
+- Every (task_type, difficulty) cell has ≥ 80% of its target count filled. ✅
+- `tests/eval/harness/test_retrieval_quality.py` runs green on `main` and produces a committed baseline in `tests/eval/golden/baseline_v1.0.json`. ✅
+- The calibration curve for `sufficiency_score` is published (even if it reveals the score is poorly calibrated — that's the point). ✅
 
 **Phase 1 reveals a finding — any of:**
 - Sufficiency score is well-calibrated → current system is defensible; future work can focus elsewhere.
