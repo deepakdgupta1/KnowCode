@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://knowcode.dev/schemas/prose/golden_v0.schema.json",
+  "title": "Prose GoldenLabel",
+  "description": "Final committed record for the SDLC document-collateral retrieval golden set. Extends the code GoldenLabel (tests/eval/golden/golden_v1.0.json): query_type replaces task_type; expected_doc_spans replace expected_entities/expected_files; traceability and synthesis add expected_trace_path / expected_doc_types. See docs/research/document_collateral_retrieval_2026.md section 6.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "query_id",
+    "query_text",
+    "query_type",
+    "difficulty",
+    "expected_doc_spans",
+    "must_mention_facts",
+    "must_not_mention_facts",
+    "validation",
+    "schema_version"
+  ],
+  "properties": {
+    "query_id": {
+      "type": "string",
+      "pattern": "^pq[0-9]{3,}$|^pq_[a-z0-9_]+$",
+      "description": "e.g. 'pq001' or 'pq_example_trace'."
+    },
+    "query_text": { "type": "string", "minLength": 8 },
+    "query_type": { "enum": ["fact_lookup", "traceability", "synthesis"] },
+    "difficulty": { "enum": ["easy", "medium", "hard"] },
+    "expected_doc_spans": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/docSpan" },
+      "description": "Prose analogue of expected_entities + expected_files: the passages a correct retrieval must surface."
+    },
+    "expected_trace_path": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "string",
+        "pattern": "^(feature|requirement|persona|component|release|decision|client):[a-z0-9._/-]+$|^[a-z0-9._/-]+\\.md$",
+        "description": "Ordered graph nodes for a traceability walk: typed entity refs (e.g. 'feature:atlas-rate-limiting') or document ids ('prd/atlas-rate-limiting.md')."
+      }
+    },
+    "expected_doc_types": {
+      "type": "array",
+      "default": [],
+      "items": { "$ref": "#/$defs/docType" },
+      "description": "For synthesis: the collection(s) in scope (e.g. ['case_study'])."
+    },
+    "must_mention_facts": { "type": "array", "items": { "type": "string" } },
+    "must_not_mention_facts": { "type": "array", "items": { "type": "string" } },
+    "correct": { "type": "boolean" },
+    "validation": { "$ref": "#/$defs/validation" },
+    "provenance": { "$ref": "#/$defs/provenance" },
+    "schema_version": { "const": "0.1.0" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "query_type": { "const": "traceability" } } },
+      "then": {
+        "required": ["expected_trace_path"],
+        "properties": {
+          "expected_trace_path": { "minItems": 2 },
+          "expected_doc_spans": { "minItems": 2 }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "query_type": { "const": "synthesis" } } },
+      "then": {
+        "required": ["expected_doc_types"],
+        "properties": {
+          "expected_doc_spans": { "minItems": 3 },
+          "expected_doc_types": { "minItems": 1 }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "docType": {
+      "enum": [
+        "problem_statement", "prd", "architecture", "hld", "lld",
+        "release_notes", "user_guide", "install_guide", "support_manual",
+        "brochure", "feature_catalog", "case_study", "whitepaper"
+      ]
+    },
+    "docSpan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["doc_id", "doc_type", "heading_path", "line_range"],
+      "properties": {
+        "doc_id": { "type": "string", "description": "Repo-relative path of the document." },
+        "doc_type": { "$ref": "#/$defs/docType" },
+        "heading_path": {
+          "type": "string",
+          "description": "Breadcrumb of the section, e.g. 'PRD > Requirements > Rate Limiting'."
+        },
+        "line_range": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 1 },
+          "minItems": 2,
+          "maxItems": 2,
+          "description": "[start, end], 1-indexed, start <= end (cross-field check enforced by the mechanical gate)."
+        },
+        "role": { "enum": ["primary", "supporting", "contextual"] }
+      }
+    },
+    "validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_verified", "human_reviewed", "method"],
+      "properties": {
+        "source_verified": { "type": "boolean" },
+        "human_reviewed": { "type": "boolean" },
+        "method": { "type": "string" }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "properties": {
+        "query_author": { "type": "string" },
+        "oracle": { "type": "string" },
+        "adversary": { "type": "string" },
+        "human_reviewer": { "type": ["string", "null"] },
+        "reviewed_at": { "type": ["string", "null"] }
+      }
+    }
+  }
+}
