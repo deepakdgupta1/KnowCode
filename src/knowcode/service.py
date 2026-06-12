@@ -309,9 +309,9 @@ class KnowCodeService:
                 files = scanner.scan_all()
                 if files:
                     latest_source_change = max(os.path.getmtime(f.path) for f in files)
-        except Exception as e:
+        except OSError as e:
             import logging
-            logging.getLogger(__name__).warning("Failed to check source staleness: %s", e)
+            logging.getLogger(__name__).warning("Failed to check source staleness (OS error): %s", e)
 
         if last_store_rebuild == 0.0:
             is_stale = True

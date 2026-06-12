@@ -312,6 +312,9 @@ class KnowCodeMCPServer:
         Returns:
             JSON string result.
         """
+        if not isinstance(arguments, dict):
+            return json.dumps({"error": "arguments must be a dictionary"})
+            
         try:
             from knowcode.telemetry import log_event
             log_event(
@@ -322,37 +325,47 @@ class KnowCodeMCPServer:
                     "arguments": arguments,
                 }
             )
-        except Exception as e:
+        except OSError as e:
             import logging
-            logging.getLogger(__name__).warning("Ignored exception: %s", e)
+            logging.getLogger(__name__).warning("Ignored telemetry OS error: %s", e)
 
         try:
             if name == "search_codebase":
-
+                if "query" not in arguments or not isinstance(arguments["query"], str):
+                    raise ValueError("search_codebase requires 'query' as a string")
+                limit = arguments.get("limit", 10)
+                if not isinstance(limit, int):
+                    raise ValueError("'limit' must be an integer")
                 result = self.search_codebase(
                     query=arguments["query"],
-                    limit=arguments.get("limit", 10),
+                    limit=limit,
                 )
             elif name == "get_entity_context":
+                if "entity_id" not in arguments or not isinstance(arguments["entity_id"], str):
+                    raise ValueError("get_entity_context requires 'entity_id' as a string")
                 result = self.get_entity_context(  # type: ignore
                     entity_id=arguments["entity_id"],
-                    task_type=arguments.get("task_type", "general"),
-                    max_tokens=arguments.get("max_tokens", 2000),
+                    task_type=str(arguments.get("task_type", "general")),
+                    max_tokens=int(arguments.get("max_tokens", 2000)),
                 )
             elif name == "trace_calls":
+                if "entity_id" not in arguments or not isinstance(arguments["entity_id"], str):
+                    raise ValueError("trace_calls requires 'entity_id' as a string")
                 result = self.trace_calls(
                     entity_id=arguments["entity_id"],
-                    direction=arguments.get("direction", "callees"),
-                    depth=arguments.get("depth", 1),
+                    direction=str(arguments.get("direction", "callees")),
+                    depth=int(arguments.get("depth", 1)),
                 )
             elif name == "retrieve_context_for_query":
+                if "query" not in arguments or not isinstance(arguments["query"], str):
+                    raise ValueError("retrieve_context_for_query requires 'query' as a string")
                 result = self.retrieve_context_for_query(  # type: ignore
                     query=arguments["query"],
-                    task_type=arguments.get("task_type", "auto"),
-                    max_tokens=arguments.get("max_tokens", 4000),
-                    limit_entities=arguments.get("limit_entities", 3),
-                    expand_deps=arguments.get("expand_deps", True),
-                    verbosity=arguments.get("verbosity", "minimal"),
+                    task_type=str(arguments.get("task_type", "auto")),
+                    max_tokens=int(arguments.get("max_tokens", 4000)),
+                    limit_entities=int(arguments.get("limit_entities", 3)),
+                    expand_deps=bool(arguments.get("expand_deps", True)),
+                    verbosity=str(arguments.get("verbosity", "minimal")),
                 )
             else:
                 result = {"error": f"Unknown tool: {name}"}  # type: ignore
@@ -363,6 +376,8 @@ class KnowCodeMCPServer:
                 {"error": str(e), "code": e.code, "hint": e.hint},
                 separators=(",", ":"),
             )
+        except ValueError as e:
+            return json.dumps({"error": f"Validation Error: {e}"}, separators=(',', ':'))
         except Exception as e:
             return json.dumps({"error": str(e)}, separators=(',', ':'))
 

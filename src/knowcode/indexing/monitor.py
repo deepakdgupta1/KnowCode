@@ -12,8 +12,7 @@ try:
     from watchdog.events import FileSystemEventHandler
 except ImportError:
     Observer = None  # type: ignore[assignment]
-    class FileSystemEventHandler: 
-        pass  # type: ignore[no-redef]
+    FileSystemEventHandler = object  # type: ignore[misc, assignment]
 
 if TYPE_CHECKING:
     from knowcode.indexing.background_indexer import BackgroundIndexer

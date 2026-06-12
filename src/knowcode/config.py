@@ -185,10 +185,9 @@ class AppConfig:
             )
         except Exception as e:
             message = f"Failed to load config from {path}: {e}"
-            if strict:
-                raise ValueError(message) from e
-            logger.warning(message)
-            return cls.default()
+            # RF-001-D004: NEVER swallow errors silently. 
+            # If a config file is present but malformed, fail explicitly.
+            raise ValueError(message) from e
 
     @classmethod
     def _validate_keys(cls, data: dict[str, Any], *, path: Path, strict: bool) -> None:

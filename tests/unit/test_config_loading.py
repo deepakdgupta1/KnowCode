@@ -105,15 +105,12 @@ def test_load_strict_rejects_invalid_root_type(tmp_path: Path) -> None:
         AppConfig.load(str(config_file), strict=True)
 
 
-def test_load_non_strict_invalid_file_falls_back_to_default(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
+def test_load_non_strict_invalid_file_raises_error(
+    tmp_path: Path
 ) -> None:
-    """Non-strict mode should warn and return defaults on invalid config."""
+    """Non-strict mode should still raise on invalid config to prevent silent failures."""
     config_file = tmp_path / "aimodels.yaml"
     _write(config_file, "config: [")
 
-    with caplog.at_level(logging.WARNING, logger="knowcode.config"):
-        cfg = AppConfig.load(str(config_file))
-
-    assert cfg.models  # default models loaded
-    assert any("Failed to load config" in rec.message for rec in caplog.records)
+    with pytest.raises(ValueError, match="Failed to load config from"):
+        AppConfig.load(str(config_file))
