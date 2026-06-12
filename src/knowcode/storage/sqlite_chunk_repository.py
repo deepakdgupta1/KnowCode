@@ -15,7 +15,7 @@ import json
 import sqlite3
 import threading
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 
 from knowcode.data_models import CodeChunk
 from knowcode.storage.chunk_repository import ChunkRepository
@@ -131,7 +131,7 @@ class SqliteChunkRepository(ChunkRepository):
         idx = entity_id.find("::")
         return entity_id[:idx] if idx >= 0 else entity_id
 
-    def _row_to_chunk(self, row: tuple) -> CodeChunk:  # type: ignore[type-arg]
+    def _row_to_chunk(self, row: tuple[Any, ...]) -> CodeChunk:
         """Convert a database row to a CodeChunk.
 
         Expected column order:

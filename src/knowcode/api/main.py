@@ -53,7 +53,7 @@ def create_app(store_path: str = ".", watch: bool = False) -> FastAPI:
 
     return app
 
-def start_server(host: str = "127.0.0.1", port: int = 8000, store_path: str = ".", watch: bool = False):  # type: ignore
+def start_server(host: str = "127.0.0.1", port: int = 8000, store_path: str = ".", watch: bool = False) -> None:
     """Start the uvicorn server with the configured app.
 
     Args:

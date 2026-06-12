@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 import hashlib
 import math
 import os
-from typing import Any
+from typing import Any, cast
 
 from knowcode.config import AppConfig
 from knowcode.data_models import EmbeddingConfig
@@ -135,14 +135,14 @@ class VoyageAIEmbeddingProvider(EmbeddingProvider):
         """
         super().__init__(config)
         self.api_key_env = api_key_env
-        self.client = None
+        self.client: Any = None
 
-    def _get_client(self):  # type: ignore
+    def _get_client(self) -> Any:  
         """Return an initialized VoyageAI client, loading credentials if needed."""
         if self.client is None:
             from knowcode.llm.voyageai_client import get_voyageai_client
 
-            self.client = get_voyageai_client(self.api_key_env)  # type: ignore
+            self.client = get_voyageai_client(self.api_key_env)  
 
         if self.client is None:
             raise ValueError(
@@ -157,7 +157,7 @@ class VoyageAIEmbeddingProvider(EmbeddingProvider):
         if not texts:
             return []
 
-        client = self._get_client()  # type: ignore
+        client = self._get_client()  
         embeddings = client.embed(
             texts=texts,
             model=self.config.model_name,
@@ -169,11 +169,11 @@ class VoyageAIEmbeddingProvider(EmbeddingProvider):
         if self.config.normalize:
             embeddings = [self._normalize(e) for e in embeddings]
 
-        return embeddings  # type: ignore
+        return cast(list[list[float]], embeddings)  
 
     def embed_single(self, text: str) -> list[float]:
         """Generate a query embedding for a single text input."""
-        client = self._get_client()  # type: ignore
+        client = self._get_client()  
         embeddings = client.embed(
             texts=[text],
             model=self.config.model_name,

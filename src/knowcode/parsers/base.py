@@ -131,7 +131,7 @@ class TreeSitterParser:
 
     def _get_text(self, node: Any) -> str:
         """Get text content of a node."""
-        return node.text.decode("utf8")  # type: ignore
+        return str(node.text.decode("utf8"))  
 
     def _get_location(self, node: Any, file_path: Path) -> Location:
         """Get location object for a node."""

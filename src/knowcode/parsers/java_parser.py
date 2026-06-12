@@ -173,7 +173,7 @@ class JavaParser(TreeSitterParser):
              
         return entities, rels
 
-    def _walk_for_calls(self, node, source_id) -> Any:  # type: ignore
+    def _walk_for_calls(self, node: Any, source_id: str) -> Any:  
         rels = []
         cursor = node.walk()
         visited_children = False

@@ -289,7 +289,7 @@ class JavaScriptParser(TreeSitterParser):
 
         return entity, relationships
 
-    def _walk_for_calls(self, node, source_id) -> Any:  # type: ignore
+    def _walk_for_calls(self, node: Any, source_id: str) -> Any:  
         """Recursive walk to find call_expression.
         
         Note: We use a cursor walk here which is significantly more performant 
@@ -325,7 +325,7 @@ class JavaScriptParser(TreeSitterParser):
                 
         return rels
 
-    def _extract_call(self, node, source_id) -> Any:  # type: ignore
+    def _extract_call(self, node: Any, source_id: str) -> Any:  
         # call_expression: function: (identifier) arguments: (arguments)
         func_node = node.child_by_field_name("function")
         if not func_node:

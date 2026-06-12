@@ -4,15 +4,16 @@ from __future__ import annotations
 
 from pathlib import Path
 from knowcode.indexing.scanner import Scanner
-from typing import Optional, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING, Any
 
 
 try:
     from watchdog.observers import Observer
     from watchdog.events import FileSystemEventHandler
 except ImportError:
-    Observer = None  # type: ignore
-    FileSystemEventHandler = object  # type: ignore
+    Observer = None  # type: ignore[assignment]
+    class FileSystemEventHandler: 
+        pass  # type: ignore[no-redef]
 
 if TYPE_CHECKING:
     from knowcode.indexing.background_indexer import BackgroundIndexer
@@ -30,7 +31,7 @@ class FileMonitor:
         """
         self.root_dir = Path(root_dir)
         self.background_indexer = background_indexer
-        self.observer = None
+        self.observer: Any = None
 
     def start(self) -> None:
         """Start watching the directory for changes."""
@@ -39,9 +40,9 @@ class FileMonitor:
             return
 
         event_handler = IndexingHandler(self.background_indexer)
-        self.observer = Observer()  # type: ignore
-        self.observer.schedule(event_handler, str(self.root_dir), recursive=True)  # type: ignore
-        self.observer.start()  # type: ignore
+        self.observer = Observer()
+        self.observer.schedule(event_handler, str(self.root_dir), recursive=True)
+        self.observer.start()
 
     def stop(self) -> None:
         """Stop watching and join the observer thread."""
@@ -61,17 +62,17 @@ class IndexingHandler(FileSystemEventHandler):
         """
         self.background_indexer = background_indexer
 
-    def on_modified(self, event):   # type: ignore
+    def on_modified(self, event: Any) -> None:
         """Handle modified file events."""
         if not event.is_directory:
             self._handle_change(event.src_path)
 
-    def on_created(self, event):   # type: ignore
+    def on_created(self, event: Any) -> None:
         """Handle created file events."""
         if not event.is_directory:
             self._handle_change(event.src_path)
 
-    def on_deleted(self, event):   # type: ignore
+    def on_deleted(self, event: Any) -> None:
         """Handle deleted file events."""
         if not event.is_directory and self.background_indexer:
             path = Path(event.src_path)
@@ -81,7 +82,7 @@ class IndexingHandler(FileSystemEventHandler):
                 else:
                     self._handle_change(event.src_path)
 
-    def on_moved(self, event):   # type: ignore
+    def on_moved(self, event: Any) -> None:
         """Handle moved file events."""
         if not event.is_directory and self.background_indexer:
             src_path = Path(event.src_path)

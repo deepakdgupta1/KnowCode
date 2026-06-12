@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Protocol, Optional, TYPE_CHECKING
+from typing import Protocol, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from knowcode.retrieval.orchestrator import SearchEngineProtocol
+    pass
 
 
 from knowcode.data_models import EmbeddingConfig, Entity

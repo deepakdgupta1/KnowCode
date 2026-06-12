@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from knowcode.storage.chunk_repository import ChunkRepository
     from knowcode.protocols import KnowledgeStoreProtocol
-    from knowcode.models import CodeChunk  # type: ignore
+    from knowcode.data_models import CodeChunk
 
 
 def expand_dependencies(

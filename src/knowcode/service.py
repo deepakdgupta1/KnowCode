@@ -14,11 +14,17 @@ from knowcode.retrieval.orchestrator import RetrievalOrchestrator
 from knowcode.storage.knowledge_store import KnowledgeStore
 from knowcode.storage.sqlite_knowledge_store import SqliteKnowledgeStore
 from knowcode.protocols import VectorStoreProtocol
+from knowcode.llm.embedding import create_embedding_provider
+from knowcode.indexing.indexer import Indexer
+from knowcode.storage.sqlite_chunk_repository import SqliteChunkRepository
+from knowcode.storage.lancedb_vector_store import LanceDBVectorStore
+from knowcode.storage.vector_store import VectorStore
+from knowcode.retrieval.hybrid_index import HybridIndex
+from knowcode.retrieval.search_engine import SearchEngine
+from knowcode.retrieval.exact_query_engine import ExactQueryEngine
+from knowcode.data_models import TaskType
 
 if TYPE_CHECKING:
-    from knowcode.data_models import TaskType
-    from knowcode.indexing.indexer import Indexer
-    from knowcode.retrieval.search_engine import SearchEngine
     from knowcode.retrieval.orchestrator import SearchEngineProtocol
 
 
@@ -149,9 +155,6 @@ class KnowCodeService:
             Initialized Indexer instance.
         """
         if self._indexer is None:
-            from knowcode.llm.embedding import create_embedding_provider
-            from knowcode.indexing.indexer import Indexer
-            from knowcode.storage.sqlite_chunk_repository import SqliteChunkRepository
 
             provider = create_embedding_provider(app_config=self.app_config)
             resolved_index_path = Path(index_path) if index_path else self._index_path()
@@ -162,10 +165,8 @@ class KnowCodeService:
             dimension = provider.config.dimension
             vector_store: VectorStoreProtocol
             if self.app_config.vector_backend == "lancedb":
-                from knowcode.storage.lancedb_vector_store import LanceDBVectorStore
                 vector_store = LanceDBVectorStore(dimension=dimension, path=vs_path)
             else:
-                from knowcode.storage.vector_store import VectorStore
                 vector_store = VectorStore(dimension=dimension, index_path=vs_path)
 
             self._indexer = Indexer(provider, chunk_repo=chunk_repo, vector_store=vector_store)
@@ -187,8 +188,6 @@ class KnowCodeService:
             SearchEngine wired to the current knowledge store.
         """
         if self._search_engine is None:
-            from knowcode.retrieval.hybrid_index import HybridIndex
-            from knowcode.retrieval.search_engine import SearchEngine
 
             indexer = self.get_indexer(index_path)
             hybrid_index = HybridIndex(
@@ -215,8 +214,6 @@ class KnowCodeService:
         Returns:
             ExactQueryEngine instance.
         """
-        from knowcode.retrieval.exact_query_engine import ExactQueryEngine
-        
         if index_path is None:
             index_path = self.ensure_index()
             
@@ -378,7 +375,6 @@ class KnowCodeService:
             count = indexer.index_directory(directory)
             
         indexer.save(resolved_index_path)
-        self._indexer = indexer
         return count
 
     def _extract_query_keywords(self, query: str) -> list[str]:

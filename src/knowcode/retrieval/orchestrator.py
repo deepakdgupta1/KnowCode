@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional, Protocol
+import logging
+
+from knowcode.llm.query_classifier import classify_query
+from knowcode.telemetry import log_event
 
 if TYPE_CHECKING:
     from knowcode.data_models import TaskType
@@ -80,8 +84,6 @@ class RetrievalOrchestrator:
         is_stale: bool = False,
     ) -> dict[str, Any]:
         """Retrieve an evidence-backed context bundle for a query."""
-        from knowcode.llm.query_classifier import classify_query
-
         errors: list[str] = []
         self._service._assert_store_exists()
         index_path = self._service._assert_index_exists()
@@ -239,8 +241,6 @@ class RetrievalOrchestrator:
 
         try:
             store_path = self._service._assert_store_exists()
-            from knowcode.telemetry import log_event
-
             log_event(
                 store_path,
                 {
@@ -259,7 +259,6 @@ class RetrievalOrchestrator:
                 },
             )
         except Exception as e:
-            import logging
             logging.getLogger(__name__).warning("Failed to log telemetry: %s", e)
 
         if verbosity == "diagnostic":

@@ -80,7 +80,7 @@ def classify_query(query: str) -> Tuple[TaskType, float]:
     if max_score == 0:
         return TaskType.GENERAL, 0.0
     
-    best_type = max(scores, key=scores.get)  # type: ignore
+    best_type = max(scores, key=scores.__getitem__)  
     
     # Calculate confidence based on score relative to maximum possible
     # and gap to second-best

@@ -197,7 +197,7 @@ def main() -> None:
     print("Pre-embedding queries in batch...")
     queries = [r["query_text"] for r in records]
     provider = service.get_indexer().embedding_provider
-    embeddings = provider.embed(queries)
+    embeddings = [provider.embed_single(q) for q in queries]
     
     query_embeddings_cache = {}
     for q, emb in zip(queries, embeddings):
