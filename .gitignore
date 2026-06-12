@@ -212,4 +212,8 @@ docs_test/
 #aimodels.yaml
 .knowcode/
 knowcode_index/
-
+knowledge.db
+.DS_Store
+tests/test_sample-prose
+tests/.DS_Store
+.gitignore

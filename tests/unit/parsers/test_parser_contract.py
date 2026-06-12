@@ -3,6 +3,7 @@ import pytest
 from knowcode.data_models import ParseResult, Entity, Relationship
 from knowcode.parsers.python_parser import PythonParser
 from knowcode.parsers.markdown_parser import MarkdownParser
+from knowcode.parsers.rst_parser import RstParser
 from knowcode.parsers.yaml_parser import YamlParser
 from knowcode.parsers.javascript_parser import JavaScriptParser
 from knowcode.parsers.java_parser import JavaParser
@@ -13,6 +14,7 @@ from knowcode.parsers.typescript_parser import TypeScriptParser
 PARSERS = [
     (PythonParser, "x = 1\n", ".py"),
     (MarkdownParser, "# Hello\n", ".md"),
+    (RstParser, "Title\n=====\n\nBody.\n", ".rst"),
     (YamlParser, "key: value\n", ".yaml"),
     (JavaScriptParser, "let x = 1;\n", ".js"),
     (JavaParser, "class Main {}\n", ".java"),

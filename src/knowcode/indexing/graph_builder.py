@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Optional
 
 from knowcode.data_models import Entity, ParseResult, Relationship
-from knowcode.parsers import MarkdownParser, PythonParser, YamlParser
+from knowcode.parsers import MarkdownParser, PythonParser, RstParser, YamlParser
 from knowcode.parsers.javascript_parser import JavaScriptParser
 from knowcode.parsers.typescript_parser import TypeScriptParser
 from knowcode.parsers.java_parser import JavaParser
@@ -25,6 +25,7 @@ class GraphBuilder:
         """Initialize the graph builder with parsers."""
         self.python_parser = PythonParser()
         self.markdown_parser = MarkdownParser()
+        self.rst_parser = RstParser()
         self.yaml_parser = YamlParser()
         self.js_parser = JavaScriptParser()
         self.ts_parser = TypeScriptParser()
@@ -101,6 +102,8 @@ class GraphBuilder:
             return self.python_parser.parse_file(file_info.path)
         elif file_info.extension == ".md":
             return self.markdown_parser.parse_file(file_info.path)
+        elif file_info.extension == ".rst":
+            return self.rst_parser.parse_file(file_info.path)
         elif file_info.extension in {".yaml", ".yml"}:
             return self.yaml_parser.parse_file(file_info.path)
         elif file_info.extension in {".js", ".jsx"}:
