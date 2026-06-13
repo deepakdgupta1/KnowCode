@@ -87,13 +87,12 @@ class Indexer:
                 total_chunks += 1
                 
         # Store current commit hash for future incremental indexing
-        import subprocess
         try:
-            res = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(root_path), capture_output=True, text=True, check=True)
-            self.manifest["last_indexed_commit"] = res.stdout.strip()
+            import git
+            repo = git.Repo(str(root_path), search_parent_directories=True)
+            self.manifest["last_indexed_commit"] = repo.head.commit.hexsha
         except Exception as e:
-            import logging
-            logging.getLogger(__name__).warning("Ignored exception: %s", e)
+            logger.warning("Failed to get git commit for manifest: %s", e)
             
         return total_chunks
 
@@ -106,7 +105,6 @@ class Indexer:
         Returns:
             Number of new chunks added.
         """
-        import subprocess
         root_path = Path(root_dir).resolve()
         
         # Determine last indexed commit
@@ -114,8 +112,9 @@ class Indexer:
         
         # Get current commit
         try:
-            res = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(root_path), capture_output=True, text=True, check=True)
-            current_commit = res.stdout.strip()
+            import git
+            repo = git.Repo(str(root_path), search_parent_directories=True)
+            current_commit = repo.head.commit.hexsha
         except Exception as e:
             logger.warning(f"Failed to get current git commit: {e}. Incremental indexer falling back to full index.")
             return self.index_directory(root_dir)
@@ -131,20 +130,20 @@ class Indexer:
 
         # Get changed files
         try:
-            diff_res = subprocess.run(
-                ["git", "diff", "--name-only", last_commit, current_commit],
-                cwd=str(root_path), capture_output=True, text=True, check=True
-            )
-            untracked_res = subprocess.run(
-                ["git", "ls-files", "--others", "--exclude-standard"],
-                cwd=str(root_path), capture_output=True, text=True, check=True
-            )
+            changed_files_rel = []
+            diff = repo.commit(last_commit).diff(current_commit)
+            for d in diff:
+                if d.b_path:
+                    changed_files_rel.append(d.b_path)
+            
+            untracked = repo.untracked_files
+            changed_files_rel.extend(untracked)
         except Exception as e:
             logger.warning(f"Failed to get git diff: {e}. Falling back to full index.")
             self.manifest["last_indexed_commit"] = current_commit
             return self.index_directory(root_dir)
 
-        changed_files_rel = diff_res.stdout.splitlines() + untracked_res.stdout.splitlines()
+        changed_files_rel = list(set(changed_files_rel))
         changed_files = [str(root_path / f) for f in set(changed_files_rel) if f.strip()]
 
         if not changed_files:

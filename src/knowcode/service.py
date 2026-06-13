@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import os
 import re
+import shutil
+import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -284,8 +287,6 @@ class KnowCodeService:
 
     def get_freshness_metadata(self) -> dict[str, Any]:
         """Compute freshness metadata for the knowledge store and index."""
-        import os
-
         store_file = self._store_file()
         last_store_rebuild = 0.0
         if store_file.exists():
@@ -346,7 +347,6 @@ class KnowCodeService:
         
         if not incremental:
             # Clear/initialize directory
-            import shutil
             if resolved_index_path.exists():
                 shutil.rmtree(resolved_index_path)
         
@@ -688,9 +688,9 @@ class KnowCodeService:
         try:
             # Force reload by accessing the property
             _ = self.store
-        except FileNotFoundError:
+        except FileNotFoundError as e:
             # If the file is gone, keep _store as None
-            pass
+            logging.getLogger(__name__).warning("Knowledge store file not found during reload: %s", e)
 
     def get_entity_details(self, entity_id: str) -> Optional[dict[str, Any]]:
         """Get detailed information about an entity as a dictionary.

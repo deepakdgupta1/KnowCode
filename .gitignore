@@ -213,6 +213,8 @@ docs_test/
 .knowcode/
 knowcode_index/
 knowledge.db
+knowledge.db-shm
+knowledge.db-wal
 .DS_Store
 tests/test_sample-prose
 tests/.DS_Store

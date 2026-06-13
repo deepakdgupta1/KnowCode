@@ -686,10 +686,16 @@ def _path_size(path: Path) -> int:
         return path.stat().st_size
 
     total = 0
+    import logging
+    logger = logging.getLogger(__name__)
+    
     for child in path.rglob("*"):
-        with contextlib.suppress(OSError):
+        try:
             if child.is_file():
                 total += child.stat().st_size
+        except OSError as e:
+            logger.warning("Skipped file size calculation for %s: %s", child, e)
+            
     return total
 
 

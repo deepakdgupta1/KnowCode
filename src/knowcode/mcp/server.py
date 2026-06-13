@@ -330,6 +330,8 @@ class KnowCodeMCPServer:
             logging.getLogger(__name__).warning("Ignored telemetry OS error: %s", e)
 
         try:
+            result: dict[str, Any] | list[dict[str, Any]]
+            
             if name == "search_codebase":
                 if "query" not in arguments or not isinstance(arguments["query"], str):
                     raise ValueError("search_codebase requires 'query' as a string")
@@ -343,7 +345,7 @@ class KnowCodeMCPServer:
             elif name == "get_entity_context":
                 if "entity_id" not in arguments or not isinstance(arguments["entity_id"], str):
                     raise ValueError("get_entity_context requires 'entity_id' as a string")
-                result = self.get_entity_context(  # type: ignore
+                result = self.get_entity_context(
                     entity_id=arguments["entity_id"],
                     task_type=str(arguments.get("task_type", "general")),
                     max_tokens=int(arguments.get("max_tokens", 2000)),
@@ -359,7 +361,7 @@ class KnowCodeMCPServer:
             elif name == "retrieve_context_for_query":
                 if "query" not in arguments or not isinstance(arguments["query"], str):
                     raise ValueError("retrieve_context_for_query requires 'query' as a string")
-                result = self.retrieve_context_for_query(  # type: ignore
+                result = self.retrieve_context_for_query(
                     query=arguments["query"],
                     task_type=str(arguments.get("task_type", "auto")),
                     max_tokens=int(arguments.get("max_tokens", 4000)),
@@ -368,7 +370,7 @@ class KnowCodeMCPServer:
                     verbosity=str(arguments.get("verbosity", "minimal")),
                 )
             else:
-                result = {"error": f"Unknown tool: {name}"}  # type: ignore
+                result = {"error": f"Unknown tool: {name}"}
                 
             return json.dumps(result, separators=(',', ':'))
         except KnowCodePrerequisiteError as e:
