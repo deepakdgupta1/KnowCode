@@ -927,6 +927,8 @@ dependencies = [
     { name = "gitpython" },
     { name = "networkx", version = "3.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "networkx", version = "3.6.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.3.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "pathspec" },
     { name = "pyyaml" },
     { name = "tiktoken" },
@@ -941,8 +943,6 @@ all = [
     { name = "google-api-core" },
     { name = "google-genai" },
     { name = "lancedb" },
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "numpy", version = "2.3.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "openai" },
     { name = "slowapi" },
     { name = "uvicorn" },
@@ -959,8 +959,6 @@ mcp = [
 search = [
     { name = "faiss-cpu" },
     { name = "lancedb" },
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "numpy", version = "2.3.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
 ]
 server = [
     { name = "fastapi" },
@@ -1002,8 +1000,7 @@ requires-dist = [
     { name = "lancedb", marker = "extra == 'search'", specifier = ">=0.12.0" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.0.0" },
     { name = "networkx", specifier = ">=3.0" },
-    { name = "numpy", marker = "extra == 'all'", specifier = ">=1.24.0" },
-    { name = "numpy", marker = "extra == 'search'", specifier = ">=1.24.0" },
+    { name = "numpy", specifier = ">=1.24.0" },
     { name = "openai", marker = "extra == 'all'", specifier = ">=1.0.0" },
     { name = "openai", marker = "extra == 'llm'", specifier = ">=1.0.0" },
     { name = "pathspec", specifier = ">=0.11" },

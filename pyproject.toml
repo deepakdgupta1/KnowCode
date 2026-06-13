@@ -13,6 +13,7 @@ dependencies = [
     "tree-sitter-languages>=1.10.0",
     "GitPython>=3.1.0",
     "tiktoken>=0.7.0",
+    "numpy>=1.24.0",
 ]
 
 [project.optional-dependencies]
@@ -23,7 +24,6 @@ server = [
 ]
 search = [
     "faiss-cpu>=1.7.0",
-    "numpy>=1.24.0",
     "lancedb>=0.12.0",
 ]
 llm = [
@@ -37,7 +37,6 @@ all = [
     "uvicorn>=0.22.0",
     "slowapi>=0.1.9",
     "faiss-cpu>=1.7.0",
-    "numpy>=1.24.0",
     "lancedb>=0.12.0",
     "openai>=1.0.0",
     "google-genai>=0.3.0",
