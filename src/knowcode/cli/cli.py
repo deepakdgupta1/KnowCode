@@ -1,6 +1,8 @@
 """CLI interface for KnowCode."""
 
 import json
+import shlex
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Optional
@@ -11,6 +13,10 @@ from knowcode import __version__
 from knowcode.analysis.documentation_synthesizer import DocumentationSynthesizer
 from knowcode.data_models import RelationshipKind
 from knowcode.errors import KnowCodePrerequisiteError
+from knowcode.readiness import (
+    IDEAL_SETUP_FEATURES,
+    build_install_command,
+)
 from knowcode.service import KnowCodeService
 from knowcode.storage.knowledge_store import KnowledgeStore
 from knowcode.utils.dependency_guard import require_extra
@@ -21,6 +27,45 @@ from knowcode.utils.dependency_guard import require_extra
 def cli() -> None:
     """KnowCode - Transform your codebase into an effective knowledge base."""
     pass
+
+
+@cli.command("install")
+@click.option(
+    "--upgrade",
+    is_flag=True,
+    help="Upgrade packages while installing the ideal dependency set.",
+)
+@click.option(
+    "--user",
+    "user_install",
+    is_flag=True,
+    help="Install into the Python user site-packages directory.",
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="Print the installer command without running it.",
+)
+def install_command(upgrade: bool, user_install: bool, dry_run: bool) -> None:
+    """Install dependencies for a full-featured KnowCode setup."""
+    command = build_install_command(upgrade=upgrade, user_install=user_install)
+
+    click.echo("Installing KnowCode ideal setup dependencies.")
+    click.echo(f"  Includes: {', '.join(IDEAL_SETUP_FEATURES)}")
+    click.echo(f"  Command: {shlex.join(command)}")
+
+    if dry_run:
+        click.echo("Dry run only; no packages installed.")
+        return
+
+    try:
+        subprocess.run(command, check=True)
+    except subprocess.CalledProcessError as exc:
+        raise click.ClickException(
+            f"Dependency installation failed with exit code {exc.returncode}."
+        ) from exc
+
+    click.echo("✓ KnowCode ideal setup dependencies installed.")
 
 
 @cli.command()
@@ -194,31 +239,29 @@ def index(directory: str, output: str, config: Optional[str], incremental: bool)
     click.echo(f"Indexing: {directory}")
 
     try:
-        require_extra("search", "knowcode index", ("faiss", "numpy"))
         from knowcode.config import AppConfig
         from knowcode.llm.embedding import create_embedding_provider
         from knowcode.indexing.indexer import Indexer
+        from knowcode.storage.sqlite_chunk_repository import SqliteChunkRepository
+        from knowcode.storage.vector_backends import create_vector_store
 
         app_config = AppConfig.load(config)
+        if app_config.vector_backend == "lancedb":
+            require_extra("search", "knowcode index", ("lancedb",))
         provider = create_embedding_provider(app_config=app_config)
-        indexer = Indexer(provider)
-
         index_path = Path(output)
-        if incremental and (index_path / "index_manifest.json").exists():
-            from knowcode.storage.sqlite_chunk_repository import SqliteChunkRepository
-            db_path = index_path / "chunks.db"
-            indexer.chunk_repo = SqliteChunkRepository(db_path)
-            
-            vector_backend = app_config.vector_backend
-            dimension = provider.config.dimension
-            if vector_backend == "lancedb":
-                from knowcode.storage.lancedb_vector_store import LanceDBVectorStore
-                vs_path = index_path / "vectors.lancedb"
-                indexer.vector_store = LanceDBVectorStore(dimension=dimension, path=vs_path)
-            else:
-                from knowcode.storage.vector_store import VectorStore
-                indexer.vector_store = VectorStore(dimension=dimension, index_path=index_path)
+        vector_store = create_vector_store(
+            app_config.vector_backend,
+            dimension=provider.config.dimension,
+            index_dir=index_path,
+        )
+        indexer = Indexer(
+            provider,
+            chunk_repo=SqliteChunkRepository(index_path / "chunks.db"),
+            vector_store=vector_store,
+        )
 
+        if incremental and (index_path / "index_manifest.json").exists():
             indexer.load(index_path)
             count = indexer.index_incremental(directory)
         else:
@@ -339,10 +382,11 @@ def semantic_search(
     click.echo(f"Searching for: '{question}'...")
 
     try:
-        require_extra("search", "knowcode semantic-search", ("faiss", "numpy"))
         from knowcode.config import AppConfig
 
         app_config = AppConfig.load(config)
+        if app_config.vector_backend == "lancedb":
+            require_extra("search", "knowcode semantic-search", ("lancedb",))
         service = KnowCodeService(store_path=store, app_config=app_config)
         engine = service.get_search_engine(index_path=index)
 

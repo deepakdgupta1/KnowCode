@@ -11,11 +11,13 @@ import pytest
 
 from knowcode.data_models import Entity, EntityKind, Location
 from knowcode.indexing.indexer import Indexer
+from knowcode import readiness
 from knowcode.storage.knowledge_store import KnowledgeStore
 from knowcode.storage.vector_store import VectorStore
 
 
 cli_module = importlib.import_module("knowcode.cli.cli")
+doctor_module = importlib.import_module("knowcode.doctor")
 
 
 def _write_config(path: Path) -> None:
@@ -50,7 +52,7 @@ def _write_store(path: Path) -> None:
     store.save(path)
 
 
-def _write_index(path: Path, *, dimension: int = 1024) -> None:
+def _write_index(path: Path, *, dimension: int = 1024, backend: str | None = None) -> None:
     path.mkdir(parents=True, exist_ok=True)
     (path / "index_manifest.json").write_text(
         json.dumps(
@@ -71,17 +73,22 @@ def _write_index(path: Path, *, dimension: int = 1024) -> None:
         json.dumps({"schema_version": Indexer.SCHEMA_VERSION, "chunks": []}),
         encoding="utf-8",
     )
+    vector_metadata = {
+        "schema_version": 1 if backend == "lancedb" else VectorStore.SCHEMA_VERSION,
+        "id_map": {},
+        "dimension": dimension,
+    }
+    if backend:
+        vector_metadata["backend"] = backend
     (path / "vectors.json").write_text(
-        json.dumps(
-            {
-                "schema_version": VectorStore.SCHEMA_VERSION,
-                "id_map": {},
-                "dimension": dimension,
-            }
-        ),
+        json.dumps(vector_metadata),
         encoding="utf-8",
     )
-    (path / "vectors.index").write_bytes(b"placeholder")
+    if backend == "lancedb":
+        (path / "vectors.lancedb").mkdir()
+        (path / "vectors.lancedb" / "vectors.lance").write_bytes(b"placeholder")
+    else:
+        (path / "vectors.index").write_bytes(b"placeholder")
 
 
 @pytest.fixture(autouse=True)
@@ -142,6 +149,57 @@ def test_doctor_reports_missing_store_and_index(tmp_path: Path) -> None:
     assert "Semantic index" in failed
     assert "knowcode build" in failed["Knowledge store"]["hint"]
     assert "knowcode build" in failed["Semantic index"]["hint"]
+
+
+def test_doctor_missing_optional_dependencies_points_to_ideal_install(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    checks = []
+
+    monkeypatch.setattr(readiness, "find_spec", lambda _module: None)
+
+    def _missing_import(_module: str):  # type: ignore[no-untyped-def]
+        raise ImportError("missing")
+
+    monkeypatch.setattr(doctor_module.importlib, "import_module", _missing_import)
+
+    doctor_module._check_dependencies(checks)
+
+    optional = next(check for check in checks if check.name == "Optional dependencies")
+    assert optional.status == "warn"
+    assert "knowcode[all,mcp,voyageai]" in optional.hint
+    assert optional.hint.count("knowcode[llm]") == 0
+
+
+def test_doctor_python_runtime_warns_for_unsupported_uvx_python(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    checks = []
+    monkeypatch.setattr(doctor_module.sys, "version_info", (3, 14, 0))
+
+    doctor_module._check_python_runtime(checks)
+
+    runtime = checks[0]
+    assert runtime.status == "warn"
+    assert "uvx --python 3.12" in runtime.hint
+    assert runtime.suggestions[0].command.startswith("uvx --python 3.12")
+
+
+def test_doctor_accepts_lancedb_vector_artifact(tmp_path: Path) -> None:
+    config = tmp_path / "aimodels.yaml"
+    _write_config(config)
+    _write_store(tmp_path)
+    _write_index(tmp_path / "knowcode_index", backend="lancedb")
+
+    result = CliRunner().invoke(
+        cli_module.cli,
+        ["doctor", "--store", str(tmp_path), "--config", str(config), "--json"],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    semantic = next(check for check in payload["checks"] if check["name"] == "Semantic index")
+    assert semantic["status"] == "pass"
 
 
 def test_doctor_fails_on_index_dimension_mismatch(tmp_path: Path) -> None:
@@ -206,5 +264,3 @@ def test_doctor_checks_rules_freshness_and_unsupported_extensions(tmp_path: Path
     assert checks2["Agent rules"]["status"] == "pass"
     assert checks2["Supported languages"]["status"] == "warn"
     assert "Go" in checks2["Supported languages"]["message"]
-
-

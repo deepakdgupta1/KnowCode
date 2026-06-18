@@ -6,8 +6,6 @@ import os
 import sys
 from pathlib import Path
 from knowcode.storage.chunk_repository import InMemoryChunkRepository
-from knowcode.storage.vector_store import VectorStore
-from knowcode.retrieval.hybrid_index import HybridIndex
 from knowcode.llm.embedding import OpenAIEmbeddingProvider, VoyageAIEmbeddingProvider
 from knowcode.data_models import EmbeddingConfig, CodeChunk
 
@@ -72,10 +70,12 @@ def evaluate(ground_truth_path: Path, index_path: Path) -> dict:
         return {"error": "chunks.json not found in index directory"}
                 
     # Load vector store (VectorStore.load expects the base name 'vectors')
+    from knowcode.storage.vector_store import VectorStore
     vs = VectorStore(dimension=dimension)
     vs.load(index_path / "vectors")
     
     # Setup provider
+    # ... (rest of provider setup)
     if provider_name == "voyageai":
         if not os.environ.get("VOYAGE_API_KEY_1") and not os.environ.get("VOYAGE_API_KEY"):
             return {"error": "VOYAGE_API_KEY_1 or VOYAGE_API_KEY not set"}
@@ -85,6 +85,7 @@ def evaluate(ground_truth_path: Path, index_path: Path) -> dict:
             return {"error": "OPENAI_API_KEY not set"}
         provider = OpenAIEmbeddingProvider(EmbeddingConfig(provider="openai", dimension=dimension))
 
+    from knowcode.retrieval.hybrid_index import HybridIndex
     hybrid = HybridIndex(repo, vs)
     
     # Metrics

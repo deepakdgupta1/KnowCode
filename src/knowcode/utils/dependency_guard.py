@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from importlib.util import find_spec
 from typing import Sequence
+
+from knowcode.readiness import missing_feature_for_modules
 
 
 def require_extra(extra: str, command: str, modules: Sequence[str]) -> None:
@@ -17,13 +18,6 @@ def require_extra(extra: str, command: str, modules: Sequence[str]) -> None:
     Raises:
         ImportError: If any required module is missing.
     """
-    missing: list[str] = []
-    for module in modules:
-        try:
-            if find_spec(module) is None:
-                missing.append(module)
-        except ModuleNotFoundError:
-            missing.append(module)
-
-    if missing:
+    missing = missing_feature_for_modules(extra, modules)
+    if missing is not None:
         raise ImportError(f"Install knowcode[{extra}] to use '{command}'.")

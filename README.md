@@ -21,6 +21,13 @@ source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 # Install KnowCode for development (batteries included)
 uv sync --dev --extra all --extra mcp --extra voyageai
 
+# Or, from an installed KnowCode CLI, install the ideal runtime setup
+knowcode install
+
+# If using uvx from a machine whose default Python is 3.13+,
+# pin Python 3.12 because tree-sitter-languages publishes wheels through cp312.
+uvx --python 3.12 --from "/path/to/KnowCode[all,mcp,voyageai]" knowcode doctor
+
 # Set API keys (only needed for the features you use; see aimodels.yaml)
 export VOYAGE_API_KEY_1="..."   # embeddings + reranking (semantic search)
 export OPENAI_API_KEY="..."     # embeddings (alternative to VoyageAI)
