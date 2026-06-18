@@ -11,7 +11,6 @@ from knowcode.indexing.chunker import Chunker
 from knowcode.indexing.graph_builder import GraphBuilder
 from knowcode.indexing.scanner import Scanner
 from knowcode.protocols import EmbeddingProviderProtocol, VectorStoreProtocol
-from knowcode.storage.vector_store import VectorStore
 from knowcode.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -39,7 +38,11 @@ class Indexer:
         """
         self.embedding_provider = embedding_provider
         self.chunk_repo: ChunkRepository = chunk_repo or SqliteChunkRepository(":memory:")
-        self.vector_store = vector_store or VectorStore(dimension=embedding_provider.config.dimension)
+        if vector_store is None:
+            from knowcode.storage.vector_store import VectorStore
+            self.vector_store = VectorStore(dimension=embedding_provider.config.dimension)
+        else:
+            self.vector_store = vector_store
         self.chunker = Chunker()
         self.manifest: dict[str, Any] = {}
 

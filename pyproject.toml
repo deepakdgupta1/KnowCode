@@ -1,6 +1,6 @@
 [project]
 name = "knowcode"
-version = "0.2.1"
+version = "0.2.3"
 description = "Efficient codebase knowledge graph builder"
 readme = "README.md"
 requires-python = ">=3.10, <3.13"
@@ -42,6 +42,8 @@ all = [
     "google-genai>=0.3.0",
     "google-api-core>=2.29.0",
     "watchdog>=3.0.0",
+    "mcp>=1.0.0",
+    "voyageai>=0.2.0",
 ]
 mcp = ["mcp>=1.0.0"]
 voyageai = ["voyageai>=0.2.0"]

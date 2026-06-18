@@ -16,12 +16,10 @@ from knowcode.indexing.graph_builder import GraphBuilder
 from knowcode.retrieval.orchestrator import RetrievalOrchestrator
 from knowcode.storage.knowledge_store import KnowledgeStore
 from knowcode.storage.sqlite_knowledge_store import SqliteKnowledgeStore
-from knowcode.protocols import VectorStoreProtocol
 from knowcode.llm.embedding import create_embedding_provider
 from knowcode.indexing.indexer import Indexer
 from knowcode.storage.sqlite_chunk_repository import SqliteChunkRepository
-from knowcode.storage.lancedb_vector_store import LanceDBVectorStore
-from knowcode.storage.vector_store import VectorStore
+from knowcode.storage.vector_backends import create_vector_store
 from knowcode.retrieval.hybrid_index import HybridIndex
 from knowcode.retrieval.search_engine import SearchEngine
 from knowcode.retrieval.exact_query_engine import ExactQueryEngine
@@ -162,15 +160,14 @@ class KnowCodeService:
             provider = create_embedding_provider(app_config=self.app_config)
             resolved_index_path = Path(index_path) if index_path else self._index_path()
             db_path = resolved_index_path / "chunks.db"
-            vs_path = resolved_index_path / "vectors.lancedb"
             chunk_repo = SqliteChunkRepository(db_path)
 
             dimension = provider.config.dimension
-            vector_store: VectorStoreProtocol
-            if self.app_config.vector_backend == "lancedb":
-                vector_store = LanceDBVectorStore(dimension=dimension, path=vs_path)
-            else:
-                vector_store = VectorStore(dimension=dimension, index_path=vs_path)
+            vector_store = create_vector_store(
+                self.app_config.vector_backend,
+                dimension=dimension,
+                index_dir=resolved_index_path,
+            )
 
             self._indexer = Indexer(provider, chunk_repo=chunk_repo, vector_store=vector_store)
 
@@ -355,16 +352,12 @@ class KnowCodeService:
         db_path = resolved_index_path / "chunks.db"
         chunk_repo = SqliteChunkRepository(db_path)
 
-        vector_backend = self.app_config.vector_backend
         dimension = provider.config.dimension
-        vector_store: VectorStoreProtocol
-        if vector_backend == "lancedb":
-            from knowcode.storage.lancedb_vector_store import LanceDBVectorStore
-            vs_path = resolved_index_path / "vectors.lancedb"
-            vector_store = LanceDBVectorStore(dimension=dimension, path=vs_path)
-        else:
-            from knowcode.storage.vector_store import VectorStore
-            vector_store = VectorStore(dimension=dimension)
+        vector_store = create_vector_store(
+            self.app_config.vector_backend,
+            dimension=dimension,
+            index_dir=resolved_index_path,
+        )
 
         indexer = Indexer(provider, chunk_repo=chunk_repo, vector_store=vector_store)
         

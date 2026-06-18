@@ -71,6 +71,47 @@ def test_cli_build_defaults_to_current_directory(tmp_path, monkeypatch) -> None:
     conn.close()
 
 
+def test_cli_install_dry_run_prints_ideal_dependency_set() -> None:
+    runner = CliRunner()
+
+    result = runner.invoke(cli_module.cli, ["install", "--dry-run"])
+
+    assert result.exit_code == 0, result.output
+    assert "knowcode[all,mcp,voyageai]" in result.output
+    assert "MCP server" in result.output
+    assert "VoyageAI embeddings and reranking" in result.output
+    assert "Dry run only" in result.output
+
+
+def test_cli_install_runs_pip_for_ideal_dependency_set(monkeypatch) -> None:  # type: ignore
+    runner = CliRunner()
+    calls = []
+
+    def _run(command, check):  # type: ignore
+        calls.append((command, check))
+
+    monkeypatch.setattr(cli_module.subprocess, "run", _run)
+
+    result = runner.invoke(cli_module.cli, ["install", "--upgrade", "--user"])
+
+    assert result.exit_code == 0, result.output
+    assert calls == [
+        (
+            [
+                cli_module.sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "--upgrade",
+                "--user",
+                "knowcode[all,mcp,voyageai]",
+            ],
+            True,
+        )
+    ]
+    assert "KnowCode ideal setup dependencies installed" in result.output
+
+
 @pytest.mark.parametrize(
     ("args", "expected_message"),
     [

@@ -925,7 +925,7 @@ wheels = [
 
 [[package]]
 name = "knowcode"
-version = "0.2.1"
+version = "0.2.3"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
@@ -948,9 +948,11 @@ all = [
     { name = "google-api-core" },
     { name = "google-genai" },
     { name = "lancedb" },
+    { name = "mcp" },
     { name = "openai" },
     { name = "slowapi" },
     { name = "uvicorn" },
+    { name = "voyageai" },
     { name = "watchdog" },
 ]
 llm = [
@@ -1003,6 +1005,7 @@ requires-dist = [
     { name = "google-genai", marker = "extra == 'llm'", specifier = ">=0.3.0" },
     { name = "lancedb", marker = "extra == 'all'", specifier = ">=0.12.0" },
     { name = "lancedb", marker = "extra == 'search'", specifier = ">=0.12.0" },
+    { name = "mcp", marker = "extra == 'all'", specifier = ">=1.0.0" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.0.0" },
     { name = "networkx", specifier = ">=3.0" },
     { name = "numpy", specifier = ">=1.24.0" },
@@ -1017,6 +1020,7 @@ requires-dist = [
     { name = "tree-sitter-languages", specifier = ">=1.10.0" },
     { name = "uvicorn", marker = "extra == 'all'", specifier = ">=0.22.0" },
     { name = "uvicorn", marker = "extra == 'server'", specifier = ">=0.22.0" },
+    { name = "voyageai", marker = "extra == 'all'", specifier = ">=0.2.0" },
     { name = "voyageai", marker = "extra == 'voyageai'", specifier = ">=0.2.0" },
     { name = "watchdog", marker = "extra == 'all'", specifier = ">=3.0.0" },
     { name = "watchdog", marker = "extra == 'watch'", specifier = ">=3.0.0" },

@@ -5,7 +5,10 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-import lancedb
+try:
+    import lancedb
+except ImportError:
+    lancedb = None
 
 
 class LanceDBVectorStore:
@@ -21,6 +24,11 @@ class LanceDBVectorStore:
             dimension: Expected embedding dimensionality.
             path: Directory path for LanceDB. If None, uses in-memory DB.
         """
+        if lancedb is None:
+            raise ImportError(
+                "lancedb is not installed. Install with 'pip install lancedb' "
+                "or 'pip install knowcode[search]'"
+            )
         self.dimension = dimension
         self.path = str(path) if path else "memory://"
         self.db = lancedb.connect(self.path)
@@ -104,6 +112,11 @@ class LanceDBVectorStore:
 
     def load(self, path: Path) -> None:
         """Load vector index artifacts."""
+        if lancedb is None:
+            raise ImportError(
+                "lancedb is not installed. Install with 'pip install lancedb' "
+                "or 'pip install knowcode[search]'"
+            )
         path = Path(path)
         target = path.with_suffix(".lancedb")
         if target.exists():

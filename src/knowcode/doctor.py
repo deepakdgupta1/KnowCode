@@ -6,19 +6,35 @@ import asyncio
 import importlib
 import json
 import os
+import shlex
 import sys
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Literal, Optional
 
 from knowcode.config import AppConfig
 from knowcode.data_models import EmbeddingConfig
 from knowcode.indexing.indexer import Indexer
+from knowcode.readiness import (
+    IDEAL_SETUP_FEATURE_KEYS,
+    IDEAL_SETUP_TARGET,
+    install_hint,
+    missing_features,
+)
 from knowcode.storage.knowledge_store import KnowledgeStore
-from knowcode.storage.vector_store import VectorStore
+from knowcode.storage.vector_backends import inspect_vector_index
 
 
 CheckStatus = Literal["pass", "warn", "fail"]
+
+
+@dataclass(frozen=True)
+class DoctorSuggestion:
+    """Actionable remediation suggestion for a readiness check."""
+
+    label: str
+    command: str
+    detail: str = ""
 
 
 @dataclass(frozen=True)
@@ -29,6 +45,21 @@ class DoctorCheck:
     status: CheckStatus
     message: str
     hint: Optional[str] = None
+    suggestions: tuple[DoctorSuggestion, ...] = field(default_factory=tuple)
+
+
+@dataclass(frozen=True)
+class ReadinessContext:
+    """Resolved paths and config shared across doctor checks."""
+
+    cwd: Path
+    store_path: Path
+    store_file: Path
+    store_root: Path
+    index_path: Path
+    config_path: Optional[Path]
+    config: AppConfig
+    vector_backend: str
 
 
 @dataclass(frozen=True)
@@ -74,39 +105,54 @@ def run_doctor(
     checks: list[DoctorCheck] = []
 
     config, resolved_config = _check_config(config_path, checks)
-    _check_api_keys(config, checks)
-
     store_file = _resolve_store_file(store_path)
     store_root = store_file.parent
-    _check_knowledge_store(store_file, checks)
+    resolved_index = Path(index_path) if index_path is not None else store_root / "knowcode_index"
+    context = ReadinessContext(
+        cwd=Path.cwd(),
+        store_path=Path(store_path),
+        store_file=store_file,
+        store_root=store_root,
+        index_path=resolved_index,
+        config_path=resolved_config,
+        config=config,
+        vector_backend=config.vector_backend,
+    )
+
+    _check_api_keys(context.config, checks)
+    _check_knowledge_store(context, checks)
 
     _check_dependencies(checks)
+    _check_python_runtime(checks)
 
-    resolved_index = Path(index_path) if index_path is not None else store_root / "knowcode_index"
-    _check_semantic_index(resolved_index, config, checks)
+    _check_semantic_index(context, checks)
 
     _check_disk_footprint(
-        store_file=store_file,
-        index_path=resolved_index,
+        store_file=context.store_file,
+        index_path=context.index_path,
         max_disk_mb=max_disk_mb,
         checks=checks,
     )
 
-    _check_agent_rules(store_path, checks)
-    _check_unsupported_languages(store_path, checks)
-    _check_freshness(store_path, config_path, checks)
+    _check_agent_rules(context.store_root, checks)
+    _check_unsupported_languages(context.store_root, checks)
+    _check_freshness(context, checks)
 
     if include_mcp:
         checks.append(
             _run_mcp_check(
                 store_path=store_path,
-                config_path=resolved_config,
+                config_path=context.config_path,
                 timeout_seconds=mcp_timeout_seconds,
             )
         )
 
     return DoctorReport(checks=checks)
 
+
+def _shell_command(parts: list[str]) -> str:
+    """Return a shell-safe command string for human-facing suggestions."""
+    return shlex.join(parts)
 
 
 def _check_config(
@@ -123,6 +169,13 @@ def _check_config(
                 status="fail",
                 message=f"Config file not found: {requested}",
                 hint="Pass a valid --config path or create aimodels.yaml.",
+                suggestions=(
+                    DoctorSuggestion(
+                        label="Create config file",
+                        command="touch aimodels.yaml",
+                        detail="Add explicit model and API key settings before model-backed commands.",
+                    ),
+                ),
             )
         )
         return AppConfig.default(), None
@@ -147,6 +200,12 @@ def _check_config(
                 status="warn",
                 message="No config file found; using built-in defaults.",
                 hint="Create aimodels.yaml for explicit model and API key settings.",
+                suggestions=(
+                    DoctorSuggestion(
+                        label="Create config file",
+                        command="touch aimodels.yaml",
+                    ),
+                ),
             )
         )
     else:
@@ -197,6 +256,14 @@ def _check_api_keys(config: AppConfig, checks: list[DoctorCheck]) -> None:
                 status="fail",
                 message=f"Missing environment variables: {', '.join(missing)}.",
                 hint="Export the missing keys before using indexing, reranking, or LLM Q&A.",
+                suggestions=tuple(
+                    DoctorSuggestion(
+                        label=f"Export {name}",
+                        command=f'export {name}="..."',
+                        detail="Set this in your shell before running KnowCode model-backed commands.",
+                    )
+                    for name in missing
+                ),
             )
         )
         return
@@ -212,25 +279,6 @@ def _check_api_keys(config: AppConfig, checks: list[DoctorCheck]) -> None:
 
 def _check_dependencies(checks: list[DoctorCheck]) -> None:
     """Check for optional and native dependencies."""
-    from importlib.util import find_spec
-
-    deps = [
-        ("faiss", "knowcode[search]", "Required for fast dense vector retrieval."),
-        ("mcp", "knowcode[mcp]", "Required for Model Context Protocol server."),
-        ("voyageai", "knowcode[voyageai]", "Required for VoyageAI embeddings and reranking."),
-        ("openai", "knowcode[llm]", "Required for OpenAI embeddings."),
-        ("google.genai", "knowcode[llm]", "Required for Google Gemini integration."),
-        ("watchdog", "knowcode[watch]", "Required for background file indexing."),
-    ]
-
-    missing = []
-    for module, extra, reason in deps:
-        try:
-            if find_spec(module) is None:
-                missing.append((module, extra, reason))
-        except (ModuleNotFoundError, ImportError):
-            missing.append((module, extra, reason))
-
     # FAISS is special - it's a native binary
     faiss_installed = True
     try:
@@ -244,7 +292,14 @@ def _check_dependencies(checks: list[DoctorCheck]) -> None:
                 name="Native dependencies",
                 status="warn",
                 message="FAISS native binaries not found. Using MockVectorStore fallback.",
-                hint='Install with `pip install "faiss-cpu>=1.7.0"`.',
+                hint='Install with `pip install "faiss-cpu>=1.7.0"` or `knowcode install`.',
+                suggestions=(
+                    DoctorSuggestion(
+                        label="Install ideal setup",
+                        command="knowcode install",
+                        detail="Includes FAISS plus the other optional KnowCode integrations.",
+                    ),
+                ),
             )
         )
     else:
@@ -256,15 +311,25 @@ def _check_dependencies(checks: list[DoctorCheck]) -> None:
             )
         )
 
+    missing = missing_features(IDEAL_SETUP_FEATURE_KEYS)
     if missing:
-        msg = f"Missing {len(missing)} optional dependencies."
-        hint = "Install them using: pip install " + " ".join(f'"{extra}"' for _, extra, _ in missing)
+        missing_labels = ", ".join(
+            f"{item.feature.key} ({', '.join(item.modules)})" for item in missing
+        )
+        msg = f"Missing {len(missing)} optional features: {missing_labels}."
         checks.append(
             DoctorCheck(
                 name="Optional dependencies",
                 status="warn",
                 message=msg,
-                hint=hint,
+                hint=install_hint(),
+                suggestions=(
+                    DoctorSuggestion(
+                        label="Install ideal setup",
+                        command="knowcode install",
+                        detail=f'Equivalent package target: pip install "{IDEAL_SETUP_TARGET}"',
+                    ),
+                ),
             )
         )
     else:
@@ -277,8 +342,34 @@ def _check_dependencies(checks: list[DoctorCheck]) -> None:
         )
 
 
-def _check_knowledge_store(store_file: Path, checks: list[DoctorCheck]) -> None:
+def _check_python_runtime(checks: list[DoctorCheck]) -> None:
+    """Warn when running on a Python version known to break uvx resolution."""
+    if sys.version_info < (3, 13):
+        return
+
+    checks.append(
+        DoctorCheck(
+            name="Python runtime",
+            status="warn",
+            message=(
+                "Python 3.13+ may not resolve tree-sitter-languages wheels "
+                "when KnowCode is launched through uvx."
+            ),
+            hint="Use `uvx --python 3.12 ...` for ephemeral KnowCode tool runs.",
+            suggestions=(
+                DoctorSuggestion(
+                    label="Run with Python 3.12",
+                    command=f'uvx --python 3.12 --from "{IDEAL_SETUP_TARGET}" knowcode doctor',
+                    detail="tree-sitter-languages publishes wheels through CPython 3.12.",
+                ),
+            ),
+        )
+    )
+
+
+def _check_knowledge_store(context: ReadinessContext, checks: list[DoctorCheck]) -> None:
     """Validate knowledge store presence and schema."""
+    store_file = context.store_file
     if not store_file.exists():
         checks.append(
             DoctorCheck(
@@ -286,6 +377,13 @@ def _check_knowledge_store(store_file: Path, checks: list[DoctorCheck]) -> None:
                 status="fail",
                 message=f"Knowledge store not found: {store_file}",
                 hint="Run `knowcode build <dir>` first.",
+                suggestions=(
+                    DoctorSuggestion(
+                        label="Build KnowCode artifacts",
+                        command=f"knowcode build {context.store_root}",
+                        detail="Creates the knowledge store and semantic index for this project.",
+                    ),
+                ),
             )
         )
         return
@@ -300,6 +398,12 @@ def _check_knowledge_store(store_file: Path, checks: list[DoctorCheck]) -> None:
                 status="fail",
                 message=f"Could not load {store_file}: {exc}",
                 hint="Re-run `knowcode build <dir>` to rebuild the store.",
+                suggestions=(
+                    DoctorSuggestion(
+                        label="Rebuild knowledge store",
+                        command=f"knowcode build {context.store_root}",
+                    ),
+                ),
             )
         )
         return
@@ -315,6 +419,12 @@ def _check_knowledge_store(store_file: Path, checks: list[DoctorCheck]) -> None:
                     f"({len(store.entities)} entities)."
                 ),
                 hint="Re-run `knowcode build <dir>` to persist the current schema.",
+                suggestions=(
+                    DoctorSuggestion(
+                        label="Persist current schema",
+                        command=f"knowcode build {context.store_root}",
+                    ),
+                ),
             )
         )
         return
@@ -332,12 +442,9 @@ def _check_knowledge_store(store_file: Path, checks: list[DoctorCheck]) -> None:
     )
 
 
-def _check_semantic_index(
-    index_path: Path,
-    config: AppConfig,
-    checks: list[DoctorCheck],
-) -> None:
+def _check_semantic_index(context: ReadinessContext, checks: list[DoctorCheck]) -> None:
     """Validate semantic index files, schemas, and embedding dimensions."""
+    index_path = context.index_path
     if not index_path.exists():
         checks.append(
             DoctorCheck(
@@ -345,6 +452,12 @@ def _check_semantic_index(
                 status="fail",
                 message=f"Semantic index not found: {index_path}",
                 hint="Run `knowcode build <dir>` first.",
+                suggestions=(
+                    DoctorSuggestion(
+                        label="Build semantic index",
+                        command=f"knowcode build {context.store_root}",
+                    ),
+                ),
             )
         )
         return
@@ -355,6 +468,12 @@ def _check_semantic_index(
                 status="fail",
                 message=f"Semantic index path is not a directory: {index_path}",
                 hint="Pass --index pointing at a KnowCode index directory.",
+                suggestions=(
+                    DoctorSuggestion(
+                        label="Run doctor with explicit index",
+                        command=f"knowcode doctor --store {context.store_root} --index {context.index_path}",
+                    ),
+                ),
             )
         )
         return
@@ -363,8 +482,6 @@ def _check_semantic_index(
     warnings: list[str] = []
 
     manifest_file = index_path / "index_manifest.json"
-    vectors_file = index_path / "vectors.json"
-    vector_index_file = index_path / "vectors.index"
 
     manifest: dict[str, Any] = {}
     raw_manifest: dict[str, Any] = {}
@@ -377,25 +494,15 @@ def _check_semantic_index(
     else:
         failures.append("missing index_manifest.json")
 
+    vector_inspection = inspect_vector_index(
+        index_path,
+        configured_backend=context.vector_backend,
+    )
+    failures.extend(vector_inspection.failures)
+    warnings.extend(vector_inspection.warnings)
+    vector_metadata = vector_inspection.metadata
 
-
-    vector_metadata: dict[str, Any] = {}
-    raw_vector_metadata: dict[str, Any] = {}
-    if vectors_file.exists():
-        try:
-            raw_vector_metadata = _read_json_object(vectors_file)
-            vector_metadata = VectorStore._validate_and_migrate_metadata(
-                raw_vector_metadata
-            )
-        except Exception as exc:
-            failures.append(f"invalid vectors.json: {exc}")
-    else:
-        failures.append("missing vectors.json")
-
-    if not vector_index_file.exists():
-        failures.append("missing vectors.index")
-
-    expected_embedding = _expected_embedding_config(config)
+    expected_embedding = _expected_embedding_config(context.config)
     recorded_embedding = manifest.get("embedding", {})
     if isinstance(recorded_embedding, dict):
         for key in ("provider", "model_name", "dimension", "normalize"):
@@ -421,11 +528,6 @@ def _check_semantic_index(
 
     if raw_manifest and not _schema_is_current(raw_manifest, Indexer.SCHEMA_VERSION):
         warnings.append("manifest was migrated in memory")
-    if raw_vector_metadata and not _schema_is_current(
-        raw_vector_metadata,
-        VectorStore.SCHEMA_VERSION,
-    ):
-        warnings.append("vector metadata was migrated in memory")
 
     if failures:
         checks.append(
@@ -434,6 +536,12 @@ def _check_semantic_index(
                 status="fail",
                 message=f"{index_path}: {'; '.join(failures)}.",
                 hint="Rebuild the semantic index with `knowcode build <dir>`.",
+                suggestions=(
+                    DoctorSuggestion(
+                        label="Rebuild semantic index",
+                        command=f"knowcode build {context.store_root}",
+                    ),
+                ),
             )
         )
         return
@@ -445,6 +553,12 @@ def _check_semantic_index(
                 status="warn",
                 message=f"{index_path}: {'; '.join(warnings)}.",
                 hint="Rebuild the semantic index to persist the current schema.",
+                suggestions=(
+                    DoctorSuggestion(
+                        label="Persist current index schema",
+                        command=f"knowcode build {context.store_root}",
+                    ),
+                ),
             )
         )
         return
@@ -773,11 +887,14 @@ def _check_unsupported_languages(store_path: str | Path, checks: list[DoctorChec
         )
 
 
-def _check_freshness(store_path: str | Path, config_path: str | Path | None, checks: list[DoctorCheck]) -> None:
+def _check_freshness(context: ReadinessContext, checks: list[DoctorCheck]) -> None:
     """Validate freshness of the knowledge store and index."""
     try:
         from knowcode.service import KnowCodeService
-        service = KnowCodeService(store_path=store_path, config_path=str(config_path) if config_path else None)
+        service = KnowCodeService(
+            store_path=context.store_root,
+            config_path=str(context.config_path) if context.config_path else None,
+        )
         freshness = service.get_freshness_metadata()
         if freshness["is_stale"]:
             checks.append(
@@ -786,6 +903,12 @@ def _check_freshness(store_path: str | Path, config_path: str | Path | None, che
                     status="warn",
                     message=f"Store/index may be stale. Reasons: {', '.join(freshness['stale_reasons'])}.",
                     hint="Re-run `knowcode build` to rebuild artifacts.",
+                    suggestions=(
+                        DoctorSuggestion(
+                            label="Rebuild stale artifacts",
+                            command=f"knowcode build {context.store_root}",
+                        ),
+                    ),
                 )
             )
         else:
@@ -803,5 +926,11 @@ def _check_freshness(store_path: str | Path, config_path: str | Path | None, che
                 status="fail",
                 message=f"Could not determine freshness: {exc}",
                 hint="Ensure the knowledge store and semantic index are built.",
+                suggestions=(
+                    DoctorSuggestion(
+                        label="Build KnowCode artifacts",
+                        command=f"knowcode build {context.store_root}",
+                    ),
+                ),
             )
         )
