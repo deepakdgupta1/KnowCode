@@ -42,10 +42,10 @@ all = [
     "google-genai>=0.3.0",
     "google-api-core>=2.29.0",
     "watchdog>=3.0.0",
-    "mcp>=1.0.0",
+    "mcp>=1.0.0,<2",
     "voyageai>=0.2.0",
 ]
-mcp = ["mcp>=1.0.0"]
+mcp = ["mcp>=1.0.0,<2"]
 voyageai = ["voyageai>=0.2.0"]
 
 [project.scripts]
