@@ -38,6 +38,7 @@ class Indexer:
         """
         self.embedding_provider = embedding_provider
         self.chunk_repo: ChunkRepository = chunk_repo or SqliteChunkRepository(":memory:")
+        self.vector_store: VectorStoreProtocol
         if vector_store is None:
             from knowcode.storage.vector_store import VectorStore
             self.vector_store = VectorStore(dimension=embedding_provider.config.dimension)

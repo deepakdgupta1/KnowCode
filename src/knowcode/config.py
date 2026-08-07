@@ -29,6 +29,7 @@ class AppConfig:
         "models",
         "natural_language_models",
         "embedding_models",
+        "prose_embedding_models",
         "reranking_models",
         "eval_models",
         "config",
@@ -37,6 +38,7 @@ class AppConfig:
 
     models: list[ModelConfig] = field(default_factory=list)
     embedding_models: list[ModelConfig] = field(default_factory=list)
+    prose_embedding_models: list[ModelConfig] = field(default_factory=list)
     reranking_models: list[ModelConfig] = field(default_factory=list)
     sufficiency_threshold: float = 0.8  # For local-first answering
     hybrid_alpha: float = 0.2
@@ -136,6 +138,18 @@ class AppConfig:
                     api_key_env=m.get("api_key_env", "VOYAGE_API_KEY_1"),
                     tokens_free_tier_limit=m.get("tokens_free_tier_limit", 0),
                 ))
+
+            # Load prose embedding models (SDLC documentation collateral)
+            prose_embedding_models: list[ModelConfig] = []
+            for m in (data.get("prose_embedding_models") or []):
+                if not isinstance(m, dict):
+                    raise ValueError("Each prose embedding model entry must be an object.")
+                prose_embedding_models.append(ModelConfig(
+                    name=m["name"],
+                    provider=m.get("provider", "voyageai"),
+                    api_key_env=m.get("api_key_env", "VOYAGE_API_KEY_1"),
+                    tokens_free_tier_limit=m.get("tokens_free_tier_limit", 0),
+                ))
             
             # Load reranking models
             reranking_models: list[ModelConfig] = []
@@ -177,6 +191,7 @@ class AppConfig:
             return cls(
                 models=models,
                 embedding_models=embedding_models,
+                prose_embedding_models=prose_embedding_models,
                 reranking_models=reranking_models,
                 sufficiency_threshold=sufficiency_threshold,
                 hybrid_alpha=hybrid_alpha,

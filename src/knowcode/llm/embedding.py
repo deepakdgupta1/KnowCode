@@ -8,7 +8,7 @@ import math
 import os
 from typing import Any, cast
 
-from knowcode.config import AppConfig
+from knowcode.config import AppConfig, ModelConfig
 from knowcode.data_models import EmbeddingConfig
 
 _OPENAI_EMBED_DIMENSIONS: dict[str, int] = {
@@ -19,6 +19,7 @@ _OPENAI_EMBED_DIMENSIONS: dict[str, int] = {
 _VOYAGE_EMBED_DIMENSIONS: dict[str, int] = {
     "voyage-3-lite": 1024,
     "voyage-3": 1024,
+    "voyage-3-large": 1024,
     "voyage-code-3": 1024,
 }
 
@@ -270,5 +271,119 @@ def create_embedding_provider(
                     api_key_env=model.api_key_env,
                     base_url=base_url,
                 )
+
+    return DummyEmbeddingProvider(EmbeddingConfig())
+
+
+def resolve_embedding_dimension(provider: str, model_name: str) -> int:
+    """Resolve the embedding dimension for a provider/model pair.
+
+    Args:
+        provider: Provider key (e.g. "voyageai", "openai").
+        model_name: Model name (e.g. "voyage-3-large", "text-embedding-3-small").
+
+    Returns:
+        The embedding dimension, falling back to a sensible per-provider default
+        when the model is not in the known-dimensions tables.
+    """
+    normalized = provider.lower()
+    if normalized in {"voyageai", "voyage"}:
+        return _VOYAGE_EMBED_DIMENSIONS.get(model_name, 1024)
+    if normalized in {"openai", "openrouter", "mistralai"}:
+        return _OPENAI_EMBED_DIMENSIONS.get(model_name, 1536)
+    return 1024
+
+
+def build_provider_from_model(model: ModelConfig) -> EmbeddingProvider:
+    """Construct an embedding provider from a single ModelConfig.
+
+    This is the single dispatch seam used by both code and prose provider
+    selection: it inspects ``model.provider`` and builds the matching provider,
+    reading the API key from ``model.api_key_env``.
+
+    Args:
+        model: A configured model entry (provider + name + api_key_env).
+
+    Returns:
+        A concrete EmbeddingProvider wired to the model's credentials.
+
+    Raises:
+        NotImplementedError: For the ``local`` provider, which is not yet
+            implemented. Failing loudly here is intentional so callers do not
+            silently degrade.
+        ValueError: For an unrecognized provider string.
+    """
+    provider = model.provider.lower()
+    dimension = resolve_embedding_dimension(provider, model.name)
+
+    if provider in {"voyageai", "voyage"}:
+        cfg = EmbeddingConfig(
+            provider="voyageai",
+            model_name=model.name,
+            dimension=dimension,
+        )
+        return VoyageAIEmbeddingProvider(cfg, api_key_env=model.api_key_env)
+
+    if provider in {"openai", "openrouter", "mistralai"}:
+        base_url = None
+        if provider in {"openrouter", "mistralai"}:
+            base_url = "https://openrouter.ai/api/v1"
+        cfg = EmbeddingConfig(
+            provider="openai",
+            model_name=model.name,
+            dimension=dimension,
+        )
+        return OpenAIEmbeddingProvider(
+            cfg, api_key_env=model.api_key_env, base_url=base_url
+        )
+
+    if provider == "local":
+        raise NotImplementedError(
+            "local embedding provider is not yet implemented"
+        )
+
+    raise ValueError(f"Unknown embedding provider: {model.provider!r}")
+
+
+def create_prose_embedding_provider(
+    app_config: AppConfig | None = None,
+    embedding_config: EmbeddingConfig | None = None,
+) -> EmbeddingProvider:
+    """Create an embedding provider for SDLC prose documentation collateral.
+
+    Selection precedence:
+    1) Explicit EmbeddingConfig (embedding_config.provider).
+    2) The first usable model in app_config.prose_embedding_models (one whose
+       API key is present in the environment).
+    3) Fall back to the code embedding provider (create_embedding_provider),
+       so prose retrieval degrades to the code embedder when no dedicated prose
+       model is usable.
+    4) DummyEmbeddingProvider when no AppConfig is given at all.
+
+    Args:
+        app_config: Optional application configuration with prose/code model lists.
+        embedding_config: Optional explicit embedding configuration.
+
+    Returns:
+        A concrete EmbeddingProvider for prose chunks.
+    """
+    if embedding_config is not None:
+        provider = embedding_config.provider.lower()
+        if provider in {"voyageai", "voyage"}:
+            return VoyageAIEmbeddingProvider(embedding_config)
+        return OpenAIEmbeddingProvider(embedding_config)
+
+    if app_config and app_config.prose_embedding_models:
+        for model in app_config.prose_embedding_models:
+            if not os.environ.get(model.api_key_env):
+                continue
+            return build_provider_from_model(model)
+
+    # No usable prose model — fall back to the code embedder, then the dummy.
+    if app_config and (app_config.embedding_models or app_config.models):
+        code_provider = create_embedding_provider(app_config=app_config)
+        # create_embedding_provider already returns DummyEmbeddingProvider when
+        # nothing is usable, so no further fallback is required here.
+        return code_provider
 
     return DummyEmbeddingProvider(EmbeddingConfig())
