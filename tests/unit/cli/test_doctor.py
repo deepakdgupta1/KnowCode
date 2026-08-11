@@ -13,6 +13,7 @@ from knowcode.data_models import Entity, EntityKind, Location
 from knowcode.indexing.indexer import Indexer
 from knowcode import readiness
 from knowcode.storage.knowledge_store import KnowledgeStore
+from knowcode.storage.sqlite_knowledge_store import SqliteKnowledgeStore
 from knowcode.storage.vector_store import VectorStore
 
 
@@ -50,6 +51,21 @@ def _write_store(path: Path) -> None:
     )
     store.entities[entity.id] = entity
     store.save(path)
+
+
+def _write_sqlite_store(path: Path) -> None:
+    store = SqliteKnowledgeStore(path)
+    store.add_entity(
+        Entity(
+            id="sample.py::foo",
+            kind=EntityKind.FUNCTION,
+            name="foo",
+            qualified_name="foo",
+            location=Location(file_path="sample.py", line_start=1, line_end=2),
+            source_code="def foo():\n    return 1\n",
+        )
+    )
+    store.close()
 
 
 def _write_index(path: Path, *, dimension: int = 1024, backend: str | None = None) -> None:
@@ -130,6 +146,26 @@ def test_doctor_passes_with_valid_store_index_and_config(tmp_path: Path) -> None
         "Optional dependencies",
     }
     assert all(check["status"] == "pass" for check in payload["checks"])
+
+
+def test_doctor_uses_current_sqlite_store_built_by_cli(tmp_path: Path) -> None:
+    config = tmp_path / "aimodels.yaml"
+    _write_config(config)
+    _write_sqlite_store(tmp_path / "knowledge.db")
+    _write_index(tmp_path / "knowcode_index")
+
+    result = CliRunner().invoke(
+        cli_module.cli,
+        ["doctor", "--store", str(tmp_path), "--config", str(config), "--json"],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    store_check = next(
+        check for check in payload["checks"] if check["name"] == "Knowledge store"
+    )
+    assert store_check["status"] == "pass"
+    assert "SQLite schema v1" in store_check["message"]
 
 
 

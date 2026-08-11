@@ -7,6 +7,7 @@ import importlib
 import json
 import os
 import shlex
+import sqlite3
 import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -22,6 +23,7 @@ from knowcode.readiness import (
     missing_features,
 )
 from knowcode.storage.knowledge_store import KnowledgeStore
+from knowcode.storage.sqlite_knowledge_store import SqliteKnowledgeStore
 from knowcode.storage.vector_backends import inspect_vector_index
 
 
@@ -141,7 +143,7 @@ def run_doctor(
     if include_mcp:
         checks.append(
             _run_mcp_check(
-                store_path=store_path,
+                store_path=context.store_file,
                 config_path=context.config_path,
                 timeout_seconds=mcp_timeout_seconds,
             )
@@ -383,6 +385,57 @@ def _check_knowledge_store(context: ReadinessContext, checks: list[DoctorCheck])
                         command=f"knowcode build {context.store_root}",
                         detail="Creates the knowledge store and semantic index for this project.",
                     ),
+                ),
+            )
+        )
+        return
+
+    if store_file.suffix == ".db":
+        try:
+            connection = sqlite3.connect(
+                f"file:{store_file.resolve()}?mode=ro",
+                uri=True,
+            )
+            try:
+                integrity = connection.execute("PRAGMA integrity_check").fetchone()
+                if integrity is None or integrity[0] != "ok":
+                    raise ValueError("SQLite integrity check failed")
+                tables = {
+                    row[0]
+                    for row in connection.execute(
+                        "SELECT name FROM sqlite_master WHERE type = 'table'"
+                    )
+                }
+                required_tables = {"entities", "relationships"}
+                if not required_tables.issubset(tables):
+                    raise ValueError("missing entities or relationships table")
+                entity_count = int(
+                    connection.execute("SELECT COUNT(*) FROM entities").fetchone()[0]
+                )
+                relationship_count = int(
+                    connection.execute("SELECT COUNT(*) FROM relationships").fetchone()[0]
+                )
+            finally:
+                connection.close()
+        except (sqlite3.Error, ValueError, TypeError) as exc:
+            checks.append(
+                DoctorCheck(
+                    name="Knowledge store",
+                    status="fail",
+                    message=f"Could not load {store_file}: {exc}",
+                    hint="Re-run `knowcode build <dir>` to rebuild the store.",
+                )
+            )
+            return
+        checks.append(
+            DoctorCheck(
+                name="Knowledge store",
+                status="pass",
+                message=(
+                    f"Loaded {store_file} "
+                    f"(SQLite schema v{SqliteKnowledgeStore.SCHEMA_VERSION}, "
+                    f"{entity_count} entities, "
+                    f"{relationship_count} relationships)."
                 ),
             )
         )
@@ -713,11 +766,14 @@ async def _check_mcp_handshake(
 
 
 def _resolve_store_file(store_path: str | Path) -> Path:
-    """Resolve a store argument to the actual JSON file path."""
+    """Resolve a store argument to the current SQLite or legacy JSON path."""
     path = Path(store_path)
     if path.is_dir():
+        sqlite_store = path / "knowledge.db"
+        if sqlite_store.exists():
+            return sqlite_store
         return path / KnowledgeStore.DEFAULT_FILENAME
-    if path.suffix == ".json":
+    if path.suffix in {".json", ".db"}:
         return path
     return path / KnowledgeStore.DEFAULT_FILENAME
 

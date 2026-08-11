@@ -1,6 +1,7 @@
 """Configuration management for KnowCode."""
 
 import logging
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
@@ -34,13 +35,31 @@ class AppConfig:
         "eval_models",
         "config",
     }
-    KNOWN_CONFIG_KEYS = {"sufficiency_threshold", "hybrid_alpha", "reranker_top_k_multiplier", "vector_backend"}
+    KNOWN_CONFIG_KEYS = {
+        "sufficiency_threshold",
+        "local_answer_task_types",
+        "routing_quality_floor",
+        "hybrid_alpha",
+        "reranker_top_k_multiplier",
+        "vector_backend",
+    }
+    SUPPORTED_TASK_TYPES = {
+        "explain",
+        "debug",
+        "extend",
+        "review",
+        "locate",
+        "general",
+    }
 
     models: list[ModelConfig] = field(default_factory=list)
     embedding_models: list[ModelConfig] = field(default_factory=list)
     prose_embedding_models: list[ModelConfig] = field(default_factory=list)
     reranking_models: list[ModelConfig] = field(default_factory=list)
     sufficiency_threshold: float = 0.8  # For local-first answering
+    # Fail closed: only a machine-verified artifact may populate this allowlist.
+    local_answer_task_types: list[str] = field(default_factory=list)
+    routing_quality_floor: float = 0.9
     hybrid_alpha: float = 0.2
     reranker_top_k_multiplier: int = 5
     vector_backend: str = "lancedb"
@@ -63,17 +82,57 @@ class AppConfig:
         if config_path:
             path = Path(config_path)
             if path.exists():
-                return cls._load_from_yaml(path, strict=strict)
+                return cls._fail_closed(cls._load_from_yaml(path, strict=strict))
         
         local_config = Path("aimodels.yaml")
         if local_config.exists():
-            return cls._load_from_yaml(local_config, strict=strict)
+            return cls._fail_closed(cls._load_from_yaml(local_config, strict=strict))
             
         home_config = Path.home() / ".aimodels.yaml"
         if home_config.exists():
-            return cls._load_from_yaml(home_config, strict=strict)
+            return cls._fail_closed(cls._load_from_yaml(home_config, strict=strict))
             
-        return cls.default()
+        return cls._fail_closed(cls.default())
+
+    @classmethod
+    def _fail_closed(cls, config: "AppConfig") -> "AppConfig":
+        """Prevent descriptive YAML fields from enabling local answers."""
+        config.local_answer_task_types = []
+        return config
+
+    def apply_runtime_policy(self, *, source_root: Path) -> None:
+        """Apply the explicitly checksum-pinned policy selected by the runtime."""
+        artifact_path = os.environ.get("KNOWCODE_ROUTING_POLICY_ARTIFACT")
+        if artifact_path:
+            self.apply_machine_verification_artifact(
+                Path(artifact_path),
+                source_root=source_root,
+                expected_sha256=os.environ.get("KNOWCODE_ROUTING_POLICY_SHA256"),
+            )
+        else:
+            self.local_answer_task_types = []
+
+    def apply_machine_verification_artifact(
+        self,
+        path: Path,
+        *,
+        source_root: Path,
+        expected_sha256: str | None,
+    ) -> None:
+        """Apply a verified policy artifact; unblessed artifacts stay closed."""
+        from knowcode.routing_policy import load_routing_policy
+
+        self.local_answer_task_types = []
+        policy = load_routing_policy(
+            path,
+            source_root=source_root,
+            expected_sha256=expected_sha256,
+        )
+        if policy is None:
+            return
+        self.sufficiency_threshold = policy.sufficiency_threshold
+        self.local_answer_task_types = list(policy.local_answer_task_types)
+        self.routing_quality_floor = policy.routing_quality_floor
 
     @classmethod
     def default(cls) -> "AppConfig":
@@ -143,7 +202,9 @@ class AppConfig:
             prose_embedding_models: list[ModelConfig] = []
             for m in (data.get("prose_embedding_models") or []):
                 if not isinstance(m, dict):
-                    raise ValueError("Each prose embedding model entry must be an object.")
+                    raise ValueError(
+                        "Each prose embedding model entry must be an object."
+                    )
                 prose_embedding_models.append(ModelConfig(
                     name=m["name"],
                     provider=m.get("provider", "voyageai"),
@@ -172,6 +233,39 @@ class AppConfig:
             sufficiency_threshold = config_section.get("sufficiency_threshold", 0.8)
             if not isinstance(sufficiency_threshold, (int, float)):
                 raise ValueError("'config.sufficiency_threshold' must be a number.")
+            if not 0 <= float(sufficiency_threshold) <= 1:
+                raise ValueError(
+                    "'config.sufficiency_threshold' must be between 0 and 1."
+                )
+
+            local_answer_task_types = config_section.get(
+                "local_answer_task_types", []
+            )
+            if not isinstance(local_answer_task_types, list):
+                raise ValueError(
+                    "'config.local_answer_task_types' must be a list."
+                )
+            if not all(isinstance(item, str) for item in local_answer_task_types):
+                raise ValueError(
+                    "'config.local_answer_task_types' entries must be strings."
+                )
+            unsupported_task_types = sorted(
+                set(local_answer_task_types) - cls.SUPPORTED_TASK_TYPES
+            )
+            if unsupported_task_types:
+                raise ValueError(
+                    "Unsupported task type(s) in "
+                    "'config.local_answer_task_types': "
+                    + ", ".join(unsupported_task_types)
+                )
+
+            routing_quality_floor = config_section.get("routing_quality_floor", 0.9)
+            if not isinstance(routing_quality_floor, (int, float)):
+                raise ValueError("'config.routing_quality_floor' must be a number.")
+            if not 0 <= float(routing_quality_floor) <= 1:
+                raise ValueError(
+                    "'config.routing_quality_floor' must be between 0 and 1."
+                )
             
             hybrid_alpha = config_section.get("hybrid_alpha", 0.5)
             if not isinstance(hybrid_alpha, (int, float)):
@@ -193,7 +287,9 @@ class AppConfig:
                 embedding_models=embedding_models,
                 prose_embedding_models=prose_embedding_models,
                 reranking_models=reranking_models,
-                sufficiency_threshold=sufficiency_threshold,
+                sufficiency_threshold=float(sufficiency_threshold),
+                local_answer_task_types=list(dict.fromkeys(local_answer_task_types)),
+                routing_quality_floor=float(routing_quality_floor),
                 hybrid_alpha=hybrid_alpha,
                 reranker_top_k_multiplier=reranker_top_k_multiplier,
                 vector_backend=vector_backend,

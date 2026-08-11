@@ -68,11 +68,19 @@ class Agent:
         self.clients[client_key] = client
         return client
 
-    def answer(self, query: str) -> str:
+    def answer(
+        self,
+        query: str,
+        *,
+        retrieval: dict[str, Any] | None = None,
+    ) -> str:
         """Answer a question about the codebase.
 
         Args:
             query: User's question.
+            retrieval: Optional retrieval result to reuse. When omitted, the
+                agent retrieves a minimal response with the task metadata
+                required to select the prompt.
 
         Returns:
             The agent's answer.
@@ -81,7 +89,8 @@ class Agent:
             ValueError: If no API keys are set.
             Exception: If all models fail.
         """
-        retrieval = self.service.retrieve_context_for_query(query)
+        if retrieval is None:
+            retrieval = self._retrieve_context(query)
         task_type = TaskType(retrieval.get("task_type", TaskType.GENERAL.value))
         confidence = float(retrieval.get("task_confidence", 0.0))
         print(f"  📋 Query type: {task_type.value} (confidence: {confidence:.0%})")
@@ -159,6 +168,25 @@ class Agent:
         
         raise ValueError("No valid configuration found or all models skipped (check API keys or limits).")
 
+    def _retrieve_context(
+        self,
+        query: str,
+        *,
+        max_tokens: int = 1500,
+        limit_entities: int = 1,
+        expand_deps: bool = False,
+        verbosity: str = "minimal",
+    ) -> dict[str, Any]:
+        """Retrieve the minimal projection plus metadata used by the agent."""
+        return self.service.retrieve_context_for_query(
+            query,
+            max_tokens=max_tokens,
+            limit_entities=limit_entities,
+            expand_deps=expand_deps,
+            verbosity=verbosity,
+            include_metadata=True,
+        )
+
     def smart_answer(
         self,
         query: str,
@@ -181,19 +209,64 @@ class Agent:
                 - sufficiency_score: Context quality score
                 - context: The retrieved context
         """
-        retrieval = self.service.retrieve_context_for_query(query)
-        task_type = TaskType(retrieval.get("task_type", TaskType.GENERAL.value))
-        confidence = float(retrieval.get("task_confidence", 0.0))
-        print(f"  📋 Query type: {task_type.value} (confidence: {confidence:.0%})")
-
+        retrieval = self._retrieve_context(query)
         avg_sufficiency = float(retrieval.get("sufficiency_score", 0.0))
         context_str = retrieval.get("context_text", "")
+        initial_task_type = TaskType(
+            retrieval.get("task_type", TaskType.GENERAL.value)
+        )
+        can_route_locally = (
+            initial_task_type.value in self.config.local_answer_task_types
+        )
 
         threshold = self.config.sufficiency_threshold
+
+        if (
+            not force_llm
+            and can_route_locally
+            and (avg_sufficiency < threshold or not context_str)
+        ):
+            print("  🔎 Expanding local retrieval breadth...")
+            retrieval = self._retrieve_context(
+                query,
+                max_tokens=3000,
+                limit_entities=3,
+                expand_deps=True,
+            )
+            avg_sufficiency = float(retrieval.get("sufficiency_score", 0.0))
+            context_str = retrieval.get("context_text", "")
+
+        if (
+            not force_llm
+            and can_route_locally
+            and (avg_sufficiency < threshold or not context_str)
+        ):
+            print("  🔎 Requesting standard retrieval detail...")
+            retrieval = self._retrieve_context(
+                query,
+                max_tokens=3000,
+                limit_entities=3,
+                expand_deps=True,
+                verbosity="standard",
+            )
+            avg_sufficiency = float(retrieval.get("sufficiency_score", 0.0))
+            context_str = retrieval.get("context_text", "")
+
+        task_type = TaskType(retrieval.get("task_type", TaskType.GENERAL.value))
+        routing_policy_allowed = (
+            task_type.value in self.config.local_answer_task_types
+        )
+        confidence = float(retrieval.get("task_confidence", 0.0))
+        print(f"  📋 Query type: {task_type.value} (confidence: {confidence:.0%})")
         print(f"  📊 Sufficiency: {avg_sufficiency:.0%} (threshold: {threshold:.0%})")
         
         # 3. Decide: local answer or LLM
-        if not force_llm and avg_sufficiency >= threshold and context_str:
+        if (
+            not force_llm
+            and routing_policy_allowed
+            and avg_sufficiency >= threshold
+            and context_str
+        ):
             # Local-first: sufficient context found
             print("  ✅ Answering locally (sufficient context)")
             
@@ -206,12 +279,13 @@ class Agent:
                 "sufficiency_score": avg_sufficiency,
                 "context": context_str,
                 "llm_tokens_saved": len(context_str.split()),  # Rough estimate
+                "routing_policy_allowed": routing_policy_allowed,
             }
         else:
             # Need LLM
             print("  🤖 Calling LLM (sufficiency below threshold or forced)")
             
-            llm_answer = self.answer(query)
+            llm_answer = self.answer(query, retrieval=retrieval)
             
             res = {
                 "answer": llm_answer,
@@ -220,6 +294,7 @@ class Agent:
                 "sufficiency_score": avg_sufficiency,
                 "context": context_str,
                 "llm_tokens_saved": 0,
+                "routing_policy_allowed": routing_policy_allowed,
             }
 
         try:
@@ -234,6 +309,7 @@ class Agent:
                     "threshold": threshold,
                     "force_llm": force_llm,
                     "task_type": task_type.value,
+                    "routing_policy_allowed": routing_policy_allowed,
                     "llm_tokens_saved": res["llm_tokens_saved"],
                 }
             )

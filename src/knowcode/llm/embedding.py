@@ -224,6 +224,51 @@ class DummyEmbeddingProvider(EmbeddingProvider):
         return [x / norm for x in vec] if norm > 0 else vec
 
 
+def resolve_embedding_dimension(provider: str, model_name: str) -> int:
+    """Resolve the vector dimension for a configured embedding model."""
+    normalized_provider = provider.lower()
+    if normalized_provider in {"voyageai", "voyage"}:
+        return _VOYAGE_EMBED_DIMENSIONS.get(model_name, 1024)
+    if normalized_provider in {"openai", "openrouter", "mistralai"}:
+        return _OPENAI_EMBED_DIMENSIONS.get(model_name, 1536)
+    raise ValueError(f"Unsupported embedding provider: {provider}")
+
+
+def build_provider_from_model(model: ModelConfig) -> EmbeddingProvider:
+    """Build an embedding provider from one model configuration."""
+    provider = model.provider.lower()
+
+    if provider in {"voyageai", "voyage"}:
+        config = EmbeddingConfig(
+            provider="voyageai",
+            model_name=model.name,
+            dimension=resolve_embedding_dimension(provider, model.name),
+        )
+        return VoyageAIEmbeddingProvider(config, api_key_env=model.api_key_env)
+
+    if provider in {"openai", "openrouter", "mistralai"}:
+        base_url = (
+            "https://openrouter.ai/api/v1"
+            if provider in {"openrouter", "mistralai"}
+            else None
+        )
+        config = EmbeddingConfig(
+            provider="openai",
+            model_name=model.name,
+            dimension=resolve_embedding_dimension(provider, model.name),
+        )
+        return OpenAIEmbeddingProvider(
+            config,
+            api_key_env=model.api_key_env,
+            base_url=base_url,
+        )
+
+    if provider == "local":
+        raise NotImplementedError("The local embedding provider is not implemented.")
+
+    raise ValueError(f"Unsupported embedding provider: {model.provider}")
+
+
 def create_embedding_provider(
     app_config: AppConfig | None = None,
     embedding_config: EmbeddingConfig | None = None,
@@ -247,30 +292,7 @@ def create_embedding_provider(
             if not api_key:
                 continue
 
-            provider = model.provider.lower()
-            if provider in {"voyageai", "voyage"}:
-                cfg = EmbeddingConfig(
-                    provider="voyageai",
-                    model_name=model.name,
-                    dimension=_VOYAGE_EMBED_DIMENSIONS.get(model.name, 1024),
-                )
-                return VoyageAIEmbeddingProvider(cfg, api_key_env=model.api_key_env)
-
-            if provider in {"openai", "openrouter", "mistralai"}:
-                base_url = None
-                if provider in {"openrouter", "mistralai"}:
-                    base_url = "https://openrouter.ai/api/v1"
-
-                cfg = EmbeddingConfig(
-                    provider="openai",
-                    model_name=model.name,
-                    dimension=_OPENAI_EMBED_DIMENSIONS.get(model.name, 1536),
-                )
-                return OpenAIEmbeddingProvider(
-                    cfg,
-                    api_key_env=model.api_key_env,
-                    base_url=base_url,
-                )
+            return build_provider_from_model(model)
 
     return DummyEmbeddingProvider(EmbeddingConfig())
 

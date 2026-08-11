@@ -56,6 +56,7 @@ def test_usecase2_high_sufficiency_uses_local_answer(tmp_path: Path) -> None:
     config = AppConfig(
         models=[ModelConfig(name="test-model", provider="google", api_key_env="TEST_KEY")],
         sufficiency_threshold=0.8,
+        local_answer_task_types=[TaskType.EXPLAIN.value],
     )
     
     agent = Agent(mock_service, config)  # type: ignore[arg-type]

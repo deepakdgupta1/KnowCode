@@ -52,6 +52,7 @@ class KnowCodeService:
         self.app_config = app_config or AppConfig.load(
             config_path, strict=strict_config
         )
+        self.app_config.apply_runtime_policy(source_root=self._store_root())
         self._store: Any = None
         self._search_engine: Optional["SearchEngine"] = None
         self._indexer: Optional["Indexer"] = None

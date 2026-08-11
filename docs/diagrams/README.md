@@ -3,10 +3,10 @@
 This directory contains the visual `.drawio` diagram assets along with their respective textual narrations. Below is the unified index of all system workflows and architecture details:
 
 - [System Architecture Overview](#system-architecture-overview)
-- [Indexing & Analysis Workflow](#indexing--analysis-workflow)
-- [Query & Retrieval Workflow](#query--retrieval-workflow)
+- [Indexing & Analysis Workflow](#indexing-analysis-workflow)
+- [Query & Retrieval Workflow](#query-retrieval-workflow)
 - [MCP Server Workflow](#mcp-server-workflow)
-- [File Watch & Hot-Reload Workflow](#file-watch--hot-reload-workflow)
+- [File Watch & Hot-Reload Workflow](#file-watch-hot-reload-workflow)
 - [Agent Gateway Workflow](#agent-gateway-workflow)
 
 ---

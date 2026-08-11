@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from pathlib import Path
 
@@ -54,6 +55,82 @@ config:
     assert any("Unknown config keys" in rec.message for rec in caplog.records)
 
 
+def test_load_parses_fail_closed_routing_policy(tmp_path: Path) -> None:
+    """A YAML allowlist cannot bypass the machine-verification artifact."""
+    config_file = tmp_path / "aimodels.yaml"
+    _write(
+        config_file,
+        """
+config:
+  sufficiency_threshold: 0.87
+  local_answer_task_types: [locate, explain]
+  routing_quality_floor: 0.9
+""",
+    )
+
+    cfg = AppConfig.load(str(config_file), strict=True)
+
+    assert cfg.sufficiency_threshold == 0.87
+    assert cfg.local_answer_task_types == []
+    assert cfg.routing_quality_floor == 0.9
+
+
+def test_default_routing_policy_is_fail_closed() -> None:
+    cfg = AppConfig.default()
+
+    assert cfg.local_answer_task_types == []
+    assert cfg.routing_quality_floor == 0.9
+
+
+def test_unblessed_machine_artifact_cannot_enable_routing(tmp_path: Path) -> None:
+    artifact = tmp_path / "machine-verification.json"
+    artifact.write_text(
+        """
+{
+  "schema_version": "1.0.0",
+  "verification_kind": "independent_machine_adjudication",
+  "status": "unblessed",
+  "routing_policy": {
+    "status": "unblessed",
+    "sufficiency_threshold": 0.5,
+    "local_answer_task_types": ["locate"]
+  }
+}
+""",
+        encoding="utf-8",
+    )
+    config = AppConfig(local_answer_task_types=["locate"])
+    digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
+
+    config.apply_machine_verification_artifact(
+        artifact,
+        source_root=tmp_path,
+        expected_sha256=digest,
+    )
+
+    assert config.local_answer_task_types == []
+
+
+@pytest.mark.parametrize(
+    ("config_yaml", "message"),
+    [
+        ("local_answer_task_types: locate", "must be a list"),
+        ("local_answer_task_types: [locate, unknown]", "Unsupported task type"),
+        ("routing_quality_floor: 1.1", "between 0 and 1"),
+    ],
+)
+def test_load_rejects_invalid_routing_policy(
+    tmp_path: Path,
+    config_yaml: str,
+    message: str,
+) -> None:
+    config_file = tmp_path / "aimodels.yaml"
+    _write(config_file, f"config:\n  {config_yaml}\n")
+
+    with pytest.raises(ValueError, match=message):
+        AppConfig.load(str(config_file), strict=True)
+
+
 def test_load_strict_rejects_unknown_keys(tmp_path: Path) -> None:
     """Strict mode should reject unknown keys instead of warning."""
     config_file = tmp_path / "aimodels.yaml"
@@ -87,6 +164,30 @@ eval_models:
     cfg = AppConfig.load(str(config_file), strict=True)
 
     assert cfg.models[0].name == "gemini-2.0-flash-lite"
+
+
+def test_load_strict_parses_prose_embedding_models(tmp_path: Path) -> None:
+    """Prose embedding models should be independently configurable."""
+    config_file = tmp_path / "aimodels.yaml"
+    _write(
+        config_file,
+        """
+natural_language_models:
+  - name: gemini-2.0-flash-lite
+prose_embedding_models:
+  - name: voyage-3-large
+    provider: voyageai
+    api_key_env: VOYAGE_API_KEY_PROSE
+    tokens_free_tier_limit: 200000000
+""",
+    )
+
+    cfg = AppConfig.load(str(config_file), strict=True)
+
+    assert len(cfg.prose_embedding_models) == 1
+    assert cfg.prose_embedding_models[0].name == "voyage-3-large"
+    assert cfg.prose_embedding_models[0].api_key_env == "VOYAGE_API_KEY_PROSE"
+    assert cfg.prose_embedding_models[0].tokens_free_tier_limit == 200000000
 
 
 def test_load_strict_rejects_invalid_root_type(tmp_path: Path) -> None:

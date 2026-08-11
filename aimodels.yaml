@@ -20,5 +20,8 @@ eval_models:
 # Configuration
 config:
   sufficiency_threshold: 0.8 # Configurable threshold for local-first answering
+  # Generated only after the machine-verification gate passes. Empty is fail-closed.
+  local_answer_task_types: []
+  routing_quality_floor: 0.9
   hybrid_alpha: 0.2
   reranker_top_k_multiplier: 5
