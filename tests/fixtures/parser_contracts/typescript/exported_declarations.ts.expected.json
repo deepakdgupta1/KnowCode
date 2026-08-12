@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "language": "typescript",
+  "entities": [
+    {"qualified_name": "exported_declarations", "kind": "module", "line_start": 1, "line_end": 7},
+    {"qualified_name": "Shape", "kind": "class", "line_start": 1, "line_end": 1},
+    {"qualified_name": "Identifier", "kind": "class", "line_start": 2, "line_end": 2},
+    {"qualified_name": "State", "kind": "class", "line_start": 3, "line_end": 3},
+    {"qualified_name": "Service", "kind": "class", "line_start": 4, "line_end": 4},
+    {"qualified_name": "createService", "kind": "function", "line_start": 5, "line_end": 5},
+    {"qualified_name": "factory", "kind": "function", "line_start": 6, "line_end": 6},
+    {"qualified_name": "default_export", "kind": "function", "line_start": 7, "line_end": 7}
+  ],
+  "relationships": [
+    {"source": "exported_declarations", "target": {"classification": "internal", "qualified_name": "Shape"}, "kind": "contains"},
+    {"source": "exported_declarations", "target": {"classification": "internal", "qualified_name": "Identifier"}, "kind": "contains"},
+    {"source": "exported_declarations", "target": {"classification": "internal", "qualified_name": "State"}, "kind": "contains"},
+    {"source": "exported_declarations", "target": {"classification": "internal", "qualified_name": "Service"}, "kind": "contains"},
+    {"source": "exported_declarations", "target": {"classification": "internal", "qualified_name": "createService"}, "kind": "contains"},
+    {"source": "exported_declarations", "target": {"classification": "internal", "qualified_name": "factory"}, "kind": "contains"},
+    {"source": "exported_declarations", "target": {"classification": "internal", "qualified_name": "default_export"}, "kind": "contains"},
+    {"source": "createService", "target": {"classification": "internal", "qualified_name": "Service"}, "kind": "calls"},
+    {"source": "factory", "target": {"classification": "internal", "qualified_name": "createService"}, "kind": "calls"}
+  ]
+}

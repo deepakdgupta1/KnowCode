@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "language": "vue",
+  "entities": [
+    {"qualified_name": "SfcSections", "kind": "class", "line_start": 1, "line_end": 12},
+    {"qualified_name": "SfcSections.title", "kind": "variable", "line_start": 5, "line_end": 5},
+    {"qualified_name": "SfcSections.select", "kind": "function", "line_start": 6, "line_end": 8}
+  ],
+  "relationships": [
+    {"source": "SfcSections", "target": {"classification": "internal", "qualified_name": "SfcSections.title"}, "kind": "contains"},
+    {"source": "SfcSections", "target": {"classification": "internal", "qualified_name": "SfcSections.select"}, "kind": "contains"}
+  ]
+}

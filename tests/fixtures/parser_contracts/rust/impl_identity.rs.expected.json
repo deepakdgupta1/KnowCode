@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "language": "rust",
+  "entities": [
+    {"qualified_name": "impl_identity", "kind": "module", "line_start": 1, "line_end": 11},
+    {"qualified_name": "impl_identity.Display", "kind": "class", "line_start": 1, "line_end": 1},
+    {"qualified_name": "impl_identity.Point", "kind": "class", "line_start": 2, "line_end": 2},
+    {"qualified_name": "impl_identity.Point.new", "kind": "function", "line_start": 4, "line_end": 4},
+    {"qualified_name": "impl_identity.Point.display", "kind": "function", "line_start": 7, "line_end": 7},
+    {"qualified_name": "impl_identity.Point.render", "kind": "function", "line_start": 10, "line_end": 10}
+  ],
+  "relationships": [
+    {"source": "impl_identity", "target": {"classification": "internal", "qualified_name": "impl_identity.Display"}, "kind": "contains"},
+    {"source": "impl_identity", "target": {"classification": "internal", "qualified_name": "impl_identity.Point"}, "kind": "contains"},
+    {"source": "impl_identity.Point", "target": {"classification": "internal", "qualified_name": "impl_identity.Point.new"}, "kind": "contains"},
+    {"source": "impl_identity.Point", "target": {"classification": "internal", "qualified_name": "impl_identity.Point.display"}, "kind": "contains"},
+    {"source": "impl_identity.Point", "target": {"classification": "internal", "qualified_name": "impl_identity.Point.render"}, "kind": "contains"},
+    {"source": "impl_identity.Point", "target": {"classification": "internal", "qualified_name": "impl_identity.Display"}, "kind": "implements"},
+    {"source": "impl_identity.Point.display", "target": {"classification": "internal", "qualified_name": "impl_identity.Display"}, "kind": "implements"},
+    {"source": "impl_identity.Point", "target": {"classification": "unresolved", "scope": "impl_identity.Point", "symbol": "vendor::Render"}, "kind": "implements"},
+    {"source": "impl_identity.Point.render", "target": {"classification": "unresolved", "scope": "impl_identity.Point.render", "symbol": "vendor::Render"}, "kind": "implements"}
+  ]
+}

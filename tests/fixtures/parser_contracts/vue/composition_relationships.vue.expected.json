@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "language": "vue",
+  "entities": [
+    {"qualified_name": "CompositionRelationships", "kind": "class", "line_start": 1, "line_end": 13},
+    {"qualified_name": "CompositionRelationships.count", "kind": "variable", "line_start": 7, "line_end": 7},
+    {"qualified_name": "CompositionRelationships.doubled", "kind": "variable", "line_start": 8, "line_end": 8},
+    {"qualified_name": "CompositionRelationships.increment", "kind": "function", "line_start": 9, "line_end": 9}
+  ],
+  "relationships": [
+    {"source": "CompositionRelationships", "target": {"classification": "internal", "qualified_name": "CompositionRelationships.count"}, "kind": "contains"},
+    {"source": "CompositionRelationships", "target": {"classification": "internal", "qualified_name": "CompositionRelationships.doubled"}, "kind": "contains"},
+    {"source": "CompositionRelationships", "target": {"classification": "internal", "qualified_name": "CompositionRelationships.increment"}, "kind": "contains"},
+    {"source": "CompositionRelationships", "target": {"classification": "external", "namespace": "npm", "symbol": "vue"}, "kind": "imports"},
+    {"source": "CompositionRelationships", "target": {"classification": "internal", "qualified_name": "CompositionRelationships.increment"}, "kind": "calls", "metadata": {"binding_type": "event"}},
+    {"source": "CompositionRelationships", "target": {"classification": "internal", "qualified_name": "CompositionRelationships.count"}, "kind": "references", "metadata": {"binding_type": "model"}},
+    {"source": "CompositionRelationships", "target": {"classification": "internal", "qualified_name": "CompositionRelationships.doubled"}, "kind": "references", "metadata": {"binding_type": "css_variable"}}
+  ]
+}

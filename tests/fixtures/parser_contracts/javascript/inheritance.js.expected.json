@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "language": "javascript",
+  "entities": [
+    {"qualified_name": "inheritance", "kind": "module", "line_start": 1, "line_end": 3},
+    {"qualified_name": "Parent", "kind": "class", "line_start": 1, "line_end": 1},
+    {"qualified_name": "Child", "kind": "class", "line_start": 2, "line_end": 2},
+    {"qualified_name": "RemoteChild", "kind": "class", "line_start": 3, "line_end": 3}
+  ],
+  "relationships": [
+    {"source": "inheritance", "target": {"classification": "internal", "qualified_name": "Parent"}, "kind": "contains"},
+    {"source": "inheritance", "target": {"classification": "internal", "qualified_name": "Child"}, "kind": "contains"},
+    {"source": "inheritance", "target": {"classification": "internal", "qualified_name": "RemoteChild"}, "kind": "contains"},
+    {"source": "Child", "target": {"classification": "internal", "qualified_name": "Parent"}, "kind": "inherits"},
+    {"source": "RemoteChild", "target": {"classification": "unresolved", "scope": "RemoteChild", "symbol": "Framework.Component"}, "kind": "inherits"}
+  ]
+}
