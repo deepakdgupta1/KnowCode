@@ -310,7 +310,7 @@ Additional global rules:
 
 ## Execution Steps
 
-### [~] Step 01 — Freeze contracts, fixtures, and architectural decisions
+### [x] Step 01 — Freeze contracts, fixtures, and architectural decisions
 
 **Execution tier:** strongest available model; architecture-heavy review.
 
@@ -359,7 +359,7 @@ hiding current failures. No production behavior changes.
 **Rollback:** Revert fixture/helper/ADR additions as one documentation-and-test
 commit; no persisted artifact changes exist.
 
-### [ ] Step 02 — Correct JavaScript inheritance and TypeScript exports
+### [~] Step 02 — Correct JavaScript inheritance and TypeScript exports
 
 **Execution tier:** default capable coding model; bounded parser refactor.
 
@@ -1418,8 +1418,8 @@ commit SHA, or durable local handoff note until a PR exists.
 
 | Step | Status | Branch/PR | Started | Completed | Verification/evidence | Handoff notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| 01 | `[~]` | [PR #21](https://github.com/deepakdgupta1/KnowCode/pull/21) (`codex/hardening-s01-contracts`) | 2026-08-12 | — | Draft PR: 150 focused and 368 global tests passed; Ruff, mypy, strict MkDocs, dependency audit, and diff checks passed. | Exit criteria are complete; PR review and merge remain before `[x]`. No parser/storage/API behavior was integrated. |
-| 02 | `[ ]` | — | — | — | — | — |
+| 01 | `[x]` | [PR #21](https://github.com/deepakdgupta1/KnowCode/pull/21) (`codex/hardening-s01-contracts`) | 2026-08-12 | 2026-08-12 | Merged to `main` as `ecee1a3`; 150 focused and 368 global tests passed; Ruff, mypy, strict MkDocs, dependency audit, and diff checks passed. | Contracts, fixtures, helpers, and ADRs are now the required baseline for dependent steps. |
+| 02 | `[~]` | `codex/hardening-s02-js-ts` | 2026-08-12 | — | Local implementation: red phase had 5 intended failures; green phase had 14 focused and 378 global tests pass; parser-module coverage is 95%; Ruff, mypy, strict MkDocs, and diff checks passed. | Exit criteria are complete; PR review and merge remain before `[x]`. Canonical endpoints and newly extracted TS entities require generated graphs to be rebuilt after applying or reverting this step. |
 | 03 | `[ ]` | — | — | — | — | — |
 | 04 | `[ ]` | — | — | — | — | — |
 | 05 | `[ ]` | — | — | — | — | — |
@@ -1448,6 +1448,7 @@ commit SHA, or durable local handoff note until a PR exists.
 | 2026-08-12 | Plan | Baseline | Focused review confirmed C2/C4/C5/C6/C7/C8/C9 and server-layer C10, plus Vue internal-edge and repository/vector split-brain defects. | Established the initial scope and corrected issue attribution. |
 | 2026-08-12 | Plan | Adversarial review | Full rebuilds can publish mismatched `knowledge.db`/semantic artifacts; vector and lifecycle draft steps were too broad; C9/C10 proof omitted production paths. | Added explicit complete-generation publication; split backend, queue, API, and hot-swap work; strengthened service telemetry and real-server limiter gates; finalized Steps 01–22. |
 | 2026-08-12 | 01 | Decision | Accepted canonical endpoint/path rules, context-owned SQLite connections, durable float32 embeddings, pointer-last immutable generations, aggregate-only telemetry, and no proxy trust in direct mode. | Later steps must implement the contracts in `docs/architecture/hardening-contracts.md`; incompatible legacy graph/index artifacts fail closed and rebuild. |
+| 2026-08-12 | 02 | Dependency audit | `pip-audit` reported 23 advisories in five packages already present on `main`: aiohttp, click, cryptography, GitPython, and pymdown-extensions. | No dependency changed in Step 02. Remediate in a separate maintenance PR before the final release gate; do not mix upgrades into the parser change. |
 
 ## Definition of Complete
 
