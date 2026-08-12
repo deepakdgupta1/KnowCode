@@ -1419,7 +1419,7 @@ commit SHA, or durable local handoff note until a PR exists.
 | Step | Status | Branch/PR | Started | Completed | Verification/evidence | Handoff notes |
 | --- | --- | --- | --- | --- | --- | --- |
 | 01 | `[x]` | [PR #21](https://github.com/deepakdgupta1/KnowCode/pull/21) (`codex/hardening-s01-contracts`) | 2026-08-12 | 2026-08-12 | Merged to `main` as `ecee1a3`; 150 focused and 368 global tests passed; Ruff, mypy, strict MkDocs, dependency audit, and diff checks passed. | Contracts, fixtures, helpers, and ADRs are now the required baseline for dependent steps. |
-| 02 | `[~]` | `codex/hardening-s02-js-ts` | 2026-08-12 | — | Local implementation: red phase had 5 intended failures; green phase had 14 focused and 378 global tests pass; parser-module coverage is 95%; Ruff, mypy, strict MkDocs, and diff checks passed. | Exit criteria are complete; PR review and merge remain before `[x]`. Canonical endpoints and newly extracted TS entities require generated graphs to be rebuilt after applying or reverting this step. |
+| 02 | `[~]` | [PR #23](https://github.com/deepakdgupta1/KnowCode/pull/23) (`codex/hardening-s02-js-ts`) | 2026-08-12 | — | Draft PR: red phase had 5 intended failures; green phase had 14 focused and 378 global tests pass; parser-module coverage is 95%; Ruff, mypy, strict MkDocs, and diff checks passed. | Exit criteria are complete; PR review and merge remain before `[x]`. Canonical endpoints and newly extracted TS entities require generated graphs to be rebuilt after applying or reverting this step. |
 | 03 | `[ ]` | — | — | — | — | — |
 | 04 | `[ ]` | — | — | — | — | — |
 | 05 | `[ ]` | — | — | — | — | — |
