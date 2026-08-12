@@ -109,7 +109,9 @@ def run_doctor(
     config, resolved_config = _check_config(config_path, checks)
     store_file = _resolve_store_file(store_path)
     store_root = store_file.parent
-    resolved_index = Path(index_path) if index_path is not None else store_root / "knowcode_index"
+    resolved_index = (
+        Path(index_path) if index_path is not None else store_root / "knowcode_index"
+    )
     context = ReadinessContext(
         cwd=Path.cwd(),
         store_path=Path(store_path),
@@ -369,7 +371,9 @@ def _check_python_runtime(checks: list[DoctorCheck]) -> None:
     )
 
 
-def _check_knowledge_store(context: ReadinessContext, checks: list[DoctorCheck]) -> None:
+def _check_knowledge_store(
+    context: ReadinessContext, checks: list[DoctorCheck]
+) -> None:
     """Validate knowledge store presence and schema."""
     store_file = context.store_file
     if not store_file.exists():
@@ -413,7 +417,9 @@ def _check_knowledge_store(context: ReadinessContext, checks: list[DoctorCheck])
                     connection.execute("SELECT COUNT(*) FROM entities").fetchone()[0]
                 )
                 relationship_count = int(
-                    connection.execute("SELECT COUNT(*) FROM relationships").fetchone()[0]
+                    connection.execute("SELECT COUNT(*) FROM relationships").fetchone()[
+                        0
+                    ]
                 )
             finally:
                 connection.close()
@@ -564,7 +570,9 @@ def _check_semantic_index(context: ReadinessContext, checks: list[DoctorCheck]) 
             recorded = recorded_embedding.get(key)
             expected = getattr(expected_embedding, key, None)
             if recorded != expected:
-                failures.append(f"{key} mismatch: index={recorded!r} current={expected!r}")
+                failures.append(
+                    f"{key} mismatch: index={recorded!r} current={expected!r}"
+                )
 
     recorded_dimension = vector_metadata.get("dimension")
     if recorded_dimension is not None:
@@ -727,16 +735,25 @@ async def _check_mcp_handshake(
                     timeout=timeout_seconds,
                 )
                 tool_names = {tool.name for tool in tools_result.tools}
-                if "search_codebase" not in tool_names:
+                if "retrieve_context_for_query" not in tool_names:
                     return DoctorCheck(
                         name="MCP handshake",
                         status="fail",
-                        message="MCP server did not expose search_codebase.",
+                        message="MCP server did not expose retrieve_context_for_query.",
                         hint="Check src/knowcode/mcp/server.py tool registration.",
                     )
 
                 call_result = await asyncio.wait_for(
-                    session.call_tool("search_codebase", {"query": "", "limit": 1}),
+                    session.call_tool(
+                        "retrieve_context_for_query",
+                        {
+                            "query": "doctor test",
+                            "max_tokens": 1500,
+                            "limit_entities": 1,
+                            "expand_deps": False,
+                            "verbosity": "minimal",
+                        },
+                    ),
                     timeout=timeout_seconds,
                 )
                 if not call_result.content:
@@ -749,17 +766,17 @@ async def _check_mcp_handshake(
 
                 text = getattr(call_result.content[0], "text", "")
                 parsed = json.loads(text)
-                if not isinstance(parsed, list):
+                if not isinstance(parsed, dict) or "context_text" not in parsed:
                     return DoctorCheck(
                         name="MCP handshake",
                         status="fail",
-                        message="MCP tool response was not a JSON list.",
-                        hint="Check search_codebase response formatting.",
+                        message="MCP tool response was not a valid context dictionary.",
+                        hint="Check retrieve_context_for_query minimal response formatting.",
                     )
 
         errlog.seek(0)
         stderr = errlog.read().strip()
-    message = f"Listed {len(tool_names)} tools and called search_codebase successfully."
+    message = f"Listed {len(tool_names)} tools and called retrieve_context_for_query successfully."
     if stderr:
         message = f"{message} Server stderr: {stderr}"
     return DoctorCheck(name="MCP handshake", status="pass", message=message)
@@ -856,15 +873,16 @@ def _path_size(path: Path) -> int:
 
     total = 0
     import logging
+
     logger = logging.getLogger(__name__)
-    
+
     for child in path.rglob("*"):
         try:
             if child.is_file():
                 total += child.stat().st_size
         except OSError as e:
             logger.warning("Skipped file size calculation for %s: %s", child, e)
-            
+
     return total
 
 
@@ -894,7 +912,9 @@ def _check_agent_rules(store_path: str | Path, checks: list[DoctorCheck]) -> Non
         )
 
 
-def _check_unsupported_languages(store_path: str | Path, checks: list[DoctorCheck]) -> None:
+def _check_unsupported_languages(
+    store_path: str | Path, checks: list[DoctorCheck]
+) -> None:
     """Scan directory for common unsupported source code extensions."""
     store_root = Path(store_path).resolve()
     if not store_root.is_dir():
@@ -911,7 +931,15 @@ def _check_unsupported_languages(store_path: str | Path, checks: list[DoctorChec
         ".php": "PHP",
         ".cs": "C#",
     }
-    ignored_dirs = {".git", ".venv", "venv", "node_modules", "__pycache__", ".pytest_cache", ".mypy_cache"}
+    ignored_dirs = {
+        ".git",
+        ".venv",
+        "venv",
+        "node_modules",
+        "__pycache__",
+        ".pytest_cache",
+        ".mypy_cache",
+    }
 
     try:
         for root, dirs, files in os.walk(store_root):
@@ -922,7 +950,10 @@ def _check_unsupported_languages(store_path: str | Path, checks: list[DoctorChec
                     unsupported_exts.add(unsupported_map[ext])
     except Exception as e:
         import logging
-        logging.getLogger(__name__).warning("Failed to scan for unsupported languages: %s", e)
+
+        logging.getLogger(__name__).warning(
+            "Failed to scan for unsupported languages: %s", e
+        )
 
     if unsupported_exts:
         checks.append(
@@ -947,6 +978,7 @@ def _check_freshness(context: ReadinessContext, checks: list[DoctorCheck]) -> No
     """Validate freshness of the knowledge store and index."""
     try:
         from knowcode.service import KnowCodeService
+
         service = KnowCodeService(
             store_path=context.store_root,
             config_path=str(context.config_path) if context.config_path else None,

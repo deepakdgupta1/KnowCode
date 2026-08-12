@@ -131,6 +131,46 @@ def test_load_rejects_invalid_routing_policy(
         AppConfig.load(str(config_file), strict=True)
 
 
+@pytest.mark.parametrize(
+    ("config_yaml", "message"),
+    [
+        ("hybrid_alpha: 1.5", "between 0 and 1"),
+        ("hybrid_alpha: -0.1", "between 0 and 1"),
+        ("hybrid_alpha: true", "must be a number"),
+        ("reranker_top_k_multiplier: 0", "between 1 and 100"),
+        ("reranker_top_k_multiplier: -1", "between 1 and 100"),
+        ("reranker_top_k_multiplier: true", "must be an integer"),
+    ],
+)
+def test_load_rejects_invalid_tuning_knobs(
+    tmp_path: Path,
+    config_yaml: str,
+    message: str,
+) -> None:
+    """hybrid_alpha and reranker_top_k_multiplier must be range-checked."""
+    config_file = tmp_path / "aimodels.yaml"
+    _write(config_file, f"config:\n  {config_yaml}\n")
+
+    with pytest.raises(ValueError, match=message):
+        AppConfig.load(str(config_file), strict=True)
+
+
+def test_load_defaults_hybrid_alpha_to_0_2(tmp_path: Path) -> None:
+    """Omitting hybrid_alpha yields the sparse-heavy 0.2 default everywhere."""
+    config_file = tmp_path / "aimodels.yaml"
+    _write(
+        config_file,
+        """
+natural_language_models:
+  - name: gemini-2.0-flash-lite
+""",
+    )
+
+    cfg = AppConfig.load(str(config_file))
+
+    assert cfg.hybrid_alpha == 0.2
+
+
 def test_load_strict_rejects_unknown_keys(tmp_path: Path) -> None:
     """Strict mode should reject unknown keys instead of warning."""
     config_file = tmp_path / "aimodels.yaml"

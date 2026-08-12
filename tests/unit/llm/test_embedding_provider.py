@@ -50,6 +50,17 @@ def test_resolve_embedding_dimension_unknown_voyage_defaults_to_1024() -> None:
     assert resolve_embedding_dimension("voyageai", "voyage-future-x") == 1024
 
 
+def test_resolve_embedding_dimension_unknown_provider_raises() -> None:
+    """Unrecognized providers must fail loudly instead of silently returning 1024.
+
+    Regression guard: a duplicate lenient ``resolve_embedding_dimension`` once
+    shadowed the fail-loud version and returned 1024 for any provider string,
+    which silently produced a wrong-dimension index for misspelled providers.
+    """
+    with pytest.raises(ValueError, match="provider"):
+        resolve_embedding_dimension("acme", "whatever")
+
+
 def test_voyage_provider_uses_asymmetric_input_types() -> None:
     """Documents use input_type='document', queries use input_type='query'."""
     captured: list[dict[str, Any]] = []

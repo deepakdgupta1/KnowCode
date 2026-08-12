@@ -114,7 +114,7 @@ not only mocks that return diagnostic-style payloads.
 **Exit criteria:** agent, MCP, CLI, docs, and tests use one contract with no
 implicit reliance on fields hidden by minimal mode.
 
-**Progress (2026-07-28):**
+**Progress (2026-08-11):**
 
 - `Agent.answer` and `Agent.smart_answer` now request the minimal projection
   with the task metadata they consume.
@@ -123,8 +123,7 @@ implicit reliance on fields hidden by minimal mode.
   final retrieval instead of querying a fourth time.
 - Integration coverage now exercises local and LLM routing against the actual
   `RetrievalOrchestrator` projection.
-- Remaining P2 work is the `doctor --mcp` and release-checklist conformance
-  audit.
+- **Done:** `knowcode doctor --mcp` and the `docs/RELEASE_CHECKLIST.md` conformance audit are completed, validating the canonical tool `retrieve_context_for_query` and minimal projection response formatting.
 
 ### P3 - Finish the MCP Token Diet
 

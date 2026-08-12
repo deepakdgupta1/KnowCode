@@ -33,7 +33,7 @@
 - **Embedding model:** `voyage-code-3` (1024-dim, code-specialized), with correct asymmetric `input_type="document"` vs `"query"`. Provider cascade: explicit config → app config w/ API key → `DummyEmbeddingProvider` fallback.
 - **Dense arm:** FAISS `IndexFlatIP` — flat inner-product, i.e. brute-force, exact, **all vectors resident in RAM**.
 - **Sparse arm:** `InMemoryChunkRepository.search_by_tokens` — raw set-intersection overlap (`len(query_set & set(chunk.tokens))`). Labelled BM25 in docstrings; it is not.
-- **Fusion:** `HybridIndex.search` — Reciprocal Rank Fusion (RRF, K=60) with an `alpha=0.5` blend.
+- **Fusion:** `HybridIndex.search` — Reciprocal Rank Fusion (RRF, K=60) with an `alpha=0.2` dense-weight blend by default (sparse-heavy; configurable via `config.hybrid_alpha`).
 - **Tokenizer:** code-aware — splits camelCase/snake_case, strips punctuation, lowercases, filters single-char tokens. Each chunk stores pre-computed `tokens: list[str]`.
 
 ### 1.2 Storage & Persistence

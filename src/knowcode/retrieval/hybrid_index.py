@@ -13,7 +13,7 @@ class HybridIndex:
         self,
         chunk_repo: ChunkRepository,
         vector_store: VectorStoreProtocol,
-        alpha: float = 0.5  # Weight for dense vs sparse (0.5 = equal weight)
+        alpha: float = 0.2  # Dense weight; 0.2 = sparse-heavy, matches AppConfig default
     ) -> None:
         """Initialize the hybrid index.
 

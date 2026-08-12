@@ -267,13 +267,25 @@ class AppConfig:
                     "'config.routing_quality_floor' must be between 0 and 1."
                 )
             
-            hybrid_alpha = config_section.get("hybrid_alpha", 0.5)
-            if not isinstance(hybrid_alpha, (int, float)):
+            hybrid_alpha = config_section.get("hybrid_alpha", 0.2)
+            if (
+                not isinstance(hybrid_alpha, (int, float))
+                or isinstance(hybrid_alpha, bool)
+            ):
                 raise ValueError("'config.hybrid_alpha' must be a number.")
-            
+            if not 0.0 <= float(hybrid_alpha) <= 1.0:
+                raise ValueError("'config.hybrid_alpha' must be between 0 and 1.")
+
             reranker_top_k_multiplier = config_section.get("reranker_top_k_multiplier", 5)
-            if not isinstance(reranker_top_k_multiplier, int):
+            if (
+                not isinstance(reranker_top_k_multiplier, int)
+                or isinstance(reranker_top_k_multiplier, bool)
+            ):
                 raise ValueError("'config.reranker_top_k_multiplier' must be an integer.")
+            if not 1 <= reranker_top_k_multiplier <= 100:
+                raise ValueError(
+                    "'config.reranker_top_k_multiplier' must be between 1 and 100."
+                )
             
             vector_backend = config_section.get("vector_backend", "lancedb")
             if not isinstance(vector_backend, str) or vector_backend not in ("faiss", "lancedb"):
