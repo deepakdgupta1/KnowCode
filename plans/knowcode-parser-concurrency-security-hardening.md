@@ -1418,7 +1418,7 @@ commit SHA, or durable local handoff note until a PR exists.
 
 | Step | Status | Branch/PR | Started | Completed | Verification/evidence | Handoff notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| 01 | `[~]` | `codex/hardening-s01-contracts` | 2026-08-12 | — | Local implementation: 150 focused and 368 global tests passed; Ruff, mypy, strict MkDocs, and diff checks passed. | Exit criteria are complete locally; PR review and merge remain before `[x]`. No parser/storage/API behavior was integrated. |
+| 01 | `[~]` | [PR #21](https://github.com/deepakdgupta1/KnowCode/pull/21) (`codex/hardening-s01-contracts`) | 2026-08-12 | — | Draft PR: 150 focused and 368 global tests passed; Ruff, mypy, strict MkDocs, dependency audit, and diff checks passed. | Exit criteria are complete; PR review and merge remain before `[x]`. No parser/storage/API behavior was integrated. |
 | 02 | `[ ]` | — | — | — | — | — |
 | 03 | `[ ]` | — | — | — | — | — |
 | 04 | `[ ]` | — | — | — | — | — |
