@@ -3,8 +3,114 @@
 from __future__ import annotations
 
 import hashlib
+from enum import Enum
+from pathlib import Path
+from urllib.parse import quote
 
 from knowcode.data_models import Entity
+
+
+class EndpointKind(str, Enum):
+    """Classification for graph relationship endpoints."""
+
+    INTERNAL = "internal"
+    EXTERNAL = "external"
+    UNRESOLVED = "unresolved"
+    INVALID = "invalid"
+
+
+_RESERVED_ENDPOINT_PREFIXES = {
+    "composable",
+    "external",
+    "ref",
+    "trait",
+    "type",
+    "unresolved",
+    "vue_component",
+}
+
+
+def _require_component(value: str, label: str) -> str:
+    normalized = value.strip()
+    if not normalized:
+        raise ValueError(f"{label} must not be empty")
+    return normalized
+
+
+def _encode_component(value: str, label: str, *, safe: str = "._-/@") -> str:
+    return quote(_require_component(value, label), safe=safe)
+
+
+def normalize_file_identity(file_path: str | Path) -> str:
+    """Return the canonical absolute POSIX identity for a source path.
+
+    ``resolve(strict=False)`` deliberately collapses symlink aliases while also
+    supporting delete/watch events whose target no longer exists.
+    """
+    return Path(file_path).expanduser().resolve(strict=False).as_posix()
+
+
+def build_internal_entity_id(
+    file_path: str | Path,
+    qualified_name: str,
+) -> str:
+    """Build a canonical ID for an entity extracted from repository source."""
+    name = _require_component(qualified_name, "qualified_name")
+    return f"{normalize_file_identity(file_path)}::{name}"
+
+
+def build_external_reference_id(namespace: str, symbol: str) -> str:
+    """Build an ID for a symbol known to be outside the indexed repository."""
+    encoded_namespace = _encode_component(namespace, "namespace", safe="._-")
+    encoded_symbol = _encode_component(symbol, "symbol")
+    return f"external::{encoded_namespace}::{encoded_symbol}"
+
+
+def build_unresolved_reference_id(
+    language: str,
+    file_path: str | Path,
+    scope: str,
+    symbol: str,
+) -> str:
+    """Build a scoped ID for a reference that cannot be resolved locally."""
+    encoded_language = _encode_component(language, "language", safe="._-")
+    encoded_file = quote(normalize_file_identity(file_path), safe="/._-")
+    encoded_scope = _encode_component(scope, "scope", safe="._-")
+    encoded_symbol = _encode_component(symbol, "symbol")
+    return (
+        f"unresolved::{encoded_language}::{encoded_file}::"
+        f"{encoded_scope}::{encoded_symbol}"
+    )
+
+
+def classify_endpoint_id(endpoint_id: str) -> EndpointKind:
+    """Classify a canonical graph endpoint without guessing legacy prefixes."""
+    parts = endpoint_id.split("::")
+    if parts[0] == "external":
+        return (
+            EndpointKind.EXTERNAL
+            if len(parts) == 3 and all(parts[1:])
+            else EndpointKind.INVALID
+        )
+    if parts[0] == "unresolved":
+        return (
+            EndpointKind.UNRESOLVED
+            if len(parts) == 5 and all(parts[1:])
+            else EndpointKind.INVALID
+        )
+    if parts[0] in _RESERVED_ENDPOINT_PREFIXES:
+        return EndpointKind.INVALID
+
+    try:
+        file_identity, qualified_name = endpoint_id.rsplit("::", 1)
+    except ValueError:
+        return EndpointKind.INVALID
+
+    if not qualified_name or not Path(file_identity).is_absolute():
+        return EndpointKind.INVALID
+    if normalize_file_identity(file_identity) != file_identity:
+        return EndpointKind.INVALID
+    return EndpointKind.INTERNAL
 
 
 def canonicalize_source_snippet(source: str) -> str:

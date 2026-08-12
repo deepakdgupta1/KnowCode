@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "language": "python",
+  "entities": [
+    {"qualified_name": "decorators", "kind": "module", "line_start": 1, "line_end": 6},
+    {"qualified_name": "Service", "kind": "class", "line_start": 1, "line_end": 6, "metadata": {"decorators": ["register('service')", "trace"]}},
+    {"qualified_name": "Service.run", "kind": "method", "line_start": 4, "line_end": 6, "metadata": {"decorators": ["cached"]}}
+  ],
+  "relationships": [
+    {"source": "decorators", "target": {"classification": "internal", "qualified_name": "Service"}, "kind": "contains"},
+    {"source": "Service", "target": {"classification": "internal", "qualified_name": "Service.run"}, "kind": "contains"}
+  ]
+}

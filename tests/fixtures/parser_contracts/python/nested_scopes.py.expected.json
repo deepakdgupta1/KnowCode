@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "language": "python",
+  "entities": [
+    {"qualified_name": "nested_scopes", "kind": "module", "line_start": 1, "line_end": 10},
+    {"qualified_name": "outer", "kind": "function", "line_start": 1, "line_end": 4},
+    {"qualified_name": "outer.duplicate", "kind": "function", "line_start": 2, "line_end": 3},
+    {"qualified_name": "Container", "kind": "class", "line_start": 6, "line_end": 10},
+    {"qualified_name": "Container.method", "kind": "method", "line_start": 7, "line_end": 10},
+    {"qualified_name": "Container.method.duplicate", "kind": "function", "line_start": 8, "line_end": 9}
+  ],
+  "relationships": [
+    {"source": "nested_scopes", "target": {"classification": "internal", "qualified_name": "outer"}, "kind": "contains"},
+    {"source": "outer", "target": {"classification": "internal", "qualified_name": "outer.duplicate"}, "kind": "contains"},
+    {"source": "nested_scopes", "target": {"classification": "internal", "qualified_name": "Container"}, "kind": "contains"},
+    {"source": "Container", "target": {"classification": "internal", "qualified_name": "Container.method"}, "kind": "contains"},
+    {"source": "Container.method", "target": {"classification": "internal", "qualified_name": "Container.method.duplicate"}, "kind": "contains"},
+    {"source": "outer.duplicate", "target": {"classification": "unresolved", "scope": "outer.duplicate", "symbol": "helper"}, "kind": "calls"},
+    {"source": "outer", "target": {"classification": "internal", "qualified_name": "outer.duplicate"}, "kind": "calls"},
+    {"source": "Container.method.duplicate", "target": {"classification": "unresolved", "scope": "Container.method.duplicate", "symbol": "nested_helper"}, "kind": "calls"},
+    {"source": "Container.method", "target": {"classification": "internal", "qualified_name": "Container.method.duplicate"}, "kind": "calls"}
+  ]
+}
