@@ -1,8 +1,84 @@
 """Tests for TypeScript parser."""
 
 from pathlib import Path
+
 from knowcode.data_models import EntityKind, RelationshipKind
 from knowcode.parsers.typescript_parser import TypeScriptParser
+from knowcode.utils.entity_identity import (
+    build_external_reference_id,
+    build_internal_entity_id,
+    build_unresolved_reference_id,
+)
+from tests.helpers.parser_assertions import (
+    assert_exact_parse_result,
+    load_parser_fixture_contract,
+)
+
+
+FIXTURE_ROOT = Path(__file__).parents[2] / "fixtures" / "parser_contracts"
+
+
+def test_parse_exported_declarations_fixture_exactly() -> None:
+    """Extract every committed TypeScript export with exact edges and lines."""
+    contract = load_parser_fixture_contract(
+        FIXTURE_ROOT / "typescript" / "exported_declarations.ts"
+    )
+
+    result = TypeScriptParser().parse_file(contract.source_path)
+
+    assert not result.errors
+    assert_exact_parse_result(result, contract)
+
+
+def test_parse_default_exported_typescript_class(tmp_path: Path) -> None:
+    """Unwrap a default exported class in the TypeScript grammar."""
+    file_path = tmp_path / "default_class.ts"
+    file_path.write_text("export default class Service {}\n", encoding="utf-8")
+
+    result = TypeScriptParser().parse_file(file_path)
+
+    assert [(entity.qualified_name, entity.kind) for entity in result.entities] == [
+        ("default_class", EntityKind.MODULE),
+        ("Service", EntityKind.CLASS),
+    ]
+
+
+def test_parse_typescript_inheritance_forms(tmp_path: Path) -> None:
+    """Resolve local class/interface bases and classify qualified bases."""
+    source = """interface Parent {}
+interface Child extends Parent, Framework.Shape {}
+class Base {}
+class Derived extends Base {}
+"""
+    file_path = tmp_path / "inheritance.ts"
+    file_path.write_text(source, encoding="utf-8")
+
+    result = TypeScriptParser().parse_file(file_path)
+
+    relationships = {
+        (relationship.source_id, relationship.target_id, relationship.kind)
+        for relationship in result.relationships
+        if relationship.kind is RelationshipKind.INHERITS
+    }
+    assert relationships == {
+        (
+            build_internal_entity_id(file_path, "Child"),
+            build_internal_entity_id(file_path, "Parent"),
+            RelationshipKind.INHERITS,
+        ),
+        (
+            build_internal_entity_id(file_path, "Child"),
+            build_unresolved_reference_id(
+                "typescript", file_path, "Child", "Framework.Shape"
+            ),
+            RelationshipKind.INHERITS,
+        ),
+        (
+            build_internal_entity_id(file_path, "Derived"),
+            build_internal_entity_id(file_path, "Base"),
+            RelationshipKind.INHERITS,
+        ),
+    }
 
 
 def test_parse_typescript_features(tmp_path: Path) -> None:
@@ -75,9 +151,14 @@ def test_parse_typescript_features(tmp_path: Path) -> None:
     # Import
     imports = [r for r in rels if r.kind == RelationshipKind.IMPORTS]
     assert len(imports) == 1
-    assert imports[0].target_id == "external::external-module"
+    assert imports[0].target_id == build_external_reference_id(
+        "npm", "external-module"
+    )
     
     # Calls
     calls = [r for r in rels if r.kind == RelationshipKind.CALLS]
     targets = {r.target_id for r in calls}
-    assert "ref::something" in targets
+    assert build_unresolved_reference_id(
+        "typescript", file_path, "MyClass.myMethod", "something"
+    ) in targets
+    assert build_internal_entity_id(file_path, "MyClass") in targets
