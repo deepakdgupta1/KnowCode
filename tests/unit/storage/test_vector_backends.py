@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from knowcode.storage.lancedb_vector_store import LanceDBVectorStore
 from knowcode.storage.vector_backends import (
     create_vector_store,
     inspect_vector_index,
@@ -22,7 +23,11 @@ def _write_vectors_json(path: Path, payload: dict[str, object]) -> None:
 def test_inspect_lancedb_vector_artifact(tmp_path: Path) -> None:
     _write_vectors_json(
         tmp_path,
-        {"schema_version": 1, "dimension": 1024, "backend": "lancedb"},
+        {
+            "schema_version": LanceDBVectorStore.SCHEMA_VERSION,
+            "dimension": 1024,
+            "backend": "lancedb",
+        },
     )
     (tmp_path / "vectors.lancedb").mkdir()
 
@@ -71,7 +76,11 @@ def test_inspect_numpy_fallback_vector_artifact(tmp_path: Path) -> None:
 def test_inspect_missing_vector_artifact_fails(tmp_path: Path) -> None:
     _write_vectors_json(
         tmp_path,
-        {"schema_version": 1, "dimension": 1024, "backend": "lancedb"},
+        {
+            "schema_version": LanceDBVectorStore.SCHEMA_VERSION,
+            "dimension": 1024,
+            "backend": "lancedb",
+        },
     )
 
     inspection = inspect_vector_index(tmp_path, configured_backend="lancedb")
@@ -93,11 +102,12 @@ def test_inspect_unknown_vector_backend_fails(tmp_path: Path) -> None:
 
 
 def test_schema_check_uses_selected_backend(tmp_path: Path) -> None:
-    """LanceDB stays at schema 1; a legacy FAISS envelope now fails closed.
+    """A legacy envelope fails closed on both backends, with its own version.
 
-    Step 11 stopped migrating v1/v2 FAISS metadata in memory: those artifacts
-    describe a plain ``IndexFlatIP`` whose rows carry no native IDs, so doctor
-    reports an actionable failure instead of a migration warning.
+    Step 11 stopped migrating v1/v2 FAISS metadata in memory and Step 12 did the
+    same for LanceDB v1: neither artifact can be verified against its index, so
+    doctor reports an actionable failure instead of a migration warning. Each
+    backend is checked against its *own* current version.
     """
     _write_vectors_json(
         tmp_path,
@@ -107,8 +117,25 @@ def test_schema_check_uses_selected_backend(tmp_path: Path) -> None:
 
     lancedb_inspection = inspect_vector_index(tmp_path, configured_backend="lancedb")
 
-    assert lancedb_inspection.ok
+    assert not lancedb_inspection.ok
     assert lancedb_inspection.warnings == ()
+    assert any(
+        "invalid vectors.json" in failure and "knowcode build" in failure
+        for failure in lancedb_inspection.failures
+    )
+
+    current_path = tmp_path / "current"
+    _write_vectors_json(
+        current_path,
+        {
+            "schema_version": LanceDBVectorStore.SCHEMA_VERSION,
+            "dimension": 1024,
+            "backend": "lancedb",
+        },
+    )
+    (current_path / "vectors.lancedb").mkdir()
+
+    assert inspect_vector_index(current_path, configured_backend="lancedb").ok
 
     faiss_path = tmp_path / "faiss"
     _write_vectors_json(

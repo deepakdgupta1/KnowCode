@@ -8,10 +8,11 @@ Parametrized over the three backend modes:
 * ``lancedb`` — :class:`LanceDBVectorStore`, directory-backed so ``save()`` does
   not skip the artifact copy
 
-The green core runs unchanged on every backend. The strict-xfail cases name the
-precise backend/defect combinations that Steps 11 (VectorStore) and 12 (LanceDB)
-repair; each carries an explicit reason and turns into a failure (XPASS) the
-moment a later step fixes the behavior, so the xfail cannot rot.
+The green core runs unchanged on every backend. The cases below it started as
+strict xfails naming the precise backend/defect combinations that Steps 11
+(VectorStore) and 12 (LanceDB) had to repair; each turned into an XPASS failure
+the moment its step landed, which is what the strict marks were for. Both steps
+have now landed, so every case is a live gate on every backend.
 """
 
 from __future__ import annotations
@@ -84,13 +85,13 @@ def test_vector_contract_green_core(backend: str, make_store, tmp_path) -> None:
     run_vector_contract(factory, tmp_path)
 
 
-# --- Strict-xfail cases ---
+# --- Previously deferred defects, now live gates ---
 
 
 # Native-tombstone parity and removed-ID slot consumption are VectorStore
 # defects only (the ``.index.ntotal`` native row count). LanceDB has no such
-# attribute, so it is excluded from these two cases. Step 11 repaired both
-# VectorStore engines, so they are live gates here rather than xfails.
+# attribute, so it is excluded from these two cases; its durable-row parity is
+# gated in ``test_lancedb_vector_store.py`` instead.
 
 
 @pytest.mark.parametrize("backend", ["faiss", "numpy"])
@@ -103,95 +104,31 @@ def test_removed_id_does_not_consume_top_k_slot(backend: str, make_store) -> Non
     assert_removed_id_does_not_consume_top_k_slot(lambda: make_store(backend))
 
 
-@pytest.mark.parametrize(
-    "backend",
-    [
-        "faiss",
-        "numpy",
-        pytest.param(
-            "lancedb",
-            marks=pytest.mark.xfail(
-                strict=True,
-                reason="LanceDB accepts duplicate IDs (count==2). Step 12.",
-            ),
-        ),
-    ],
-)
+@pytest.mark.parametrize("backend", BACKENDS)
 def test_duplicate_add_is_prevented(backend: str, make_store) -> None:
     assert_duplicate_add_is_prevented(lambda: make_store(backend))
 
 
-@pytest.mark.parametrize(
-    "backend",
-    [
-        "faiss",
-        "numpy",
-        pytest.param(
-            "lancedb",
-            marks=pytest.mark.xfail(
-                strict=True,
-                reason="LanceDB returns duplicate result IDs. Step 12.",
-            ),
-        ),
-    ],
-)
+@pytest.mark.parametrize("backend", BACKENDS)
 def test_result_ids_unique_after_duplicate_add(backend: str, make_store) -> None:
     assert_result_ids_unique_after_duplicate_add(lambda: make_store(backend))
 
 
-# Hostile-ID cases: VectorStore matches IDs exactly (green); LanceDB interpolates
-# IDs into SQL-like filters and widens the operation (xfail, Step 12).
+# Hostile-ID cases: VectorStore matches IDs exactly and was always green;
+# LanceDB interpolated IDs into SQL-like filters until Step 12 replaced every
+# predicate with a hex-digest exact key.
 
 
-@pytest.mark.parametrize(
-    "backend",
-    [
-        "faiss",
-        "numpy",
-        pytest.param(
-            "lancedb",
-            marks=pytest.mark.xfail(
-                strict=True,
-                reason="LanceDB interpolated filter widens removal. Step 12.",
-            ),
-        ),
-    ],
-)
+@pytest.mark.parametrize("backend", BACKENDS)
 def test_hostile_id_removal_is_exact(backend: str, make_store) -> None:
     assert_hostile_id_removal_is_exact(lambda: make_store(backend))
 
 
-@pytest.mark.parametrize(
-    "backend",
-    [
-        "faiss",
-        "numpy",
-        pytest.param(
-            "lancedb",
-            marks=pytest.mark.xfail(
-                strict=True,
-                reason="LanceDB interpolated filter widens get_embedding. Step 12.",
-            ),
-        ),
-    ],
-)
+@pytest.mark.parametrize("backend", BACKENDS)
 def test_hostile_id_get_embedding_is_exact(backend: str, make_store) -> None:
     assert_hostile_id_get_embedding_is_exact(lambda: make_store(backend))
 
 
-@pytest.mark.parametrize(
-    "backend",
-    [
-        "faiss",
-        "numpy",
-        pytest.param(
-            "lancedb",
-            marks=pytest.mark.xfail(
-                strict=True,
-                reason="LanceDB upsert inherits the interpolated remove. Step 12.",
-            ),
-        ),
-    ],
-)
+@pytest.mark.parametrize("backend", BACKENDS)
 def test_hostile_id_upsert_is_exact(backend: str, make_store) -> None:
     assert_hostile_id_upsert_is_exact(lambda: make_store(backend))

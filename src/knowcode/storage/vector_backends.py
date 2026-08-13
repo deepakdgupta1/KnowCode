@@ -40,7 +40,7 @@ VECTOR_BACKENDS: dict[str, VectorBackendSpec] = {
     "lancedb": VectorBackendSpec(
         key="lancedb",
         display_name="LanceDB",
-        metadata_schema_version=1,
+        metadata_schema_version=2,
         artifact_description="vectors.lancedb",
     ),
     "faiss": VectorBackendSpec(
@@ -112,15 +112,10 @@ def inspect_vector_index(
     missing_artifacts = _missing_artifacts(index_path, backend)
     failures.extend(missing_artifacts)
 
-    # Only a payload that validated can be reported as migrated. A FAISS/NumPy
-    # envelope below the current version now fails closed (Step 11), so it is a
-    # failure with rebuild guidance rather than a migration warning.
-    if metadata and not _schema_is_current(
-        raw_metadata,
-        _current_schema_version(backend),
-    ):
-        warnings.append("vector metadata was migrated in memory")
-
+    # No producer of ``warnings`` remains: both backends now fail closed on a
+    # legacy envelope (FAISS in Step 11, LanceDB in Step 12), so an
+    # out-of-date artifact is a failure with rebuild guidance rather than a
+    # migration warning. The channel stays for Steps 13-14 parity reporting.
     return VectorIndexInspection(
         backend=backend,
         raw_metadata=raw_metadata,
@@ -133,7 +128,11 @@ def inspect_vector_index(
 def _validate_vector_metadata(data: dict[str, Any]) -> dict[str, Any]:
     backend = data.get("backend")
     if backend == "lancedb":
-        return dict(data)
+        # Importable without the optional extra: the envelope check is a
+        # classmethod that never touches the lancedb package.
+        from knowcode.storage.lancedb_vector_store import LanceDBVectorStore
+
+        return LanceDBVectorStore._validate_metadata(data)
     if backend and backend not in VECTOR_BACKENDS:
         return dict(data)
 
@@ -169,23 +168,6 @@ def _missing_artifacts(index_path: Path, backend: str) -> tuple[str, ...]:
     return ()
 
 
-def _current_schema_version(backend: str) -> int:
-    if backend == "lancedb":
-        try:
-            from knowcode.storage.lancedb_vector_store import LanceDBVectorStore
-
-            return LanceDBVectorStore.SCHEMA_VERSION
-        except ImportError:
-            return VECTOR_BACKENDS["lancedb"].metadata_schema_version
-
-    try:
-        from knowcode.storage.vector_store import VectorStore
-
-        return VectorStore.SCHEMA_VERSION
-    except ImportError:
-        return VECTOR_BACKENDS["faiss"].metadata_schema_version
-
-
 def _normalize_backend(backend: str) -> str:
     normalized = backend.lower()
     if normalized not in VECTOR_BACKENDS:
@@ -199,8 +181,3 @@ def _read_json_object(path: Path) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ValueError(f"Expected JSON object in {path}.")
     return data
-
-
-def _schema_is_current(payload: dict[str, Any], current: int) -> bool:
-    value = payload.get("schema_version")
-    return value == current or value == str(current)

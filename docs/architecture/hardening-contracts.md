@@ -204,7 +204,7 @@ but does not change runtime protocols.
 | SQLite connections | One `check_same_thread=False` connection per repository instance. | One connection per execution context and one serialized transaction owner. | Step 09 |
 | `VectorStoreProtocol` | `add`, logical `remove`, search, count, save/load; no generation or locking contract. | Exact-ID idempotent `upsert`, exact `remove`, unique search results, live count, dimension validation, flush/close, contract version, generation ID, and serialized/snapshot-safe operations. | Step 10 |
 | FAISS metadata | Schema 2; ID map can diverge from native rows. | Schema 3 with backend, dimension, contract version, generation, checksums, native/live count parity, and exact upsert/removal. | Step 11 |
-| LanceDB metadata | Schema 1; interpolated filters and unsynchronized buffer. | Schema 2 with the shared vector contract, typed exact matching, generation metadata, and synchronized buffer/table state. | Step 12 |
+| LanceDB metadata | Schema 1; interpolated filters and unsynchronized buffer. | Schema 2 with the shared vector contract, digest-keyed exact matching, generation metadata, and synchronized buffer/table state. | Step 12 |
 | JSON/manifest writes | Several files truncate in place. | Shared crash-safe atomic replacement utility and pointer-last ordering. | Step 13 |
 | Index manifest | Schema 2; no complete-generation parity. | Schema 3 with artifact contract version, generation, checksums, embedding config, and knowledge/chunk/vector counts. | Steps 13-14 |
 
@@ -287,41 +287,131 @@ reader-lease handoff, `close()`, and generation IDs are declared as intent in
 the protocol docstrings and are implemented in Steps 11/12/18; Step 10 does not
 touch the artifact format.
 
-### Deferred defects (strict xfails)
+### Deferred defects (strict xfails), now all closed
 
 The shared contract suite (`tests/helpers/vector_assertions.py` +
 `tests/unit/storage/test_vector_contract.py`, parametrized over FAISS, the numpy
 fallback, and LanceDB) is green overall. The following desired-contract cases
-fail today and carry named strict `xfail` marks, so each becomes an XPASS
-failure the moment its step repairs the behavior:
+failed at Step 10 and carried named strict `xfail` marks, so each became an
+XPASS failure the moment its step repaired the behavior:
 
 | Case | Backends | Repair step | State |
 | --- | --- | --- | --- |
 | Native-tombstone parity (`index.ntotal == count()`) | VectorStore (FAISS, numpy) | 11 | closed |
 | Removed ID consumes a top-k slot | VectorStore (FAISS, numpy) | 11 | closed |
 | Duplicate `add` of one ID (`count() == 2`) | VectorStore (FAISS, numpy) | 11 | closed |
-| Duplicate `add` of one ID (`count() == 2`) | LanceDB | 12 | open |
+| Duplicate `add` of one ID (`count() == 2`) | LanceDB | 12 | closed |
 | Result-ID uniqueness after a duplicate `add` | VectorStore (FAISS, numpy) | 11 | closed |
-| Result-ID uniqueness after a duplicate `add` | LanceDB | 12 | open |
-| Hostile-ID removal widening (`x' OR true --`) | LanceDB | 12 | open |
-| Hostile-ID `get_embedding` widening | LanceDB | 12 | open |
-| Hostile-ID `upsert` widening (inherits `remove`) | LanceDB | 12 | open |
+| Result-ID uniqueness after a duplicate `add` | LanceDB | 12 | closed |
+| Hostile-ID removal widening (`x' OR true --`) | LanceDB | 12 | closed |
+| Hostile-ID `get_embedding` widening | LanceDB | 12 | closed |
+| Hostile-ID `upsert` widening (inherits `remove`) | LanceDB | 12 | closed |
 
-Closed rows are live gates in `test_vector_contract.py`, not xfails: each one
-XPASS-failed the moment Step 11 landed, which is what the strict marks were for.
+Every row is now a live gate in `test_vector_contract.py` on all three backends,
+not an xfail: each XPASS-failed the moment its step landed, which is what the
+strict marks were for. No strict xfail remains in the vector suites.
 
-VectorStore matches IDs exactly, so its hostile-ID cases are green controls;
-LanceDB interpolates repository IDs into SQL-like filters, which is the Step 12
-injection defect.
+VectorStore matched IDs exactly all along, so its hostile-ID cases were green
+controls for the LanceDB repair.
 
 ### Incompatible-artifact policy
 
-Step 10 changes no on-disk artifact: FAISS metadata stays at schema 2, LanceDB
-metadata stays at schema 1, and `vectors.json`, `vectors.index`, `vectors.npy`,
-and `vectors.lancedb` are untouched. An incompatible artifact is rejected with
-`VectorArtifactVersionError` and rebuild guidance once Steps 11/12 stamp and
-validate the version; until then the existing per-backend version checks apply
-unchanged.
+Step 10 changed no on-disk artifact. Steps 11 and 12 then stamped and validated
+both envelopes: FAISS metadata is schema 3 and LanceDB metadata is schema 2, and
+an artifact that is missing, malformed, legacy, newer, or inconsistent with its
+index is rejected with `VectorArtifactVersionError` and `knowcode build` rebuild
+guidance rather than being migrated in memory.
+
+## LanceDB backend (Step 12)
+
+Step 12 repairs the reviewed injection defect, activates the Step 10 contract
+for LanceDB, and synchronizes its mutable write buffer with the durable table.
+
+### Chunk IDs are data, not filter syntax
+
+`get_embedding` and `remove` interpolated the chunk ID straight into LanceDB's
+SQL-like predicates (`where(f"id = '{chunk_id}'")`, `delete(f"id =
+'{chunk_id}'")`). The reproduced repository ID `x' OR true --` therefore widened
+a read to a different row and deleted every row in the table.
+
+The locked LanceDB version (0.33; floor 0.12) accepts only string predicates —
+`Table.delete(where: str)`, `count_rows(filter: str)`, and `.where(str)` — so
+exactness cannot come from a typed expression API. It comes from the column the
+predicate names instead:
+
+* Every row carries `key`, the SHA-256 hex digest of its chunk ID, alongside
+  `id` and `vector`.
+* Every predicate this store issues is built by one central pair of helpers,
+  `_key_predicate` (single) and `_keys_predicate` (batched flush), from that
+  digest. `_key_literal` asserts `^[0-9a-f]{64}$` before quoting, so a
+  programming error cannot smuggle anything else in either.
+* A digest cannot contain a quote, operator, comment, or whitespace, so no
+  repository ID can reach the filter grammar at all. This is a stronger
+  guarantee than quote escaping, which depends on the SQL dialect's lexer, and
+  it is **not** a filename whitelist: every legal path, including quotes,
+  backslashes, Unicode, and SQL wildcards, is stored and matched unchanged.
+* Exactness is then verified in Python against the returned row's own `id`, so
+  matching is proven on the data rather than assumed from the predicate.
+* A digest collision between two live chunk IDs is the one remaining way
+  exactness could be lost. It is rejected with `VectorContractError` on write
+  and `VectorArtifactVersionError` on load, never silently widened.
+
+### Buffer and table synchronization
+
+One re-entrant lock serializes `add`, `upsert`, `remove`, `clear`, `flush`,
+`save`, `load`, `search`, `get_embedding`, and `count`, satisfying the Step 10
+matrix. Visibility is defined rather than accidental: **reads flush first**, so a
+write that has returned is always observable by a later read on that store.
+
+The buffer is keyed by chunk ID and paired with a pending-delete set, so:
+
+| Sequence | Effect |
+| --- | --- |
+| `add` of a buffered ID | replaces the buffered row in place; nothing reaches the table |
+| `add` of a durable ID | buffers the new row and schedules the stale durable row for deletion |
+| `remove` of a buffered ID | drops the buffered row; nothing reaches the table |
+| `remove` of a durable ID | schedules the durable row for deletion |
+| `flush` | applies pending deletes **first**, then inserts, so a replacement never leaves two rows |
+| `load` | discards any pending buffer; a rejected artifact leaves live state untouched |
+
+Deletes are issued in batches of 128 digests so one `IN (...)` predicate stays
+bounded. `add` is exact-ID add-or-replace and shares one code path with
+`upsert`, so one chunk ID always has exactly one live row and search results are
+unique. `count()` and `ids()` report the live set, and the tests assert them
+against the durable rows read straight out of the table — bookkeeping alone
+cannot hide a widened delete.
+
+### Metadata envelope, schema 2
+
+`vectors.json` records `schema_version`, `backend`, `dimension`, live `count`,
+and `generation`. `load()` validates the whole set before adopting any of it:
+
+| Check | Rejected when |
+| --- | --- |
+| Envelope version | missing, malformed, legacy (1), or newer than 2 |
+| Backend | the envelope names another backend |
+| Dimension | not an integer, or disagreeing with the table's vector width |
+| Artifact | the envelope exists without its `vectors.lancedb` table, or the reverse |
+| Table schema | the `key` column is absent (a pre-Step-12 table) |
+| Duplicate IDs | two rows carry one chunk ID |
+| Key collision | two chunk IDs share one digest |
+| Declared count | `count` disagrees with the rows the table holds |
+
+A schema 1 envelope is not migrated in memory. It describes a table with no
+exact-key column whose rows may also carry duplicates or the residue of an
+injected delete, so `knowcode doctor` reports it as a failure with rebuild
+guidance. The committed `knowcode_index/vectors.json` is exactly such a v1
+artifact and must be rebuilt with `knowcode build`.
+
+A path with no persisted table loads as an empty index. The directory alone is
+not evidence: `lancedb.connect` creates it, so a store merely pointed at an
+index directory has one with no table inside — which is the normal service
+topology on a first build.
+
+`save()` is symmetric on every configuration. A directory-backed store already
+living at the destination writes its envelope in place; anything else, including
+an in-memory store, is exported into a fresh database at the target so rows are
+never silently dropped.
 
 ## FAISS/NumPy backend (Step 11)
 

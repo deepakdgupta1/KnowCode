@@ -14,6 +14,7 @@ from knowcode.data_models import Entity, EntityKind, Location
 from knowcode.indexing.indexer import Indexer
 from knowcode import readiness
 from knowcode.storage.knowledge_store import KnowledgeStore
+from knowcode.storage.lancedb_vector_store import LanceDBVectorStore
 from knowcode.storage.sqlite_knowledge_store import SqliteKnowledgeStore
 from knowcode.storage.vector_store import VectorStore
 
@@ -91,7 +92,11 @@ def _write_index(path: Path, *, dimension: int = 1024, backend: str | None = Non
         encoding="utf-8",
     )
     vector_metadata = {
-        "schema_version": 1 if backend == "lancedb" else VectorStore.SCHEMA_VERSION,
+        "schema_version": (
+            LanceDBVectorStore.SCHEMA_VERSION
+            if backend == "lancedb"
+            else VectorStore.SCHEMA_VERSION
+        ),
         "id_map": {},
         "dimension": dimension,
     }
@@ -300,6 +305,30 @@ def test_doctor_accepts_lancedb_vector_artifact(tmp_path: Path) -> None:
     payload = json.loads(result.output)
     semantic = next(check for check in payload["checks"] if check["name"] == "Semantic index")
     assert semantic["status"] == "pass"
+
+
+def test_doctor_fails_closed_on_legacy_lancedb_vector_metadata(tmp_path: Path) -> None:
+    """A v1 LanceDB envelope predates the exact-key table (Step 12)."""
+    config = tmp_path / "aimodels.yaml"
+    _write_config(config)
+    _write_store(tmp_path)
+    index_dir = tmp_path / "knowcode_index"
+    _write_index(index_dir, backend="lancedb")
+    (index_dir / "vectors.json").write_text(
+        json.dumps({"schema_version": 1, "dimension": 1024, "backend": "lancedb"}),
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(
+        cli_module.cli,
+        ["doctor", "--store", str(tmp_path), "--config", str(config), "--json"],
+    )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    semantic = next(check for check in payload["checks"] if check["name"] == "Semantic index")
+    assert semantic["status"] == "fail"
+    assert "knowcode build" in semantic["hint"]
 
 
 def test_doctor_fails_on_index_dimension_mismatch(tmp_path: Path) -> None:
