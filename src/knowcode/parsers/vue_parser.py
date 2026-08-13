@@ -7,6 +7,13 @@ import re
 from knowcode.data_models import Entity, EntityKind, Relationship, RelationshipKind, Location, ParseResult
 from knowcode.parsers.base import TreeSitterParser
 from knowcode.parsers.javascript_parser import JavaScriptParser
+from knowcode.parsers.typescript_parser import TypeScriptParser
+from knowcode.parsers.vue_script_index import (
+    TYPESCRIPT_LANGS,
+    DeclarationSpan,
+    VueScriptIndex,
+)
+from knowcode.parsers.vue_sections import VueSection, scan_sfc_sections
 
 
 class VueParser(TreeSitterParser):
@@ -26,7 +33,10 @@ class VueParser(TreeSitterParser):
         """
         # Don't call super().__init__ because vue language is not available
         self.language_name = "vue"
+        # Script blocks are parsed with the real JS/TS grammars. Both parsers are
+        # built once here and reused for every component.
         self.js_parser = JavaScriptParser()
+        self.ts_parser = TypeScriptParser()
         self.parser = cast(Any, None)  # No tree-sitter parser for Vue
         self.language = None
 
@@ -48,8 +58,12 @@ class VueParser(TreeSitterParser):
                 errors=[f"Failed to read file: {e}"],
             )
 
-        # Extract sections using regex (fallback if tree-sitter fails)
-        sections = self._extract_sections(source_code)
+        # Scan top-level SFC blocks; malformed sections are reported, not dropped.
+        scan = scan_sfc_sections(source_code)
+        errors.extend(scan.errors)
+        template_section = scan.first("template")
+        script_section = scan.script()
+        style_section = scan.first("style")
 
         entities: list[Entity] = []
         relationships: list[Relationship] = []
@@ -60,7 +74,9 @@ class VueParser(TreeSitterParser):
         component_id = f"{file_path}::{component_name}"
 
         # Determine Vue API type (composition vs options)
-        vue_api_type = "composition" if sections.get("script", {}).get("is_setup") else "options"
+        vue_api_type = (
+            "composition" if script_section and script_section.is_setup else "options"
+        )
 
         component_entity = Entity(
             id=component_id,
@@ -75,18 +91,20 @@ class VueParser(TreeSitterParser):
             metadata={
                 "component_type": "vue_sfc",
                 "vue_api": vue_api_type,
-                "has_template": "true" if sections.get("template") else "false",
-                "has_script": "true" if sections.get("script") else "false",
-                "has_style": "true" if sections.get("style") else "false",
-                "script_lang": sections.get("script", {}).get("lang", "js") if sections.get("script") else "none",
+                "has_template": "true" if template_section else "false",
+                "has_script": "true" if script_section else "false",
+                "has_style": "true" if style_section else "false",
+                "script_lang": (
+                    (script_section.lang or "js") if script_section else "none"
+                ),
             }
         )
         entities.append(component_entity)
 
         # Parse <script> section
-        if sections.get("script"):
+        if script_section:
             script_entities, script_rels = self._parse_script_section(
-                sections["script"],
+                script_section,
                 file_path,
                 component_id,
                 source_lines,
@@ -95,25 +113,28 @@ class VueParser(TreeSitterParser):
             relationships.extend(script_rels)
 
         # Parse <template> section
-        if sections.get("template"):
+        if template_section:
             template_rels = self._parse_template_section(
-                sections["template"],
+                template_section,
                 component_id,
             )
             relationships.extend(template_rels)
 
-        # Parse component imports from script
-        if sections.get("script"):
-            import_rels = self._extract_component_imports(
-                sections["script"],
-                component_id,
-            )
-            relationships.extend(import_rels)
+        # Parse component imports from every script block. A component may pair
+        # a plain <script> with a <script setup>, and both can import.
+        seen_imports: set[tuple[str, RelationshipKind]] = set()
+        for section in scan.all("script"):
+            for relationship in self._extract_component_imports(section, component_id):
+                key = (relationship.target_id, relationship.kind)
+                if key in seen_imports:
+                    continue
+                seen_imports.add(key)
+                relationships.append(relationship)
 
         # Parse <style> section for v-bind() CSS variable linking
-        if sections.get("style"):
+        if style_section:
             style_rels = self._parse_style_section(
-                sections["style"],
+                style_section,
                 component_id,
             )
             relationships.extend(style_rels)
@@ -159,88 +180,21 @@ class VueParser(TreeSitterParser):
 
         return entities, relationships
 
-    def _extract_sections(self, source_code: str) -> dict[str, dict[str, Any]]:
-        """Extract <template>, <script>, and <style> sections using regex."""
-        sections = {}
-
-        # Extract <script> section
-        script_match = re.search(
-            r'<script\s*(?:setup)?\s*(?:lang="(ts|js)")?\s*>(.*?)</script>',
-            source_code,
-            re.DOTALL | re.IGNORECASE,
+    def _locate(
+        self,
+        span: DeclarationSpan,
+        file_path: Path,
+        source_lines: list[str],
+    ) -> tuple[Location, str]:
+        """Build a ``.vue`` location and its source snippet for a declaration."""
+        return (
+            Location(
+                file_path=str(file_path),
+                line_start=span.line_start,
+                line_end=span.line_end,
+            ),
+            "\n".join(source_lines[span.line_start - 1 : span.line_end]),
         )
-        if script_match:
-            lang = script_match.group(1) or "js"
-            content = script_match.group(2)
-            start_pos = script_match.start()
-            # Count lines before script section
-            line_start = source_code[:start_pos].count("\n") + 1
-            sections["script"] = {
-                "content": content,
-                "lang": lang,
-                "line_start": line_start,
-                "is_setup": "setup" in script_match.group(0),
-            }
-
-        # Extract <template> section using tag counting (handles nested templates)
-        template_start_match = re.search(
-            r"<template\s*>",
-            source_code,
-            re.IGNORECASE,
-        )
-        if template_start_match:
-            start_pos = template_start_match.end()
-            line_start = source_code[:template_start_match.start()].count("\n") + 1
-
-            # Use tag counting to find matching </template>
-            tag_count = 1
-            end_pos = start_pos
-            i = start_pos
-            while i < len(source_code) and tag_count > 0:
-                # Look for next opening or closing template tag
-                next_open = source_code.find("<template", i)
-                next_close = source_code.find("</template>", i)
-
-                if next_close == -1:
-                    break
-
-                if next_open != -1 and next_open < next_close:
-                    # Found opening tag first
-                    tag_count += 1
-                    i = next_open + 9  # len("<template")
-                else:
-                    # Found closing tag
-                    tag_count -= 1
-                    if tag_count == 0:
-                        end_pos = next_close
-                        break
-                    i = next_close + 11  # len("</template>")
-
-            if end_pos > start_pos:
-                content = source_code[start_pos:end_pos]
-                sections["template"] = {
-                    "content": content,
-                    "line_start": line_start,
-                }
-
-        # Extract <style> section
-        style_match = re.search(
-            r'<style\s*(?:scoped)?\s*(?:lang="(css|scss|less)")?\s*>(.*?)</style>',
-            source_code,
-            re.DOTALL | re.IGNORECASE,
-        )
-        if style_match:
-            lang = style_match.group(1) or "css"
-            content = style_match.group(2)
-            start_pos = style_match.start()
-            line_start = source_code[:start_pos].count("\n") + 1
-            sections["style"] = {
-                "content": content,
-                "lang": lang,
-                "line_start": line_start,
-            }
-
-        return sections
 
     def _get_component_name(self, file_path: Path) -> str:
         """Get component name from file name (PascalCase convention)."""
@@ -253,34 +207,26 @@ class VueParser(TreeSitterParser):
 
     def _parse_script_section(
         self,
-        script_info: dict[str, Any],
+        script_section: VueSection,
         file_path: Path,
         parent_id: str,
         source_lines: list[str],
     ) -> tuple[list[Entity], list[Relationship]]:
         """Parse the <script> section of a Vue component."""
-        entities: list[Entity] = []
-        relationships: list[Relationship] = []
+        script_content = script_section.content
+        lang = (script_section.lang or "").lower()
+        index = VueScriptIndex(
+            script_content,
+            self.ts_parser if lang in TYPESCRIPT_LANGS else self.js_parser,
+            script_section.content_line_start,
+        )
 
-        script_content = script_info["content"]
-        is_setup = script_info.get("is_setup", False)
-
-        if is_setup:
-            # Parse <script setup> (Composition API)
-            script_entities, script_rels = self._parse_composition_api(
-                script_content, file_path, parent_id, source_lines, script_info["line_start"]
-            )
-            entities.extend(script_entities)
-            relationships.extend(script_rels)
-        else:
-            # Parse Options API or regular script
-            script_entities, script_rels = self._parse_options_api(
-                script_content, file_path, parent_id, source_lines, script_info["line_start"]
-            )
-            entities.extend(script_entities)
-            relationships.extend(script_rels)
-
-        return entities, relationships
+        parse = (
+            self._parse_composition_api
+            if script_section.is_setup
+            else self._parse_options_api
+        )
+        return parse(script_content, file_path, parent_id, source_lines, index)
 
     def _parse_composition_api(
         self,
@@ -288,7 +234,7 @@ class VueParser(TreeSitterParser):
         file_path: Path,
         parent_id: str,
         source_lines: list[str],
-        line_offset: int,
+        index: VueScriptIndex,
     ) -> tuple[list[Entity], list[Relationship]]:
         """Parse <script setup> using Composition API."""
         entities: list[Entity] = []
@@ -297,16 +243,20 @@ class VueParser(TreeSitterParser):
         # Extract defineProps
         props = self._extract_define_props(script_content)
         for prop_name in props:
+            span = (
+                index.lookup(prop_name, prefer_member=True)
+                or index.literal(prop_name)
+                or index.call("defineProps")
+                or index.fallback()
+            )
+            location, snippet = self._locate(span, file_path, source_lines)
             prop_entity = Entity(
                 id=f"{parent_id}::prop::{prop_name}",
                 kind=EntityKind.VARIABLE,
                 name=prop_name,
                 qualified_name=f"{parent_id.split('::')[-1]}.props.{prop_name}",
-                location=Location(
-                    file_path=str(file_path),
-                    line_start=line_offset,
-                    line_end=line_offset + 1,
-                ),
+                location=location,
+                source_code=snippet,
                 metadata={"vue_api": "composition", "declaration_type": "prop"}
             )
             entities.append(prop_entity)
@@ -321,16 +271,19 @@ class VueParser(TreeSitterParser):
         # Extract defineEmits
         emits = self._extract_define_emits(script_content)
         for emit_name in emits:
+            span = (
+                index.literal(emit_name)
+                or index.call("defineEmits")
+                or index.fallback()
+            )
+            location, snippet = self._locate(span, file_path, source_lines)
             emit_entity = Entity(
                 id=f"{parent_id}::emit::{emit_name}",
                 kind=EntityKind.VARIABLE,
                 name=emit_name,
                 qualified_name=f"{parent_id.split('::')[-1]}.emits.{emit_name}",
-                location=Location(
-                    file_path=str(file_path),
-                    line_start=line_offset,
-                    line_end=line_offset + 1,
-                ),
+                location=location,
+                source_code=snippet,
                 metadata={"vue_api": "composition", "declaration_type": "emit"}
             )
             entities.append(emit_entity)
@@ -350,16 +303,20 @@ class VueParser(TreeSitterParser):
             is_arrow_function = False
 
             if decl_type in ['const', 'let', 'var']:
+                # Identifiers may contain '$', so the name must never be treated
+                # as regex syntax.
+                escaped_name = re.escape(decl_name)
+
                 # Check if it's a ref/reactive call
                 ref_check = re.search(
-                    rf"{decl_name}\s*=\s*(?:ref|reactive)\s*(?:<[^>]+>)?\s*\(",
+                    rf"{escaped_name}\s*=\s*(?:ref|reactive)\s*(?:<[^>]+>)?\s*\(",
                     script_content
                 )
                 is_reactive = ref_check is not None
 
                 # Check if it's an arrow function: const foo = () => {} or const bar = async () => {}
                 arrow_check = re.search(
-                    rf"{decl_name}\s*=\s*(?:async\s+)?\([^)]*\)\s*=>",
+                    rf"{escaped_name}\s*=\s*(?:async\s+)?\([^)]*\)\s*=>",
                     script_content
                 )
                 is_arrow_function = arrow_check is not None
@@ -383,16 +340,15 @@ class VueParser(TreeSitterParser):
             else:
                 id_type = decl_type
 
+            span = index.lookup(decl_name) or index.fallback()
+            location, snippet = self._locate(span, file_path, source_lines)
             decl_entity = Entity(
                 id=f"{parent_id}::{id_type}::{decl_name}",
                 kind=entity_kind,
                 name=decl_name,
                 qualified_name=f"{parent_id.split('::')[-1]}.{decl_name}",
-                location=Location(
-                    file_path=str(file_path),
-                    line_start=line_offset,
-                    line_end=line_offset + 1,
-                ),
+                location=location,
+                source_code=snippet,
                 metadata={
                     "vue_api": "composition",
                     "declaration_type": decl_type,
@@ -428,7 +384,7 @@ class VueParser(TreeSitterParser):
         file_path: Path,
         parent_id: str,
         source_lines: list[str],
-        line_offset: int,
+        index: VueScriptIndex,
     ) -> tuple[list[Entity], list[Relationship]]:
         """Parse Options API (Vue 2 style or Vue 3 with defineComponent)."""
         entities: list[Entity] = []
@@ -437,16 +393,15 @@ class VueParser(TreeSitterParser):
         # Extract data properties
         data_props = self._extract_data_properties(script_content)
         for prop_name in data_props:
+            span = index.lookup(prop_name, prefer_member=True) or index.fallback()
+            location, snippet = self._locate(span, file_path, source_lines)
             prop_entity = Entity(
                 id=f"{parent_id}::data::{prop_name}",
                 kind=EntityKind.VARIABLE,
                 name=prop_name,
                 qualified_name=f"{parent_id.split('::')[-1]}.data.{prop_name}",
-                location=Location(
-                    file_path=str(file_path),
-                    line_start=line_offset,
-                    line_end=line_offset + 1,
-                ),
+                location=location,
+                source_code=snippet,
                 metadata={
                     "vue_api": "options",
                     "declaration_type": "data",
@@ -458,16 +413,15 @@ class VueParser(TreeSitterParser):
         # Extract methods
         methods = self._extract_methods(script_content)
         for method_name in methods:
+            span = index.lookup(method_name, prefer_member=True) or index.fallback()
+            location, snippet = self._locate(span, file_path, source_lines)
             method_entity = Entity(
                 id=f"{parent_id}::method::{method_name}",
                 kind=EntityKind.FUNCTION,
                 name=method_name,
                 qualified_name=f"{parent_id.split('::')[-1]}.{method_name}",
-                location=Location(
-                    file_path=str(file_path),
-                    line_start=line_offset,
-                    line_end=line_offset + 1,
-                ),
+                location=location,
+                source_code=snippet,
                 metadata={
                     "vue_api": "options",
                     "declaration_type": "method"
@@ -485,16 +439,15 @@ class VueParser(TreeSitterParser):
         # Extract computed properties
         computed = self._extract_computed_properties(script_content)
         for computed_name in computed:
+            span = index.lookup(computed_name, prefer_member=True) or index.fallback()
+            location, snippet = self._locate(span, file_path, source_lines)
             computed_entity = Entity(
                 id=f"{parent_id}::computed::{computed_name}",
                 kind=EntityKind.VARIABLE,
                 name=computed_name,
                 qualified_name=f"{parent_id.split('::')[-1]}.computed.{computed_name}",
-                location=Location(
-                    file_path=str(file_path),
-                    line_start=line_offset,
-                    line_end=line_offset + 1,
-                ),
+                location=location,
+                source_code=snippet,
                 metadata={
                     "vue_api": "options",
                     "declaration_type": "computed",
@@ -506,11 +459,11 @@ class VueParser(TreeSitterParser):
         return entities, relationships
 
     def _parse_template_section(
-        self, template_info: dict[str, Any], parent_id: str
+        self, template_section: VueSection, parent_id: str
     ) -> list[Relationship]:
         """Parse the <template> section to extract event handlers and component usage."""
         relationships = []
-        template_content = template_info["content"]
+        template_content = template_section.content
 
         # Extract @click, @input, @submit etc. (event handlers)
         event_handlers = self._extract_event_handlers(template_content)
@@ -549,7 +502,7 @@ class VueParser(TreeSitterParser):
         return relationships
 
     def _extract_component_imports(
-        self, script_info: dict[str, Any], parent_id: str
+        self, script_section: VueSection, parent_id: str
     ) -> list[Relationship]:
         """Extract component imports from script section.
 
@@ -560,7 +513,7 @@ class VueParser(TreeSitterParser):
         - Multiple imports: import { Foo, Bar } from './components'
         """
         relationships = []
-        script_content = script_info["content"]
+        script_content = script_section.content
 
         # Pattern 1: Default imports with optional .vue extension
         # Matches: import Foo from './Foo', import Foo from './Foo.vue', import Foo from '@/components/Foo'
@@ -888,7 +841,7 @@ class VueParser(TreeSitterParser):
         return models
 
     def _parse_style_section(
-        self, style_info: dict[str, Any], parent_id: str
+        self, style_section: VueSection, parent_id: str
     ) -> list[Relationship]:
         """Parse the <style> section to extract v-bind() CSS variable linking.
 
@@ -902,7 +855,7 @@ class VueParser(TreeSitterParser):
         This creates a REFERENCES relationship from component to the variable.
         """
         relationships = []
-        style_content = style_info["content"]
+        style_content = style_section.content
 
         # Extract v-bind() calls
         css_bindings = self._extract_css_bindings(style_content)
