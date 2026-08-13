@@ -359,7 +359,7 @@ hiding current failures. No production behavior changes.
 **Rollback:** Revert fixture/helper/ADR additions as one documentation-and-test
 commit; no persisted artifact changes exist.
 
-### [~] Step 02 — Correct JavaScript inheritance and TypeScript exports
+### [x] Step 02 — Correct JavaScript inheritance and TypeScript exports
 
 **Execution tier:** default capable coding model; bounded parser refactor.
 
@@ -405,7 +405,7 @@ shared dispatch path rather than copied loops.
 **Rollback:** Revert the shared dispatcher and tests together. No schema or
 persisted artifact migration is introduced.
 
-### [ ] Step 03 — Make Python extraction scope-aware and decorator-complete
+### [~] Step 03 — Make Python extraction scope-aware and decorator-complete
 
 **Execution tier:** strongest available model; recursive lexical-scope work.
 
@@ -1419,8 +1419,8 @@ commit SHA, or durable local handoff note until a PR exists.
 | Step | Status | Branch/PR | Started | Completed | Verification/evidence | Handoff notes |
 | --- | --- | --- | --- | --- | --- | --- |
 | 01 | `[x]` | [PR #21](https://github.com/deepakdgupta1/KnowCode/pull/21) (`codex/hardening-s01-contracts`) | 2026-08-12 | 2026-08-12 | Merged to `main` as `ecee1a3`; 150 focused and 368 global tests passed; Ruff, mypy, strict MkDocs, dependency audit, and diff checks passed. | Contracts, fixtures, helpers, and ADRs are now the required baseline for dependent steps. |
-| 02 | `[~]` | [PR #23](https://github.com/deepakdgupta1/KnowCode/pull/23) (`codex/hardening-s02-js-ts`) | 2026-08-12 | — | Draft PR: red phase had 5 intended failures; green phase had 14 focused and 378 global tests pass; parser-module coverage is 95%; Ruff, mypy, strict MkDocs, and diff checks passed. | Exit criteria are complete; PR review and merge remain before `[x]`. Canonical endpoints and newly extracted TS entities require generated graphs to be rebuilt after applying or reverting this step. |
-| 03 | `[ ]` | — | — | — | — | — |
+| 02 | `[x]` | [PR #23](https://github.com/deepakdgupta1/KnowCode/pull/23) (`codex/hardening-s02-js-ts`) | 2026-08-12 | 2026-08-13 | Merged to `main` as `cbfec89`; 14 focused and 378 global tests passed; Ruff, mypy, strict MkDocs, and diff checks passed. | Canonical endpoints and newly extracted TS entities required generated graphs to be rebuilt after applying this step. |
+| 03 | `[~]` | [PR #25](https://github.com/deepakdgupta1/KnowCode/pull/25) (`codex/hardening-s03-python-parser`) | 2026-08-13 | — | Red phase had 9 intended failures; green phase has 21 focused python-parser tests plus parser-contract tests passing at 98% `python_parser.py` coverage; 399 global tests pass; Ruff, mypy, strict MkDocs, and diff checks passed. | Exit criteria complete; PR review and merge remain before `[x]`. Python entity IDs now use the canonical identity builder, and nested/decorator/module-variable entities are new, so generated graphs must be rebuilt after applying or reverting this step. |
 | 04 | `[ ]` | — | — | — | — | — |
 | 05 | `[ ]` | — | — | — | — | — |
 | 06 | `[ ]` | — | — | — | — | — |
@@ -1449,6 +1449,7 @@ commit SHA, or durable local handoff note until a PR exists.
 | 2026-08-12 | Plan | Adversarial review | Full rebuilds can publish mismatched `knowledge.db`/semantic artifacts; vector and lifecycle draft steps were too broad; C9/C10 proof omitted production paths. | Added explicit complete-generation publication; split backend, queue, API, and hot-swap work; strengthened service telemetry and real-server limiter gates; finalized Steps 01–22. |
 | 2026-08-12 | 01 | Decision | Accepted canonical endpoint/path rules, context-owned SQLite connections, durable float32 embeddings, pointer-last immutable generations, aggregate-only telemetry, and no proxy trust in direct mode. | Later steps must implement the contracts in `docs/architecture/hardening-contracts.md`; incompatible legacy graph/index artifacts fail closed and rebuild. |
 | 2026-08-12 | 02 | Dependency audit | `pip-audit` reported 23 advisories in five packages already present on `main`: aiohttp, click, cryptography, GitPython, and pymdown-extensions. | No dependency changed in Step 02. Remediate in a separate maintenance PR before the final release gate; do not mix upgrades into the parser change. |
+| 2026-08-13 | 03 | Decision | Python calls are resolved at parse time against the lexical scope chain (internal when a bare name matches a local definition, else a scoped `unresolved::` id). Inheritance targets are kept as `ref::` so `GraphBuilder` can still link local bases; imports use the `external::python::` namespace. Module-local (non-module) assignments are intentionally not entities. | Aligns Python with the Step 01 endpoint contract; avoids losing graph-builder base resolution; keeps the variable surface to the committed module-variable fixtures. |
 
 ## Definition of Complete
 
