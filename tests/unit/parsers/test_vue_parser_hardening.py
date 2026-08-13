@@ -183,6 +183,35 @@ export default {
     assert names(result) == {"Shape", "box"}
 
 
+def test_reactive_props_destructure_is_not_a_duplicate_declaration(
+    parser: VueParser, tmp_path: Path
+) -> None:
+    """``const { label } = defineProps(...)`` is Vue 3.5 reactive props destructure.
+
+    The destructured name and the prop are one binding, so the component is
+    correct and must not be reported as declaring ``label`` twice.
+    """
+    path = write(
+        tmp_path,
+        "Destructured.vue",
+        """<template><div>{{ label }}</div></template>
+<script setup>
+const { label, count } = defineProps({ label: String, count: Number })
+</script>
+""",
+    )
+
+    result = parser.parse_file(path)
+
+    assert result.errors == []
+    assert names(result) == {"Destructured", "label", "count"}
+    assert {
+        entity.metadata["declaration_type"]
+        for entity in result.entities
+        if entity.name in {"label", "count"}
+    } == {"prop"}
+
+
 # --- silent loss must become a visible diagnostic -------------------------
 
 

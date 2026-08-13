@@ -32,10 +32,8 @@ from knowcode.utils.entity_identity import (
 #: Component name used when a file stem yields no PascalCase name at all.
 DEFAULT_COMPONENT_NAME = "AnonymousComponent"
 
-#: Keywords that a ``name(args) {`` regex cannot distinguish from a declaration.
-_CONTROL_FLOW_KEYWORDS = frozenset(
-    {"if", "for", "while", "switch", "catch", "with", "return", "function"}
-)
+#: Compiler macros whose destructured result is already extracted elsewhere.
+_COMPILER_MACRO_INITIALIZER = re.compile(r"\s*(?:defineProps|defineEmits)\b")
 
 
 def _ordered_unique(values: Iterable[str]) -> list[str]:
@@ -772,6 +770,11 @@ class VueParser(TreeSitterParser):
             var_names = match.group(2)
             # Handle destructuring
             if var_names.startswith('{') or var_names.startswith('['):
+                # Vue 3.5 reactive props destructure binds the props themselves:
+                # `const { label } = defineProps({ label: String })` declares one
+                # binding, not a prop plus a separate const of the same name.
+                if _COMPILER_MACRO_INITIALIZER.match(script_content, match.end()):
+                    continue
                 # Extract names from destructuring
                 inner = var_names[1:-1]
                 names = re.findall(r'([a-zA-Z_$][\w$]*)', inner)
