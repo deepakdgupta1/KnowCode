@@ -533,6 +533,187 @@ def test_legacy_flat_layout_is_still_readable_when_no_pointer_exists(
         indexer.chunk_repo.close()
 
 
+def test_incremental_build_stages_from_the_previous_generation(
+    tmp_path: Path, backend: str
+) -> None:
+    """An incremental rebuild copies the last generation instead of mutating it."""
+    src = _source_tree(tmp_path)
+    service = _service(tmp_path, backend)
+    service.analyze(directory=src, output=tmp_path)
+    first = resolve_current_generation(tmp_path / "knowcode_index")
+    first_chunks = generations.read_chunk_ids(first.chunks_db)
+
+    (src / "m.py").write_text("def alpha():\n    return 2\n", encoding="utf-8")
+    rebuilt = _service(tmp_path, backend)
+    stats = rebuilt.analyze(directory=src, output=tmp_path, incremental=True)
+
+    assert stats["published"] is True
+    second = resolve_current_generation(tmp_path / "knowcode_index")
+    assert second.generation_id != first.generation_id
+    assert second.manifest.counts["chunks"] == second.manifest.counts["vectors"]
+    # The previous generation is retained byte-for-byte, not edited in place.
+    assert generations.read_chunk_ids(first.chunks_db) == first_chunks
+
+
+def test_build_index_raises_when_it_publishes_no_full_generation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``_build_index`` is the "give me a searchable index" contract."""
+    src = _source_tree(tmp_path)
+
+    def explode(self: Indexer, *args: Any, **kwargs: Any) -> int:
+        raise RuntimeError("embedding provider unavailable")
+
+    monkeypatch.setattr(Indexer, "index_directory", explode)
+    service = _service(tmp_path, "faiss")
+
+    with pytest.raises(RuntimeError, match="Semantic index build failed"):
+        service._build_index(src, tmp_path / "knowcode_index")
+
+
+def test_a_graph_only_generation_is_not_searchable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """It must fail like a missing index, not present an empty one as working."""
+    from knowcode.errors import MissingSemanticIndexError
+
+    src = _source_tree(tmp_path)
+
+    def explode(self: Indexer, *args: Any, **kwargs: Any) -> int:
+        raise RuntimeError("embedding provider unavailable")
+
+    monkeypatch.setattr(Indexer, "index_directory", explode)
+    _service(tmp_path, "faiss").analyze(directory=src, output=tmp_path)
+    monkeypatch.undo()
+
+    reader = _service(tmp_path, "faiss")
+    assert reader.current_generation().kind == generations.KIND_GRAPH_ONLY
+    # The graph is still readable...
+    assert reader.store.get_entity(f"{(src / 'm.py').resolve()}::alpha") is not None
+    # ...but retrieval fails closed with rebuild guidance.
+    with pytest.raises(MissingSemanticIndexError):
+        reader._assert_index_exists()
+    # And the chunk store is never created inside the published generation.
+    assert not (reader.current_generation().path / "chunks.db").exists()
+
+
+def test_a_graph_only_generation_discards_partial_vector_artifacts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A LanceDB directory created before the failure must not survive staging."""
+    src = _source_tree(tmp_path)
+
+    def explode(self: Indexer, *args: Any, **kwargs: Any) -> int:
+        raise RuntimeError("embedding provider unavailable")
+
+    monkeypatch.setattr(Indexer, "index_directory", explode)
+    _service(tmp_path, "lancedb").analyze(directory=src, output=tmp_path)
+    monkeypatch.undo()
+
+    resolved = resolve_current_generation(tmp_path / "knowcode_index")
+    assert resolved.kind == generations.KIND_GRAPH_ONLY
+    # Only the graph and its manifest survive; SQLite's own sidecars are
+    # excluded because they are managed by SQLite, not published artifacts.
+    published = {
+        path.name
+        for path in resolved.path.iterdir()
+        if not path.name.startswith("knowledge.db-")
+    }
+    assert published == {generations.MANIFEST_FILENAME, "knowledge.db"}
+
+
+def test_a_chunk_vector_membership_split_is_caught_before_publication(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The parity guard is what stops a half-embedded generation going live."""
+    src = _source_tree(tmp_path)
+    service = _service(tmp_path, "faiss")
+    service.analyze(directory=src, output=tmp_path)
+    first = resolve_current_generation(tmp_path / "knowcode_index")
+
+    from knowcode.storage.vector_store import VectorStore
+
+    monkeypatch.setattr(VectorStore, "count", lambda self: 999)
+
+    rebuilt = _service(tmp_path, "faiss")
+    stats = rebuilt.analyze(directory=src, output=tmp_path)
+    monkeypatch.undo()
+
+    assert stats["published"] is False
+    assert "chunk/vector count mismatch" in stats["index_error"]
+    assert (
+        resolve_current_generation(tmp_path / "knowcode_index").generation_id
+        == first.generation_id
+    )
+
+
+def test_get_indexer_honours_an_explicit_index_root(tmp_path: Path) -> None:
+    src = _source_tree(tmp_path)
+    index_root = tmp_path / "elsewhere"
+    service = _service(tmp_path, "faiss")
+    service.build_generation(src, index_root)
+
+    reader = _service(tmp_path, "faiss")
+    indexer = reader.get_indexer(index_path=index_root)
+    resolved = resolve_current_generation(index_root)
+
+    assert indexer.chunk_repo._db_path == resolved.chunks_db
+
+
+def test_an_explicit_index_root_without_a_generation_uses_the_flat_layout(
+    tmp_path: Path,
+) -> None:
+    index_root = tmp_path / "elsewhere"
+    index_root.mkdir()
+    service = _service(tmp_path, "faiss")
+
+    indexer = service.get_indexer(index_path=index_root)
+    try:
+        assert indexer.chunk_repo._db_path == index_root / "chunks.db"
+    finally:
+        indexer.chunk_repo.close()
+
+
+def test_assert_index_exists_returns_the_generation_directory(tmp_path: Path) -> None:
+    src = _source_tree(tmp_path)
+    service = _service(tmp_path, "faiss")
+    service.analyze(directory=src, output=tmp_path)
+
+    resolved = resolve_current_generation(tmp_path / "knowcode_index")
+    assert _service(tmp_path, "faiss")._assert_index_exists() == resolved.path
+
+
+def test_graph_only_publication_discards_a_written_native_vector_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The FAISS artifact is a file, so it needs the unlink branch, not rmtree."""
+    src = _source_tree(tmp_path)
+
+    def explode(self: Indexer, *args: Any, **kwargs: Any) -> None:
+        raise OSError("manifest write failed")
+
+    # Fail *after* the vector artifact has been written to staging.
+    from knowcode.storage.vector_store import VectorStore
+
+    original_save = VectorStore.save
+
+    def save_then_fail(self: Any, path: Any) -> None:
+        original_save(self, path)
+        raise OSError("vector metadata write failed")
+
+    monkeypatch.setattr(VectorStore, "save", save_then_fail)
+
+    service = _service(tmp_path, "faiss")
+    stats = service.analyze(directory=src, output=tmp_path)
+    monkeypatch.undo()
+
+    assert stats["published"] is True
+    resolved = resolve_current_generation(tmp_path / "knowcode_index")
+    assert resolved.kind == generations.KIND_GRAPH_ONLY
+    assert not (resolved.path / "vectors.index").exists()
+    assert not (resolved.path / "vectors.json").exists()
+
+
 def test_pointer_json_is_human_readable(tmp_path: Path) -> None:
     src = _source_tree(tmp_path)
     _service(tmp_path, "faiss").analyze(directory=src, output=tmp_path)

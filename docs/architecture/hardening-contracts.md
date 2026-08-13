@@ -569,6 +569,148 @@ and directory-level staging belongs to Step 14's generation directories.
 Append-only telemetry does not use this module: it has no previous version to
 preserve.
 
+## Complete index generations (Step 14)
+
+Step 14 implements ADR 4. Before it, a full rebuild mutated the live artifacts
+in place and in the wrong order: it deleted the semantic index directory,
+committed `knowledge.db`, then *tried* to rebuild the index and reported a
+failure as a successful analysis. One failed rebuild published a new graph with
+no index and destroyed the last good semantic generation.
+
+### Layout
+
+```text
+knowcode_index/
+  current.json                       # the pointer readers resolve, published last
+  generations/
+    <generation id>/
+      knowledge.db                   # the graph
+      chunks.db                      # the chunk store
+      vectors.json + vectors.index | vectors.npy | vectors.lancedb/
+      index_manifest.json            # embedding/chunking config
+      manifest.json                  # the generation manifest, schema 3
+  .staging-<generation id>.pid<pid>/  # a generation under construction
+```
+
+A generation id is `YYYYMMDDThhmmssffffffZ-<8 hex>`. Lexical order is
+publication order, because retention and pointer fallback both mean "the newest
+valid generation"; the microsecond stamp orders builds across processes and an
+in-process guard keeps two builds in the same microsecond strictly ordered.
+
+### Build sequence
+
+1. Parse the repository once. The resulting `GraphBuilder` carries its scanned
+   files and parse results, and the *same* builder writes `knowledge.db` and
+   feeds the chunker — so a generation can never hold chunks for files its
+   graph never saw. A parse failure propagates; nothing has been staged.
+2. Stage `knowledge.db`, then `chunks.db`, the vector artifacts, and
+   `index_manifest.json` into `.staging-<id>.pid<pid>/`. The live generation is
+   neither read nor mutated. An incremental build copies the previous
+   generation into staging first; Step 15 replaces that copy with a validated
+   copy-on-write delta.
+3. Close every store, so the committed rows are in the database files rather
+   than an open write-ahead log.
+4. Write `manifest.json` (data before the metadata naming it), then validate
+   the staged set *together*: manifest schema, generation id, artifact
+   presence, chunk/vector count parity, the entity- and chunk-id digests, and
+   every artifact checksum.
+5. Take the publication lock, `os.replace` the staging directory into
+   `generations/<id>`, `fsync` the parent, then atomically replace
+   `current.json` **last**.
+6. Retire superseded generations, never the current one.
+
+A failure at any step before the pointer write leaves the previous generation
+current. A failure of the pointer write itself also removes the just-renamed
+directory, so a later fallback cannot select a generation that was never
+published.
+
+### Generation manifest, schema 3
+
+| Field | Purpose |
+| --- | --- |
+| `schema_version`, `generation_id`, `created_at`, `kind` | Identity; fails closed on any other schema. |
+| `counts` | `entities`, `relationships`, `chunks`, `vectors`. |
+| `digests` | `entity_ids` and `chunk_ids`: SHA-256 over the sorted id set. |
+| `embedding`, `vector` | Embedding config and vector backend/dimension. |
+| `schema_versions` | Chunk store and index-manifest versions. |
+| `artifacts` | Name, kind, SHA-256, and size of every immutable artifact. |
+
+SQLite databases are validated *logically* (id digests plus counts) rather than
+by file checksum: opening a WAL database rewrites its bytes at checkpoint time,
+so a byte checksum over `chunks.db` would false-alarm on the first reader.
+Immutable artifacts — the vector metadata envelope, the native vector index,
+the indexer manifest — are checksummed by content. Validation reads databases
+through an `immutable=1` URI when no write-ahead log is present, so validating
+a generation does not write to it.
+
+Vector-side id parity is asserted in memory at build time, where both id sets
+are known, and recorded as `counts.vectors`; the vector protocol exposes no id
+enumeration, so on load the check is count parity against the chunk digest.
+
+### Validation depth
+
+| Caller | Checks |
+| --- | --- |
+| Publication | Structural **and** digests/checksums. |
+| Startup, `ensure_index()`, reload | Structural only: schema, id, presence, count parity. Cheap enough to run on every service start. |
+| `knowcode doctor` | Structural **and** digests/checksums, as the "Index generation" check. |
+
+### Recovery, retention, and disk
+
+`resolve_current_generation` prefers the pointed generation and falls back to
+the newest *completely valid* retained generation; it never mixes artifacts and
+never falls back to individual files. With no usable generation it returns
+`None`, and the caller raises the ordinary missing-store/missing-index error.
+
+`DEFAULT_RETAINED_GENERATIONS` is 2: one live generation plus one
+last-known-good fallback. Each generation is a full copy of the index, so this
+is also the disk-footprint multiplier — a 400 MB index occupies roughly 800 MB
+across a rebuild, and an incremental build briefly needs a third copy while its
+staging directory exists. The current generation is never retired regardless of
+the retention setting.
+
+Staging directories carry the owning PID. A build removes staging directories
+belonging to *other* processes before starting (ADR 4 gives one writer process
+per artifact root) and never its own, since another thread may be mid-build.
+Readers ignore staging directories entirely.
+
+### Graph-only generations
+
+A generation is `full` (graph plus semantic index) or `graph_only`. When the
+semantic phase fails:
+
+* if the current generation *has* a semantic index, nothing is published — the
+  build reports `published=False` with a classified stage and the searchable
+  generation survives;
+* if there is no semantic generation to protect, the graph is published as an
+  explicit `graph_only` generation, so a build without usable embeddings yields
+  a usable graph instead of nothing.
+
+A `graph_only` generation is not searchable: `_assert_index_exists` raises
+`MissingSemanticIndexError` rather than presenting an empty index as working,
+`ensure_index()` rebuilds, and `doctor` warns. Its directory holds no chunk or
+vector artifacts, so opening a reader can never create `chunks.db` inside a
+published generation.
+
+### Failure classification
+
+`analyze()` no longer reports a failed index build as success. It returns
+`published`, `generation_id`, `generation_kind`, and — on failure —
+`index_error` with `index_error_stage` (`knowledge_store`, `semantic_index`, or
+`publication`). `knowcode build`, `knowcode analyze`, and `knowcode index` exit
+non-zero when nothing was published and say that the previous generation is
+still current.
+
+### Compatibility
+
+An install with no `current.json` keeps the pre-Step-14 flat layout: the
+knowledge store resolves to `knowledge.db`/`knowcode_knowledge.json` beside the
+sources and the chunk/vector artifacts to `knowcode_index/` directly. Nothing
+migrates the flat layout in place — the legacy chunk and vector artifacts
+already fail closed under Steps 08, 11, and 12 — so the next `knowcode build`
+publishes a generation and `doctor` warns about the flat layout until then. A
+stale flat `knowledge.db` left behind is ignored once a generation exists.
+
 ## Baseline evidence
 
 The baseline is `main` at `d239b22` on 2026-08-12. Before Step 01 additions,

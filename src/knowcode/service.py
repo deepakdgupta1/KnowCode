@@ -578,10 +578,11 @@ class KnowCodeService:
                 vector_count = 0
             else:
                 kind = generations.KIND_FULL
-                chunk_ids = generations.read_chunk_ids(staging.path / "chunks.db")
-                self._assert_chunk_vector_parity(chunk_ids, vector_count)
 
             try:
+                if kind == generations.KIND_FULL:
+                    chunk_ids = generations.read_chunk_ids(staging.path / "chunks.db")
+                    self._assert_chunk_vector_parity(chunk_ids, vector_count)
                 manifest = generations.build_manifest(
                     staging.path,
                     generation_id=staging.generation_id,

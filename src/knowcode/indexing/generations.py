@@ -58,7 +58,7 @@ import threading
 import time
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, Iterator, Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
 from knowcode.utils.atomic_write import atomic_write_json
 from knowcode.utils.logger import get_logger
@@ -464,10 +464,16 @@ def digest_artifacts(directory: Path, names: Sequence[str]) -> tuple[ArtifactDig
 def _read_ids(db_path: Path, sql: str) -> list[str]:
     """Read one identifier column from a SQLite artifact, read-only.
 
-    Opened through a ``mode=ro`` URI so validation can never checkpoint a WAL
-    or otherwise mutate the generation it is validating.
+    Generations are immutable, so validating one must not write to it. A plain
+    ``mode=ro`` connection still creates ``-shm``/``-wal`` sidecars for a WAL
+    database, so when no write-ahead log is present — the normal case, since
+    every store is closed before its generation is digested — the database is
+    opened ``immutable=1`` and nothing is created at all. A hot WAL means
+    frames may not be merged yet, so that case falls back to ``mode=ro``, where
+    reading the current data matters more than leaving no trace.
     """
-    uri = f"file:{db_path}?mode=ro"
+    hot_wal = db_path.with_name(f"{db_path.name}-wal").exists()
+    uri = f"file:{db_path}?mode=ro" if hot_wal else f"file:{db_path}?immutable=1"
     conn = sqlite3.connect(uri, uri=True)
     try:
         return [str(row[0]) for row in conn.execute(sql)]
@@ -957,9 +963,3 @@ def cleanup_staging_generations(root: str | Path) -> list[Path]:
             root_path,
         )
     return removed
-
-
-def iter_generation_paths(root: str | Path) -> Iterator[Path]:
-    """Yield every retained generation directory, oldest first."""
-    for generation_id in list_generations(root):
-        yield generations_dir(root) / generation_id

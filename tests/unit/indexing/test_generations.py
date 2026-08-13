@@ -110,6 +110,18 @@ def test_generation_ids_sort_in_publication_order() -> None:
     assert ids == sorted(ids)
 
 
+def test_generation_ids_stay_ordered_within_one_microsecond(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two builds can land in the same microsecond; order must still be strict."""
+    monkeypatch.setattr(generations.time, "time", lambda: 1_780_000_000.123456)
+
+    ids = [new_generation_id() for _ in range(5)]
+
+    assert ids == sorted(ids)
+    assert len(set(ids)) == 5
+
+
 def test_staging_directory_lives_beside_the_generations_directory(
     tmp_path: Path,
 ) -> None:
@@ -390,3 +402,159 @@ def test_staging_directory_name_carries_the_owning_pid(tmp_path: Path) -> None:
     staging = stage_generation(tmp_path)
 
     assert f".pid{os.getpid()}" in staging.name
+
+
+def test_cleanup_ignores_a_root_that_does_not_exist(tmp_path: Path) -> None:
+    assert cleanup_staging_generations(tmp_path / "absent") == []
+
+
+def test_staging_generation_id_rejects_a_non_staging_path(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="staging directory"):
+        generations.staging_generation_id(tmp_path / "generations")
+
+
+# ----------------------------------------------------------------------
+# Fail-closed parsing of manifests and pointers
+# ----------------------------------------------------------------------
+
+
+def _manifest_payload(tmp_path: Path) -> dict:
+    staging, _ = _stage(tmp_path)
+    return json.loads((staging / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+
+
+def test_manifest_rejects_an_unknown_generation_kind(tmp_path: Path) -> None:
+    payload = _manifest_payload(tmp_path)
+    payload["kind"] = "partial"
+
+    with pytest.raises(ValueError, match="Unknown generation kind"):
+        generations.GenerationManifest.from_dict(payload)
+
+
+def test_manifest_rejects_a_missing_generation_id(tmp_path: Path) -> None:
+    payload = _manifest_payload(tmp_path)
+    payload["generation_id"] = ""
+
+    with pytest.raises(ValueError, match="no id"):
+        generations.GenerationManifest.from_dict(payload)
+
+
+def test_manifest_rejects_malformed_counts(tmp_path: Path) -> None:
+    payload = _manifest_payload(tmp_path)
+    payload["counts"] = {"chunks": "many"}
+
+    with pytest.raises(ValueError, match="Malformed generation manifest"):
+        generations.GenerationManifest.from_dict(payload)
+
+
+def test_read_manifest_reports_a_missing_manifest(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="Missing generation manifest"):
+        generations.read_manifest(tmp_path)
+
+
+def test_read_manifest_rejects_a_non_object_payload(tmp_path: Path) -> None:
+    (tmp_path / MANIFEST_FILENAME).write_text("[]", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="not a JSON object"):
+        generations.read_manifest(tmp_path)
+
+
+def test_validation_rejects_a_full_generation_with_no_native_vector_artifact(
+    tmp_path: Path,
+) -> None:
+    staging, manifest = _stage(tmp_path)
+    stripped = generations.GenerationManifest(
+        **{
+            **{
+                field: getattr(manifest, field)
+                for field in (
+                    "schema_version",
+                    "generation_id",
+                    "created_at",
+                    "kind",
+                    "counts",
+                    "digests",
+                    "embedding",
+                    "vector",
+                    "schema_versions",
+                )
+            },
+            "artifacts": (),
+        }
+    )
+    generations.write_manifest(staging, stripped)
+
+    failures = validate_generation(staging, expected_id=manifest.generation_id)
+
+    assert any("native vector artifact" in failure for failure in failures)
+
+
+def test_validation_reports_an_unreadable_chunk_store(tmp_path: Path) -> None:
+    staging, manifest = _stage(tmp_path)
+    (staging / "chunks.db").write_bytes(b"not a database")
+
+    failures = validate_generation(
+        staging, expected_id=manifest.generation_id, verify_digests=True
+    )
+
+    assert any("unreadable chunks.db" in failure for failure in failures)
+
+
+def test_validation_reports_an_unreadable_knowledge_store(tmp_path: Path) -> None:
+    staging, manifest = _stage(tmp_path)
+    (staging / "knowledge.db").write_bytes(b"not a database")
+
+    failures = validate_generation(
+        staging, expected_id=manifest.generation_id, verify_digests=True
+    )
+
+    assert any("unreadable knowledge.db" in failure for failure in failures)
+
+
+def test_validation_reports_a_chunk_count_that_disagrees_with_the_manifest(
+    tmp_path: Path,
+) -> None:
+    staging, manifest = _stage(tmp_path, chunk_ids=["a", "b"])
+    broken = manifest.with_counts(chunks=5, vectors=5)
+    generations.write_manifest(staging, broken)
+
+    failures = validate_generation(
+        staging, expected_id=broken.generation_id, verify_digests=True
+    )
+
+    assert any("chunk count mismatch" in failure for failure in failures)
+
+
+def test_publish_refuses_to_overwrite_an_existing_generation(tmp_path: Path) -> None:
+    staging, manifest = _stage(tmp_path)
+    publish_generation(tmp_path, staging, manifest)
+
+    replay, _ = _stage(tmp_path)
+    with pytest.raises(generations.GenerationValidationError, match="already exists"):
+        publish_generation(tmp_path, replay, manifest)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    ["[]", json.dumps({"generation_id": "x"}), json.dumps({"schema_version": 1})],
+    ids=["not-an-object", "no-version", "no-generation-id"],
+)
+def test_an_unusable_pointer_names_no_generation(tmp_path: Path, payload: str) -> None:
+    pointer_path(tmp_path).parent.mkdir(parents=True, exist_ok=True)
+    pointer_path(tmp_path).write_text(payload, encoding="utf-8")
+
+    assert generations.read_pointer(tmp_path) is None
+
+
+def test_retention_without_an_explicit_current_reads_the_pointer(
+    tmp_path: Path,
+) -> None:
+    published = []
+    for index in range(3):
+        staging, manifest = _stage(tmp_path, entity_ids=[f"m.py::e{index}"])
+        published.append(publish_generation(tmp_path, staging, manifest, retain=99))
+
+    removed = generations.retire_generations(tmp_path, keep=1)
+
+    assert len(removed) == 2
+    assert list_generations(tmp_path) == [published[-1].generation_id]
