@@ -561,6 +561,9 @@ def _check_semantic_index(context: ReadinessContext, checks: list[DoctorCheck]) 
     warnings.extend(vector_inspection.warnings)
     vector_metadata = vector_inspection.metadata
 
+    chunk_failures, _chunk_version = _inspect_chunk_store(index_path)
+    failures.extend(chunk_failures)
+
     expected_embedding = _expected_embedding_config(context.config)
     recorded_embedding = manifest.get("embedding", {})
     if isinstance(recorded_embedding, dict):
@@ -858,6 +861,55 @@ def _read_json_object(path: Path) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ValueError(f"Expected JSON object in {path}.")
     return data
+
+
+def _inspect_chunk_store(
+    index_path: Path,
+) -> tuple[list[str], Optional[int]]:
+    """Validate the chunks.db schema version and embedding column, read-only.
+
+    A legacy v1 chunks.db (no durable embedding column) fails closed with a
+    rebuild instruction, matching the Step 08 chunk-store contract (ADR 3/7).
+    Returns ``(failures, schema_version)``; absent chunks.db is not a failure
+    because older fixtures may carry the legacy chunks.json instead.
+    """
+    chunks_db = index_path / "chunks.db"
+    if not chunks_db.exists():
+        return [], None
+    try:
+        connection = sqlite3.connect(
+            f"file:{chunks_db.resolve()}?mode=ro",
+            uri=True,
+        )
+        try:
+            tables = {
+                row[0]
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                )
+            }
+            if "chunks" not in tables:
+                return (["chunks.db has no chunks table"], None)
+            columns = {
+                row[1] for row in connection.execute("PRAGMA table_info(chunks)")
+            }
+            if "embedding" not in columns or "embedding_dim" not in columns:
+                return (
+                    [
+                        "chunks.db uses a legacy schema without durable "
+                        "embeddings; rebuild the semantic index"
+                    ],
+                    1,
+                )
+            version_row = connection.execute(
+                "SELECT version FROM schema_meta LIMIT 1"
+            ).fetchone()
+            version = int(version_row[0]) if version_row else None
+        finally:
+            connection.close()
+    except (sqlite3.Error, ValueError, TypeError) as exc:
+        return ([f"invalid chunks.db: {exc}"], None)
+    return [], version
 
 
 def _schema_is_current(payload: dict[str, Any], current: int) -> bool:

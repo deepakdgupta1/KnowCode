@@ -1,10 +1,29 @@
 """Repository interface for code chunks."""
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional, Union
 
 from knowcode.data_models import CodeChunk
+
+
+@dataclass(frozen=True)
+class ChunkFileReplacement:
+    """Result of atomically replacing one file's chunk generation.
+
+    ``previous_chunk_ids`` are the IDs that existed for the file before the
+    replacement transaction; ``committed_chunk_ids`` are the IDs that are
+    searchable after it committed. ``generation_metadata`` carries the
+    per-file generation facts (canonical path, counts, and a comparable
+    generation stamp) that complete-generation publication (Step 14) extends
+    into a cross-artifact generation pointer.
+    """
+
+    file_path: str
+    previous_chunk_ids: tuple[str, ...]
+    committed_chunk_ids: tuple[str, ...]
+    generation_metadata: dict[str, Any]
 
 
 class ChunkRepository(ABC):
@@ -47,9 +66,26 @@ class ChunkRepository(ABC):
     @abstractmethod
     def remove_by_file(self, file_path: str) -> list[str]:
         """Remove all chunks associated with the given file path.
-        
+
         Returns:
             List of removed chunk IDs.
+        """
+        pass
+
+    @abstractmethod
+    def replace_file(
+        self, file_path: Union[str, Path], chunks: list[CodeChunk]
+    ) -> ChunkFileReplacement:
+        """Atomically replace every chunk for one canonical file identity.
+
+        The replacement runs as a single writer transaction: either all of
+        ``chunks`` become searchable for ``file_path`` and the previous chunks
+        for that file are removed, or nothing changes. ``file_path`` is
+        normalized to the canonical file identity (ADR 1) so callers may pass
+        a path alias (symlink, ``..`` segment, unresolved ``/var`` form) and
+        still target the rows stored for the resolved source file.
+
+        Returns the previous and committed chunk IDs plus generation metadata.
         """
         pass
 
@@ -94,7 +130,3 @@ class ChunkRepository(ABC):
     def get_all(self) -> list[CodeChunk]:
         """Get all chunks in the repository."""
         pass
-
-
-
-

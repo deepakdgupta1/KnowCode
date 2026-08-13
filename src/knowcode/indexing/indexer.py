@@ -37,7 +37,9 @@ class Indexer:
             vector_store: Optional vector store (defaults to FAISS-backed store).
         """
         self.embedding_provider = embedding_provider
-        self.chunk_repo: ChunkRepository = chunk_repo or SqliteChunkRepository(":memory:")
+        self.chunk_repo: ChunkRepository = chunk_repo or SqliteChunkRepository(
+            ":memory:", dimension=embedding_provider.config.dimension
+        )
         self.vector_store: VectorStoreProtocol
         if vector_store is None:
             from knowcode.storage.vector_store import VectorStore

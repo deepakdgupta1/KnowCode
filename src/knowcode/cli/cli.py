@@ -257,7 +257,10 @@ def index(directory: str, output: str, config: Optional[str], incremental: bool)
         )
         indexer = Indexer(
             provider,
-            chunk_repo=SqliteChunkRepository(index_path / "chunks.db"),
+            chunk_repo=SqliteChunkRepository(
+                index_path / "chunks.db",
+                dimension=provider.config.dimension,
+            ),
             vector_store=vector_store,
         )
 
