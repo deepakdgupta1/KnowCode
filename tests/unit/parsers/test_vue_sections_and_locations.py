@@ -211,6 +211,35 @@ const title = ref('Contract')
     assert _entity(result, "Widget").metadata["vue_api"] == "composition"
 
 
+def test_imports_are_collected_from_every_script_block(tmp_path: Path) -> None:
+    """A plain block's imports must survive alongside a ``setup`` block."""
+    result = _parse_source(
+        tmp_path,
+        """<template>
+  <BaseCard><BaseIcon /></BaseCard>
+</template>
+<script>
+import BaseCard from './BaseCard.vue'
+export default { name: 'Widget' }
+</script>
+<script setup>
+import BaseCard from './BaseCard.vue'
+import BaseIcon from './BaseIcon.vue'
+</script>
+""",
+    )
+
+    imported = [
+        relationship.target_id
+        for relationship in result.relationships
+        if relationship.kind.value == "imports"
+    ]
+    assert sorted(imported) == [
+        "vue_component::BaseCard",
+        "vue_component::BaseIcon",
+    ], "an import repeated across blocks must be emitted once"
+
+
 # ---------------------------------------------------------------------------
 # Malformed sections must be visible, not silently dropped
 # ---------------------------------------------------------------------------
