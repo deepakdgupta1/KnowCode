@@ -228,6 +228,97 @@ one actionable message naming the incompatible artifact and rebuild command.
 No loader silently stamps the current version onto an unverified legacy
 payload.
 
+## Vector contract (Step 10)
+
+Step 10 freezes the `VectorStoreProtocol` mutation and persistence contract
+shared by the FAISS/NumPy and LanceDB backends. It adds no production callers
+and changes neither backend's on-disk format; it makes the existing semantics
+explicit and testable so Steps 11 (FAISS) and 12 (LanceDB) repair backends
+against one shared definition.
+
+### Protocol surface
+
+`VectorStoreProtocol` is `@runtime_checkable`. Conformance is checked with
+`isinstance` (the `dimension: int` data member makes `issubclass` raise
+`TypeError`, as expected for a non-method protocol member). The required members
+are `add`, `upsert`, `flush`, `search`, `get_embedding`, `save`, `load`,
+`clear`, `remove`, `count`, and the `dimension` attribute. `hasattr` is not
+capability negotiation: a missing required member is a contract violation.
+
+`upsert` and `flush` are the only members new to Step 10; `remove` and `count`
+already existed. `upsert(id, embedding)` is the exact-ID idempotent
+add-or-replace. `flush()` is the write-visibility boundary: it is a no-op on
+FAISS/NumPy (which commits each `add` immediately and has no buffer) and drains
+LanceDB's mutable write buffer into the durable table.
+
+### Typed errors
+
+`knowcode.errors` gains three typed exceptions, all deriving from
+`VectorContractError(RuntimeError)`:
+
+- `VectorDimensionError` — raised by `add`/`upsert` when `len(embedding) !=
+  dimension`. Verified against the baseline: a mismatch already failed today,
+  but unhelpfully — FAISS raised a bare `AssertionError` with an empty message,
+  the numpy fallback raised `ValueError` from `np.vstack`, and LanceDB raised a
+  low-level Arrow `ValueError` at *flush* time on an unrelated later call. The
+  contract requires validation at `add`/`upsert` time with a named expected and
+  actual dimension.
+- `VectorArtifactVersionError` — the fail-closed signal a loader raises for a
+  missing, malformed, newer, or unsupported persisted artifact. Step 10 freezes
+  the type and rebuild guidance; Steps 11/12 stamp and validate the version.
+- `VectorContractError` — the base category for the above.
+
+### Locking and snapshot matrix
+
+| Operation | Semantics | Lock ownership |
+| --- | --- | --- |
+| `add`, `upsert`, `remove`, `clear` | serialized mutation | mutation lock |
+| `flush` | serialized with mutation | mutation lock |
+| `search`, `get_embedding`, `count` | snapshot-safe read | read observes one generation |
+| `save`, `load` | serialized with mutation and each other | mutation lock |
+
+A read observes one consistent generation: a buffered or in-flight write is
+either fully visible or not visible at all, and `flush()` is the boundary that
+makes buffered writes visible. Today only LanceDB has a write buffer; its
+`search`, `get_embedding`, `save`, `remove`, and `count` already flush
+internally, and Step 10 exposes that as the required `flush()` member so "when
+is a write visible" is defined rather than accidental. The per-generation
+reader-lease handoff, `close()`, and generation IDs are declared as intent in
+the protocol docstrings and are implemented in Steps 11/12/18; Step 10 does not
+touch the artifact format.
+
+### Deferred defects (strict xfails)
+
+The shared contract suite (`tests/helpers/vector_assertions.py` +
+`tests/unit/storage/test_vector_contract.py`, parametrized over FAISS, the numpy
+fallback, and LanceDB) is green overall. The following desired-contract cases
+fail today and carry named strict `xfail` marks, so each becomes an XPASS
+failure the moment its step repairs the behavior:
+
+| Case | Backends | Repair step |
+| --- | --- | --- |
+| Native-tombstone parity (`index.ntotal == count()`) | VectorStore (FAISS, numpy) | 11 |
+| Removed ID consumes a top-k slot | VectorStore (FAISS, numpy) | 11 |
+| Duplicate `add` of one ID (`count() == 2`) | VectorStore (FAISS, numpy) | 11 |
+| Duplicate `add` of one ID (`count() == 2`) | LanceDB | 12 |
+| Result-ID uniqueness after a duplicate `add` | all three | 11 / 12 |
+| Hostile-ID removal widening (`x' OR true --`) | LanceDB | 12 |
+| Hostile-ID `get_embedding` widening | LanceDB | 12 |
+| Hostile-ID `upsert` widening (inherits `remove`) | LanceDB | 12 |
+
+VectorStore matches IDs exactly, so its hostile-ID cases are green controls;
+LanceDB interpolates repository IDs into SQL-like filters, which is the Step 12
+injection defect.
+
+### Incompatible-artifact policy
+
+Step 10 changes no on-disk artifact: FAISS metadata stays at schema 2, LanceDB
+metadata stays at schema 1, and `vectors.json`, `vectors.index`, `vectors.npy`,
+and `vectors.lancedb` are untouched. An incompatible artifact is rejected with
+`VectorArtifactVersionError` and rebuild guidance once Steps 11/12 stamp and
+validate the version; until then the existing per-backend version checks apply
+unchanged.
+
 ## Baseline evidence
 
 The baseline is `main` at `d239b22` on 2026-08-12. Before Step 01 additions,

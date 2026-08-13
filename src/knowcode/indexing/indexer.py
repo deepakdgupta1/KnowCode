@@ -193,7 +193,9 @@ class Indexer:
                     cached_chunk_id = self.chunk_repo.get_chunk_id_by_hash(c_hash)
                     
                 emb = None
-                if cached_chunk_id and hasattr(self.vector_store, "get_embedding"):
+                if cached_chunk_id:
+                    # get_embedding is a required VectorStoreProtocol member
+                    # (Step 10), so capability detection is no longer needed.
                     emb = self.vector_store.get_embedding(cached_chunk_id)
 
                 if emb is not None:

@@ -5,6 +5,8 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from knowcode.errors import VectorDimensionError
+
 try:
     import lancedb
 except ImportError:
@@ -40,20 +42,41 @@ class LanceDBVectorStore:
 
     def add(self, chunk_id: str, embedding: list[float]) -> None:
         """Add a chunk embedding to the index."""
+        self._require_dimension(embedding)
         self._buffer.append({"id": chunk_id, "vector": embedding})
         if len(self._buffer) >= 1000:
             self._flush()
+
+    def _require_dimension(self, embedding: list[float]) -> None:
+        """Raise VectorDimensionError when the embedding length disagrees.
+
+        LanceDB otherwise raises a low-level Arrow ValueError at *flush* time
+        on an unrelated later call, so validate eagerly at add/upsert time.
+        """
+        actual = len(embedding)
+        if actual != self.dimension:
+            raise VectorDimensionError(self.dimension, actual)
+
+    def upsert(self, chunk_id: str, embedding: list[float]) -> None:
+        """Exact-ID idempotent add-or-replace (remove then add)."""
+        self._require_dimension(embedding)
+        self.remove(chunk_id)
+        self.add(chunk_id, embedding)
+
+    def flush(self) -> None:
+        """Flush the internal buffer so buffered writes are visible to reads."""
+        self._flush()
 
     def _flush(self) -> None:
         """Flush the internal buffer to LanceDB."""
         if not self._buffer:
             return
-            
+
         if self._table is None:
             self._table = self.db.create_table(self.TABLE_NAME, data=self._buffer)
         else:
             self._table.add(self._buffer)
-            
+
         self._buffer = []
 
     def search(self, embedding: list[float], limit: int = 10) -> list[tuple[str, float]]:

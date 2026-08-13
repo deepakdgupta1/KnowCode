@@ -7,6 +7,8 @@ from typing import Any, Optional
 
 import numpy as np
 
+from knowcode.errors import VectorDimensionError
+
 faiss: Any | None
 try:
     faiss = importlib.import_module("faiss")
@@ -89,11 +91,28 @@ class VectorStore:
 
     def add(self, chunk_id: str, embedding: list[float]) -> None:
         """Add a chunk embedding to the index."""
+        self._require_dimension(embedding)
         vec = np.array([embedding]).astype("float32")
         # Add the vector first, then capture the new index position
         self.index.add(vec)
         idx = self.index.ntotal - 1  # the index of the newly added vector
         self.id_map[idx] = chunk_id
+
+    def _require_dimension(self, embedding: list[float]) -> None:
+        """Raise VectorDimensionError when the embedding length disagrees."""
+        actual = len(embedding)
+        if actual != self.dimension:
+            raise VectorDimensionError(self.dimension, actual)
+
+    def upsert(self, chunk_id: str, embedding: list[float]) -> None:
+        """Exact-ID idempotent add-or-replace (remove then add)."""
+        self._require_dimension(embedding)
+        self.remove(chunk_id)
+        self.add(chunk_id, embedding)
+
+    def flush(self) -> None:
+        """No-op: FAISS/NumPy commits each add immediately, with no buffer."""
+        return None
 
     def search(
         self, embedding: list[float], limit: int = 10
