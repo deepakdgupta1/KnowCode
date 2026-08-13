@@ -193,9 +193,15 @@ class Agent:
         force_llm: bool = False,
     ) -> dict[str, Any]:
         """Smart answer with local-first mode.
-        
+
         If context sufficiency >= threshold, returns local answer without LLM.
         Only calls external LLM when context is insufficient.
+
+        The effective threshold is ``max(sufficiency_threshold,
+        routing_quality_floor)``: the independently adjudicated
+        ``routing_quality_floor`` is a hard lower bound, so a policy may set a
+        lower ``sufficiency_threshold`` but local answering is never permitted
+        below the verified floor.
         
         Args:
             query: User's question.
@@ -219,7 +225,10 @@ class Agent:
             initial_task_type.value in self.config.local_answer_task_types
         )
 
-        threshold = self.config.sufficiency_threshold
+        threshold = max(
+            self.config.sufficiency_threshold,
+            self.config.routing_quality_floor,
+        )
 
         if (
             not force_llm
@@ -258,7 +267,10 @@ class Agent:
         )
         confidence = float(retrieval.get("task_confidence", 0.0))
         print(f"  📋 Query type: {task_type.value} (confidence: {confidence:.0%})")
-        print(f"  📊 Sufficiency: {avg_sufficiency:.0%} (threshold: {threshold:.0%})")
+        print(
+            f"  📊 Sufficiency: {avg_sufficiency:.0%} "
+            f"(threshold: {threshold:.0%}, floor: {self.config.routing_quality_floor:.0%})"
+        )
         
         # 3. Decide: local answer or LLM
         if (
@@ -307,6 +319,8 @@ class Agent:
                     "source": res["source"],
                     "sufficiency_score": avg_sufficiency,
                     "threshold": threshold,
+                    "sufficiency_threshold": self.config.sufficiency_threshold,
+                    "routing_quality_floor": self.config.routing_quality_floor,
                     "force_llm": force_llm,
                     "task_type": task_type.value,
                     "routing_policy_allowed": routing_policy_allowed,

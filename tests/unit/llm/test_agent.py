@@ -331,9 +331,12 @@ def test_smart_answer_respects_custom_config_threshold(tmp_path: Path) -> None:
     }
 
     # Set threshold to 0.9. Since sufficiency_score 0.85 < 0.9, it should call LLM.
+    # routing_quality_floor is zeroed to isolate the sufficiency_threshold knob
+    # (otherwise the effective threshold is max(threshold, floor)).
     cfg = AppConfig(
         models=[ModelConfig(name="test-model", provider="google", api_key_env="TEST_KEY")],
         sufficiency_threshold=0.9,
+        routing_quality_floor=0.0,
         local_answer_task_types=[TaskType.EXPLAIN.value],
     )
     agent = Agent(service, cfg)  # type: ignore
@@ -351,6 +354,7 @@ def test_smart_answer_respects_custom_config_threshold(tmp_path: Path) -> None:
     cfg_local = AppConfig(
         models=[ModelConfig(name="test-model", provider="google", api_key_env="TEST_KEY")],
         sufficiency_threshold=0.8,
+        routing_quality_floor=0.0,
         local_answer_task_types=[TaskType.EXPLAIN.value],
     )
     agent_local = Agent(service, cfg_local)  # type: ignore
@@ -374,12 +378,12 @@ def test_smart_answer_emits_telemetry(tmp_path: Path) -> None:
         "total_tokens": 10,
         "max_tokens": 4000,
         "truncated": False,
-        "sufficiency_score": 0.85,
+        "sufficiency_score": 0.95,
         "selected_entities": [{"entity_id": "e1"}],
         "evidence": [],
         "errors": [],
     }
-    
+
     agent = _make_agent(service)
     agent.answer = MagicMock(return_value="LLM")  # type: ignore[method-assign]
     
@@ -408,4 +412,9 @@ def test_smart_answer_emits_telemetry(tmp_path: Path) -> None:
     assert len(agent_decisions) == 1
     assert agent_decisions[0]["query"] == "Explain Foo"
     assert agent_decisions[0]["source"] == "local"
-    assert agent_decisions[0]["sufficiency_score"] == 0.85
+    assert agent_decisions[0]["sufficiency_score"] == 0.95
+    # The effective threshold is max(nominal, floor); both must be logged so the
+    # floor's contribution to the decision is observable.
+    assert agent_decisions[0]["sufficiency_threshold"] == 0.8
+    assert agent_decisions[0]["routing_quality_floor"] == 0.9
+    assert agent_decisions[0]["threshold"] == 0.9
