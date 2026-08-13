@@ -62,6 +62,7 @@ nav:
   - Architecture & Roadmap: architecture/reference_architecture.md
   - Storage Analysis ADR: architecture/json-storage-analysis.md
   - Hardening Contracts: architecture/hardening-contracts.md
+  - Parser Construct Matrix: architecture/parser-construct-matrix.md
   - Workflow Diagrams: diagrams/README.md
   - Retrieval Quality Evals: retrieval-evals.md
   - Observability & Telemetry: observability.md
