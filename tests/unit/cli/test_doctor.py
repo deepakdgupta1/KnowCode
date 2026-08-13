@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import sqlite3
 from pathlib import Path
 
 from click.testing import CliRunner
@@ -185,6 +186,69 @@ def test_doctor_reports_missing_store_and_index(tmp_path: Path) -> None:
     assert "Semantic index" in failed
     assert "knowcode build" in failed["Knowledge store"]["hint"]
     assert "knowcode build" in failed["Semantic index"]["hint"]
+
+
+def _write_legacy_chunks_db(index_dir: Path) -> None:
+    """Write a baseline v1 chunks.db without the embedding column."""
+    conn = sqlite3.connect(str(index_dir / "chunks.db"))
+    conn.execute(
+        "CREATE TABLE chunks (chunk_id TEXT UNIQUE, entity_id TEXT, "
+        "content TEXT, tokens_text TEXT, metadata_json TEXT, file_path TEXT)"
+    )
+    conn.execute(
+        "INSERT INTO chunks (chunk_id, entity_id, content, tokens_text, "
+        "metadata_json, file_path) VALUES ('c1', '/x.py::X', 'c', 't', '{}', '/x.py')"
+    )
+    conn.commit()
+    conn.close()
+
+
+def test_doctor_fails_closed_on_legacy_chunks_db(tmp_path: Path) -> None:
+    config = tmp_path / "aimodels.yaml"
+    _write_config(config)
+    _write_store(tmp_path)
+    _write_index(tmp_path / "knowcode_index")
+    # Overwrite the index dir with a legacy chunks.db that lacks embeddings.
+    _write_legacy_chunks_db(tmp_path / "knowcode_index")
+
+    result = CliRunner().invoke(
+        cli_module.cli,
+        ["doctor", "--store", str(tmp_path), "--config", str(config), "--json"],
+    )
+
+    payload = json.loads(result.output)
+    semantic = next(
+        check for check in payload["checks"] if check["name"] == "Semantic index"
+    )
+    assert semantic["status"] == "fail"
+    assert "chunks" in semantic["message"].lower()
+    assert "knowcode build" in semantic["hint"]
+
+
+def test_doctor_passes_with_current_chunks_db(tmp_path: Path) -> None:
+    from knowcode.storage.sqlite_chunk_repository import SqliteChunkRepository
+
+    config = tmp_path / "aimodels.yaml"
+    _write_config(config)
+    _write_store(tmp_path)
+    index_dir = tmp_path / "knowcode_index"
+    _write_index(index_dir)
+    # Replace the legacy chunks.json fixture with a current-schema chunks.db.
+    (index_dir / "chunks.json").unlink()
+    repo = SqliteChunkRepository(index_dir / "chunks.db")
+    repo.close()
+
+    result = CliRunner().invoke(
+        cli_module.cli,
+        ["doctor", "--store", str(tmp_path), "--config", str(config), "--json"],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    semantic = next(
+        check for check in payload["checks"] if check["name"] == "Semantic index"
+    )
+    assert semantic["status"] == "pass"
 
 
 def test_doctor_missing_optional_dependencies_points_to_ideal_install(
