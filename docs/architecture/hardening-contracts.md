@@ -295,16 +295,20 @@ fallback, and LanceDB) is green overall. The following desired-contract cases
 fail today and carry named strict `xfail` marks, so each becomes an XPASS
 failure the moment its step repairs the behavior:
 
-| Case | Backends | Repair step |
-| --- | --- | --- |
-| Native-tombstone parity (`index.ntotal == count()`) | VectorStore (FAISS, numpy) | 11 |
-| Removed ID consumes a top-k slot | VectorStore (FAISS, numpy) | 11 |
-| Duplicate `add` of one ID (`count() == 2`) | VectorStore (FAISS, numpy) | 11 |
-| Duplicate `add` of one ID (`count() == 2`) | LanceDB | 12 |
-| Result-ID uniqueness after a duplicate `add` | all three | 11 / 12 |
-| Hostile-ID removal widening (`x' OR true --`) | LanceDB | 12 |
-| Hostile-ID `get_embedding` widening | LanceDB | 12 |
-| Hostile-ID `upsert` widening (inherits `remove`) | LanceDB | 12 |
+| Case | Backends | Repair step | State |
+| --- | --- | --- | --- |
+| Native-tombstone parity (`index.ntotal == count()`) | VectorStore (FAISS, numpy) | 11 | closed |
+| Removed ID consumes a top-k slot | VectorStore (FAISS, numpy) | 11 | closed |
+| Duplicate `add` of one ID (`count() == 2`) | VectorStore (FAISS, numpy) | 11 | closed |
+| Duplicate `add` of one ID (`count() == 2`) | LanceDB | 12 | open |
+| Result-ID uniqueness after a duplicate `add` | VectorStore (FAISS, numpy) | 11 | closed |
+| Result-ID uniqueness after a duplicate `add` | LanceDB | 12 | open |
+| Hostile-ID removal widening (`x' OR true --`) | LanceDB | 12 | open |
+| Hostile-ID `get_embedding` widening | LanceDB | 12 | open |
+| Hostile-ID `upsert` widening (inherits `remove`) | LanceDB | 12 | open |
+
+Closed rows are live gates in `test_vector_contract.py`, not xfails: each one
+XPASS-failed the moment Step 11 landed, which is what the strict marks were for.
 
 VectorStore matches IDs exactly, so its hostile-ID cases are green controls;
 LanceDB interpolates repository IDs into SQL-like filters, which is the Step 12
@@ -318,6 +322,78 @@ and `vectors.lancedb` are untouched. An incompatible artifact is rejected with
 `VectorArtifactVersionError` and rebuild guidance once Steps 11/12 stamp and
 validate the version; until then the existing per-backend version checks apply
 unchanged.
+
+## FAISS/NumPy backend (Step 11)
+
+Step 11 repairs the reviewed removal defect in `VectorStore`, the one class that
+covers both the FAISS engine and its numpy fallback.
+
+### ID-aware native index
+
+`remove()` used to delete only the `id_map` entry, so the vector stayed in the
+native index. Both engines are now ID-aware and removal deletes the row itself:
+
+* FAISS wraps `IndexFlatIP` in `IndexIDMap2`, giving `add_with_ids`,
+  `remove_ids`, and `reconstruct` by assigned ID.
+* `MockVectorStore` mirrors that surface with numpy, deriving `ntotal` from the
+  row count so it cannot drift, and returning native IDs (not row positions)
+  from `search`.
+
+Tombstones are removed, never hidden by overfetching or by filtering a larger
+top-k. `count()` equals the native row count, and a removed ID frees its top-k
+slot for the next live result.
+
+### Exact-ID assignment
+
+Each chunk ID maps to one monotonically assigned native ID (`id_map` is native
+ID → chunk ID, with a private reverse map). `add()` is exact-ID *add-or-replace*
+and shares one code path with `upsert()`: re-indexing a chunk replaces its
+single live row rather than adding a second row that would occupy a result slot
+and double the chunk's weight in fusion scoring. ID assignment resumes above
+every persisted native ID after a load, so a reused ID cannot collide.
+
+### Locking
+
+One re-entrant lock serializes `add`, `upsert`, `remove`, `clear`, `search`,
+`get_embedding`, `count`, `save`, and `load`, which satisfies the Step 10
+matrix: mutations are serialized and reads observe one generation. `flush()`
+remains a no-op — every mutation commits immediately, and there is no buffer.
+
+### Metadata envelope, schema 3
+
+`vectors.json` records `schema_version`, `backend` (`faiss`, the registry key
+shared by both engines), `engine` (`faiss` or `numpy`, the artifact's actual
+writer), `dimension`, live `count`, `generation`, `next_native_id`, and
+`id_map`. The numpy engine additionally records `row_ids`, the native ID of each
+saved `.npy` row in order, because — unlike a FAISS artifact — the `.npy` file
+carries no IDs of its own.
+
+`load()` validates the whole set before adopting any of it:
+
+| Check | Rejected when |
+| --- | --- |
+| Envelope version | missing, malformed, legacy (1/2), or newer than 3 |
+| Engine | the artifact was written by the other engine |
+| Native artifact | `vectors.json` exists without its `.index`/`.npy`, or the reverse |
+| Dimension | the declared dimension disagrees with the loaded index |
+| ID-map/native parity | the mapped IDs are not exactly the index's native IDs |
+| Declared count | `count` disagrees with the ID map it summarizes |
+| Duplicate chunk IDs | two native IDs map to one chunk ID |
+
+Every rejection raises `VectorArtifactVersionError` naming the artifact and the
+`knowcode build` rebuild command. A path with no vector artifacts at all still
+loads as an empty index, which is how a fresh `Indexer` reads a directory that
+was never saved.
+
+Schema 1 and 2 envelopes are no longer migrated in memory. A v1/v2 artifact
+describes a plain `IndexFlatIP` whose rows carry no native IDs, so its ID map
+cannot be verified against the index; adopting it is exactly the drift this step
+removes. `knowcode doctor` reports such an artifact as a failure with rebuild
+guidance rather than as a migration warning.
+
+Artifact checksums, which ADR 7 lists in the same row, stay with Steps 13 and 14:
+they belong to the crash-safe writer and the cross-artifact generation
+validation, not to one backend's envelope.
 
 ## Baseline evidence
 
