@@ -16,6 +16,7 @@ from knowcode.data_models import (
     ParseResult,
     Relationship,
 )
+from knowcode.utils.entity_identity import build_internal_entity_id
 
 
 class TreeSitterParser:
@@ -72,7 +73,7 @@ class TreeSitterParser:
 
         # Create module entity
         module_name = file_path.stem
-        module_id = f"{file_path}::{module_name}"
+        module_id = build_internal_entity_id(file_path, module_name)
         module_entity = Entity(
             id=module_id,
             kind=EntityKind.MODULE,
@@ -87,11 +88,12 @@ class TreeSitterParser:
         entities.append(module_entity)
 
         # Delegate to language-specific extraction
-        child_entities, child_rels = self._extract_entities(
+        child_entities, child_rels, child_errors = self._extract_file(
             tree.root_node, file_path, module_id, source_code, source_lines
         )
         entities.extend(child_entities)
         relationships.extend(child_rels)
+        errors.extend(child_errors)
 
         # Handle errors from tree-sitter
         if tree.root_node.has_error:
@@ -105,6 +107,24 @@ class TreeSitterParser:
             relationships=relationships,
             errors=errors,
         )
+
+    def _extract_file(
+        self,
+        node: Any,
+        file_path: Path,
+        parent_id: str,
+        source_code: str,
+        source_lines: list[str],
+    ) -> tuple[list[Entity], list[Relationship], list[str]]:
+        """Extract a whole file, including any classified parser limitations.
+
+        Subclasses that need to report limitations override this method; the
+        default delegates to ``_extract_entities`` and reports nothing.
+        """
+        entities, relationships = self._extract_entities(
+            node, file_path, parent_id, source_code, source_lines
+        )
+        return entities, relationships, []
 
     def _extract_entities(
         self,
@@ -161,7 +181,7 @@ class TreeSitterParser:
         node_source = "\n".join(source_lines[start_line:end_line])
 
         return Entity(
-            id=f"{file_path}::{qualified_name}",
+            id=build_internal_entity_id(file_path, qualified_name),
             kind=kind,
             name=name,
             qualified_name=qualified_name,
