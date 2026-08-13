@@ -422,6 +422,34 @@ import { UserProfile } from '@/components'
     }
 
 
+def test_aliased_and_namespace_import_clauses_bind_their_local_names(
+    parser: VueParser, tmp_path: Path
+) -> None:
+    path = write_component(
+        tmp_path,
+        "Clauses",
+        """<template><div /></template>
+<script setup>
+import { BaseCard as Card } from './widgets'
+import * as helpers from './helpers'
+import DefaultCard, { Sidebar } from './layout'
+</script>
+""",
+    )
+
+    result = parser.parse_file(path)
+
+    imports = {
+        edge.target_id
+        for edge in result.relationships
+        if edge.kind is RelationshipKind.IMPORTS
+    }
+    assert imports == {
+        build_external_reference_id("vue_component", name)
+        for name in ("Card", "helpers", "DefaultCard", "Sidebar")
+    }
+
+
 def test_composable_calls_are_external_unless_declared_locally(
     parser: VueParser, tmp_path: Path
 ) -> None:

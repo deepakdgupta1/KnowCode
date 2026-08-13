@@ -4,7 +4,64 @@ from pathlib import Path
 import tempfile
 
 from knowcode.parsers.vue_parser import VueParser
-from knowcode.data_models import EntityKind, RelationshipKind
+from knowcode.data_models import EntityKind, ParseResult, RelationshipKind
+from knowcode.utils.entity_identity import build_external_reference_id
+
+
+# ============================================================================
+# SHARED ASSERTION HELPERS
+# ============================================================================
+#
+# Vue entity IDs are canonical ``<file>::<qualified name>`` values, so a test
+# cannot identify a declaration by an ID substring. Declarations are selected by
+# their recorded semantic category, and edges are checked against the entity the
+# same parse produced rather than against a name appearing somewhere in a target
+# string.
+
+
+def declarations_of(result: ParseResult, declaration_type: str) -> list:
+    """Return entities the parser classified as ``declaration_type``."""
+    return [
+        entity
+        for entity in result.entities
+        if entity.metadata.get("declaration_type") == declaration_type
+    ]
+
+
+def declaration_names(result: ParseResult, declaration_type: str) -> set[str]:
+    return {entity.name for entity in declarations_of(result, declaration_type)}
+
+
+def entity_named(result: ParseResult, name: str):
+    """Return the single entity called ``name``, failing if it is not unique."""
+    matches = [entity for entity in result.entities if entity.name == name]
+    assert len(matches) == 1, (
+        f"expected exactly one entity named {name!r}, got "
+        f"{[e.qualified_name for e in result.entities]}"
+    )
+    return matches[0]
+
+
+def binding_targets(result: ParseResult, kind: RelationshipKind, binding_type: str) -> set[str]:
+    """Return the endpoints of every template or style edge of one binding type."""
+    return {
+        relationship.target_id
+        for relationship in result.relationships
+        if relationship.kind is kind
+        and relationship.metadata.get("binding_type") == binding_type
+    }
+
+
+def assert_binds_to_entities(
+    result: ParseResult,
+    kind: RelationshipKind,
+    binding_type: str,
+    names: set[str],
+) -> None:
+    """Assert one edge per name, each resolving to that name's real entity."""
+    assert binding_targets(result, kind, binding_type) == {
+        entity_named(result, name).id for name in names
+    }
 
 
 # ============================================================================
@@ -78,14 +135,18 @@ function handleClick() {
         result = parser.parse_file(temp_path)
 
         # Find ref entities
-        refs = [e for e in result.entities if e.kind == EntityKind.VARIABLE and "ref::" in e.id]
-        ref_names = {r.name for r in refs}
-        assert "message" in ref_names
-        assert "count" in ref_names
+        refs = {
+            entity.name
+            for entity in result.entities
+            if entity.kind == EntityKind.VARIABLE
+            and entity.metadata.get("is_reactive") == "true"
+        }
+        assert refs == {"message", "count"}
 
-        # Find event handler relationship
-        event_rels = [r for r in result.relationships if r.kind == RelationshipKind.CALLS and "handleClick" in r.target_id]
-        assert len(event_rels) >= 1
+        # The event handler must resolve to the extracted function itself.
+        assert_binds_to_entities(
+            result, RelationshipKind.CALLS, "event", {"handleClick"}
+        )
     finally:
         temp_path.unlink()
 
@@ -114,11 +175,7 @@ const props = defineProps({
     try:
         result = parser.parse_file(temp_path)
 
-        # Find prop entities
-        props = [e for e in result.entities if "prop::" in e.id]
-        prop_names = {p.name for p in props}
-        assert "title" in prop_names
-        assert "count" in prop_names
+        assert declaration_names(result, "prop") == {"title", "count"}
     finally:
         temp_path.unlink()
 
@@ -144,11 +201,13 @@ const emit = defineEmits(['update', 'close'])
     try:
         result = parser.parse_file(temp_path)
 
-        # Find emit entities
-        emits = [e for e in result.entities if "emit::" in e.id]
-        emit_names = {e.name for e in emits}
-        assert "update" in emit_names
-        assert "close" in emit_names
+        assert declaration_names(result, "emit") == {"update", "close"}
+        # Events live in their own name space so they cannot collide with a
+        # method or ref of the same name.
+        component = result.entities[0].qualified_name
+        assert {
+            entity.qualified_name for entity in declarations_of(result, "emit")
+        } == {f"{component}.emits.update", f"{component}.emits.close"}
     finally:
         temp_path.unlink()
 
@@ -181,11 +240,7 @@ export default {
     try:
         result = parser.parse_file(temp_path)
 
-        # Find data properties
-        data_props = [e for e in result.entities if "data::" in e.id]
-        data_names = {d.name for d in data_props}
-        assert "message" in data_names
-        assert "count" in data_names
+        assert declaration_names(result, "data") == {"message", "count"}
     finally:
         temp_path.unlink()
 
@@ -223,15 +278,14 @@ export default {
     try:
         result = parser.parse_file(temp_path)
 
-        # Find method entities
-        methods = [e for e in result.entities if e.kind == EntityKind.FUNCTION]
-        method_names = {m.name for m in methods}
-        assert "increment" in method_names
-        assert "reset" in method_names
+        # Options API methods are class-body callables, so they are methods.
+        methods = declarations_of(result, "method")
+        assert {method.name for method in methods} == {"increment", "reset"}
+        assert {method.kind for method in methods} == {EntityKind.METHOD}
 
-        # Check event handler relationship
-        event_rels = [r for r in result.relationships if r.kind == RelationshipKind.CALLS and "increment" in r.target_id]
-        assert len(event_rels) >= 1
+        assert_binds_to_entities(
+            result, RelationshipKind.CALLS, "event", {"increment"}
+        )
     finally:
         temp_path.unlink()
 
@@ -267,11 +321,8 @@ export default {
     try:
         result = parser.parse_file(temp_path)
 
-        # Find computed properties
-        computed = [e for e in result.entities if "computed::" in e.id]
-        computed_names = {c.name for c in computed}
-        assert "fullName" in computed_names
-        assert "reversedName" in computed_names
+        computed_names = declaration_names(result, "computed")
+        assert {"fullName", "reversedName"} <= computed_names
     finally:
         temp_path.unlink()
 
@@ -369,10 +420,10 @@ const email = ref('')
     try:
         result = parser.parse_file(temp_path)
 
-        # Find v-model relationships
-        model_rels = [r for r in result.relationships if r.kind == RelationshipKind.REFERENCES and "data::" in r.target_id]
-        # At least username and email should be referenced
-        assert len(model_rels) >= 2
+        # Both bindings must resolve to the refs the same parse extracted.
+        assert_binds_to_entities(
+            result, RelationshipKind.REFERENCES, "model", {"username", "email"}
+        )
     finally:
         temp_path.unlink()
 
@@ -410,10 +461,12 @@ const user = ref<User>({ name: 'John', age: 30 })
         assert len(result.errors) == 0
 
         # Find ref entities
-        refs = [e for e in result.entities if "ref::" in e.id]
-        ref_names = {r.name for r in refs}
-        assert "message" in ref_names
-        assert "user" in ref_names
+        refs = {
+            entity.name
+            for entity in result.entities
+            if entity.metadata.get("is_reactive") == "true"
+        }
+        assert {"message", "user"} <= refs
     finally:
         temp_path.unlink()
 
@@ -536,35 +589,36 @@ function goBack() {
         assert len(result.entities) > 5
 
         # Check props
-        props = [e for e in result.entities if "prop::" in e.id]
-        prop_names = {p.name for p in props}
-        assert "firstName" in prop_names
-        assert "lastName" in prop_names
-        assert "initialAge" in prop_names
+        assert {"firstName", "lastName", "initialAge"} <= declaration_names(
+            result, "prop"
+        )
 
         # Check emits
-        emits = [e for e in result.entities if "emit::" in e.id]
-        emit_names = {e.name for e in emits}
-        assert "update" in emit_names
-        assert "navigate" in emit_names
+        assert {"update", "navigate"} <= declaration_names(result, "emit")
 
         # Check refs
-        refs = [e for e in result.entities if "ref::" in e.id]
-        ref_names = {r.name for r in refs}
-        assert "age" in ref_names
-        assert "nickname" in ref_names
+        refs = {
+            entity.name
+            for entity in result.entities
+            if entity.metadata.get("is_reactive") == "true"
+        }
+        assert {"age", "nickname"} <= refs
 
-        # Check composable usage
-        composable_calls = [r for r in result.relationships if "composable::useRouter" in r.target_id]
-        assert len(composable_calls) >= 1
+        # Check composable usage. useRouter is imported, not declared here, so
+        # it stays an explicit external reference.
+        assert build_external_reference_id("composable", "useRouter") in {
+            relationship.target_id for relationship in result.relationships
+        }
 
-        # Check event handlers
-        event_handlers = [r for r in result.relationships if r.kind == RelationshipKind.CALLS and "incrementAge" in r.target_id]
-        assert len(event_handlers) >= 1
-
-        # Check v-model
-        v_models = [r for r in result.relationships if r.kind == RelationshipKind.REFERENCES and "nickname" in r.target_id]
-        assert len(v_models) >= 1
+        # Check event handlers and v-model resolve to real entities
+        assert (
+            entity_named(result, "incrementAge").id
+            in binding_targets(result, RelationshipKind.CALLS, "event")
+        )
+        assert (
+            entity_named(result, "nickname").id
+            in binding_targets(result, RelationshipKind.REFERENCES, "model")
+        )
     finally:
         temp_path.unlink()
 
@@ -825,13 +879,9 @@ const props = defineProps<{
         result = parser.parse_file(temp_path)
 
         # Check that props are extracted
-        prop_entities = [e for e in result.entities if "::prop::" in e.id]
-        prop_names = {e.name for e in prop_entities}
-
-        assert "title" in prop_names
-        assert "count" in prop_names
-        assert "isActive" in prop_names
-        assert "user" in prop_names
+        assert {"title", "count", "isActive", "user"} <= declaration_names(
+            result, "prop"
+        )
 
     finally:
         temp_path.unlink()
@@ -921,7 +971,7 @@ export default {
         assert component.metadata["vue_api"] == "options"
 
         # Check data property metadata
-        count_entity = [e for e in result.entities if e.name == "count" and "::data::" in e.id][0]
+        count_entity = entity_named(result, "count")
         assert count_entity.metadata["vue_api"] == "options"
         assert count_entity.metadata["declaration_type"] == "data"
         assert count_entity.metadata["is_reactive"] == "true"
@@ -1049,26 +1099,14 @@ function doSomething(arg) {}
     try:
         result = parser.parse_file(temp_path)
 
-        # Check event handler relationships
-        handler_rels = [
-            r for r in result.relationships
-            if r.kind == RelationshipKind.CALLS
-            and "::method::" in r.target_id or "::function::" in r.target_id
-        ]
-
-        # Should only have 3 valid method handlers
-        handler_names = [r.target_id.split("::")[-1] for r in handler_rels]
-
-        assert "handleClick" in handler_names
-        assert "onSubmit" in handler_names
-        assert "doSomething" in handler_names
-
-        # Should NOT have these
-        assert "count" not in handler_names
-        assert "isActive" not in handler_names
-        assert "value" not in handler_names
-        assert "item" not in handler_names
-        assert "$emit" not in handler_names
+        # Inline expressions are not handlers, so exactly the three declared
+        # functions may be event targets, each resolved to its own entity.
+        assert_binds_to_entities(
+            result,
+            RelationshipKind.CALLS,
+            "event",
+            {"handleClick", "onSubmit", "doSomething"},
+        )
 
     finally:
         temp_path.unlink()
@@ -1107,21 +1145,13 @@ const primaryColor = ref('#409eff')
     try:
         result = parser.parse_file(temp_path)
 
-        # Check CSS binding relationships
-        css_binding_rels = [
-            r for r in result.relationships
-            if r.kind == RelationshipKind.REFERENCES
-            and r.metadata.get("binding_type") == "css_variable"
-        ]
-
-        # Should have 3 CSS bindings
-        assert len(css_binding_rels) >= 3
-
-        bound_vars = [r.target_id.split("::")[-1] for r in css_binding_rels]
-
-        assert "themeColor" in bound_vars
-        assert "fontSize" in bound_vars
-        assert "primaryColor" in bound_vars
+        # Each bound name must resolve to the ref the same parse extracted.
+        assert_binds_to_entities(
+            result,
+            RelationshipKind.REFERENCES,
+            "css_variable",
+            {"themeColor", "fontSize", "primaryColor"},
+        )
 
     finally:
         temp_path.unlink()
@@ -1156,18 +1186,14 @@ const borderWidth = ref('2px')
     try:
         result = parser.parse_file(temp_path)
 
-        # Check that kebab-case is converted to camelCase
-        css_binding_rels = [
-            r for r in result.relationships
-            if r.kind == RelationshipKind.REFERENCES
-            and r.metadata.get("binding_type") == "css_variable"
-        ]
-
-        bound_vars = [r.target_id.split("::")[-1] for r in css_binding_rels]
-
-        # Should be camelCase
-        assert "primaryColor" in bound_vars
-        assert "borderWidth" in bound_vars
+        # Kebab-case is converted to camelCase, so both bindings resolve to the
+        # camelCase refs rather than becoming unresolved references.
+        assert_binds_to_entities(
+            result,
+            RelationshipKind.REFERENCES,
+            "css_variable",
+            {"primaryColor", "borderWidth"},
+        )
 
     finally:
         temp_path.unlink()
@@ -1243,8 +1269,14 @@ let isActive = true
         temp_path.unlink()
 
 
-def test_arrow_function_id_format():
-    """Test that arrow functions have correct ID format (::function:: not ::const::)."""
+def test_declaration_kind_is_metadata_not_id_syntax():
+    """Arrow functions and plain constants share the canonical ID shape.
+
+    The declaration category used to be encoded in the ID as ``::function::`` or
+    ``::const::``, which produced internal-looking endpoints that matched no
+    entity. Category now travels in the entity's kind and metadata, while the ID
+    stays ``<file>::<qualified name>``.
+    """
     vue_code = """
 <template>
   <div>Test</div>
@@ -1265,15 +1297,17 @@ const regularVar = 123
     try:
         result = parser.parse_file(temp_path)
 
-        # Check arrow function ID
-        arrow_funcs = [e for e in result.entities if e.name == "myArrowFunc"]
-        assert len(arrow_funcs) == 1
-        assert "::function::" in arrow_funcs[0].id
+        component = result.entities[0]
 
-        # Check regular variable ID
-        regular_vars = [e for e in result.entities if e.name == "regularVar"]
-        assert len(regular_vars) == 1
-        assert "::const::" in regular_vars[0].id
+        arrow_func = entity_named(result, "myArrowFunc")
+        assert arrow_func.kind == EntityKind.FUNCTION
+        assert arrow_func.metadata["declaration_type"] == "function"
+        assert arrow_func.id == f"{component.id}.myArrowFunc"
+
+        regular_var = entity_named(result, "regularVar")
+        assert regular_var.kind == EntityKind.VARIABLE
+        assert regular_var.metadata["declaration_type"] == "const"
+        assert regular_var.id == f"{component.id}.regularVar"
 
     finally:
         temp_path.unlink()
@@ -1313,23 +1347,11 @@ function increment() {}
     try:
         result = parser.parse_file(temp_path)
 
-        # Check event handler relationships
-        handler_rels = [
-            r for r in result.relationships
-            if r.kind == RelationshipKind.CALLS
-        ]
-
-        handler_names = [r.target_id.split("::")[-1] for r in handler_rels]
-
-        # Should only capture valid method handlers
-        assert "reset" in handler_names
-        assert "increment" in handler_names
-
-        # Should NOT capture these complex expressions
-        assert "search" not in handler_names
-        assert "items" not in handler_names
-        assert "console" not in handler_names
-        assert "$event" not in handler_names
+        # Only the two declared functions are handlers; every inline expression
+        # is filtered out rather than becoming an edge to an invented endpoint.
+        assert_binds_to_entities(
+            result, RelationshipKind.CALLS, "event", {"reset", "increment"}
+        )
 
     finally:
         temp_path.unlink()
@@ -1396,26 +1418,16 @@ function multiply(a, b) {
         assert "handleReset" in func_names
         assert "multiply" in func_names
 
-        # 2. Check event handlers are filtered correctly
-        handler_rels = [
-            r for r in result.relationships
-            if r.kind == RelationshipKind.CALLS
-        ]
-        handler_names = [r.target_id.split("::")[-1] for r in handler_rels]
-        assert "increment" in handler_names
-        assert "handleReset" in handler_names
-        # Should NOT have inline expressions
-        assert "count" not in handler_names
-        assert "$emit" not in handler_names
+        # 2. Check event handlers are filtered and resolved correctly
+        assert_binds_to_entities(
+            result, RelationshipKind.CALLS, "event", {"increment", "handleReset"}
+        )
 
-        # 3. Check CSS variable bindings
-        css_binding_rels = [
-            r for r in result.relationships
-            if r.kind == RelationshipKind.REFERENCES
-            and r.metadata.get("binding_type") == "css_variable"
-        ]
-        # Should have 2 CSS bindings (both themeColor)
-        assert len(css_binding_rels) >= 1
+        # 3. Check CSS variable bindings. The same name is bound twice, so it
+        # must produce exactly one edge to the ref's entity.
+        assert_binds_to_entities(
+            result, RelationshipKind.REFERENCES, "css_variable", {"themeColor"}
+        )
 
     finally:
         temp_path.unlink()

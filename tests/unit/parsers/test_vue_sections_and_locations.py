@@ -20,6 +20,7 @@ import pytest
 
 from knowcode.data_models import Entity, ParseResult
 from knowcode.parsers.vue_parser import VueParser
+from knowcode.utils.entity_identity import build_external_reference_id
 
 
 FIXTURE_ROOT = Path(__file__).parents[2] / "fixtures" / "parser_contracts" / "vue"
@@ -235,8 +236,8 @@ import BaseIcon from './BaseIcon.vue'
         if relationship.kind.value == "imports"
     ]
     assert sorted(imported) == [
-        "vue_component::BaseCard",
-        "vue_component::BaseIcon",
+        build_external_reference_id("vue_component", "BaseCard"),
+        build_external_reference_id("vue_component", "BaseIcon"),
     ], "an import repeated across blocks must be emitted once"
 
 
