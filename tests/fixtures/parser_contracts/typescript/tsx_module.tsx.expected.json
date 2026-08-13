@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "language": "typescript",
+  "entities": [
+    {"qualified_name": "tsx_module", "kind": "module", "line_start": 1, "line_end": 7},
+    {"qualified_name": "Card", "kind": "class", "line_start": 1, "line_end": 3},
+    {"qualified_name": "render", "kind": "function", "line_start": 5, "line_end": 7}
+  ],
+  "relationships": [
+    {"source": "tsx_module", "target": {"classification": "internal", "qualified_name": "Card"}, "kind": "contains"},
+    {"source": "tsx_module", "target": {"classification": "internal", "qualified_name": "render"}, "kind": "contains"}
+  ]
+}

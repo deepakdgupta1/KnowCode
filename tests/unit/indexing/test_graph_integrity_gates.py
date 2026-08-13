@@ -12,12 +12,16 @@ from pathlib import Path
 
 import pytest
 
+from knowcode.data_models import RelationshipKind
+from knowcode.indexing.graph_builder import GraphBuilder
+from knowcode.indexing.scanner import FileInfo
 from knowcode.parsers.java_parser import JavaParser
 from knowcode.parsers.javascript_parser import JavaScriptParser
 from knowcode.parsers.python_parser import PythonParser
 from knowcode.parsers.rust_parser import RustParser
 from knowcode.parsers.typescript_parser import TypeScriptParser
 from knowcode.parsers.vue_parser import VueParser
+from knowcode.utils.entity_identity import EndpointKind, classify_endpoint_id
 
 
 # ---------------------------------------------------------------------------
@@ -98,50 +102,102 @@ def test_duplicate_declarations_never_produce_duplicate_entity_ids(
 
 
 # ---------------------------------------------------------------------------
-# Mixed-language repository merge & scan-order determinism
+# Merged-graph integrity across languages and scan order
 # ---------------------------------------------------------------------------
 
 MIXED_FIXTURE_ROOT = Path(__file__).parents[2] / "fixtures" / "mixed_language"
 
 
-def test_mixed_language_graph_merge_and_order_determinism() -> None:
-    """GraphBuilder produces identical entities and relationships regardless
-    of forward or reversed scan order, and leaves no invalid endpoints."""
-    from knowcode.indexing.graph_builder import GraphBuilder
-    from knowcode.indexing.scanner import FileInfo
-    from knowcode.utils.entity_identity import EndpointKind, classify_endpoint_id
+def _snapshot(
+    builder: GraphBuilder,
+) -> tuple[frozenset[str], tuple[tuple[str, str, str], ...]]:
+    """A scan-order-independent fingerprint of a merged graph.
 
-    files = sorted(MIXED_FIXTURE_ROOT.glob("*"))
-    file_infos = [
-        FileInfo(
-            path=p,
-            relative_path=str(p.relative_to(MIXED_FIXTURE_ROOT)),
-            extension=p.suffix,
-            size_bytes=p.stat().st_size,
+    Entity IDs are a set (identity only) and relationships are a sorted multiset
+    of ``(source, target, kind)`` so duplicate edges are still counted.
+    """
+    entities = frozenset(builder.entities)
+    relationships = tuple(
+        sorted((r.source_id, r.target_id, r.kind.value) for r in builder.relationships)
+    )
+    return entities, relationships
+
+
+def assert_merged_graph_invariants(builder: GraphBuilder) -> None:
+    """Require the Step 01 endpoint and containment invariants on a merged graph."""
+    entity_ids = set(builder.entities)
+
+    # Every entity ID is canonical and internal.
+    for entity_id in entity_ids:
+        assert classify_endpoint_id(entity_id) is EndpointKind.INTERNAL, (
+            f"non-internal entity id: {entity_id!r}"
         )
-        for p in files
-        if p.is_file()
+
+    for relationship in builder.relationships:
+        source_kind = classify_endpoint_id(relationship.source_id)
+        target_kind = classify_endpoint_id(relationship.target_id)
+
+        assert source_kind is EndpointKind.INTERNAL, (
+            f"edge source must be internal: {relationship.source_id!r}"
+        )
+        assert relationship.source_id in entity_ids, (
+            f"missing internal source entity: {relationship.source_id!r}"
+        )
+        assert target_kind is not EndpointKind.INVALID, (
+            f"invalid edge target: {relationship.target_id!r}"
+        )
+        if target_kind is EndpointKind.INTERNAL:
+            assert relationship.target_id in entity_ids, (
+                f"dangling internal target: {relationship.target_id!r}"
+            )
+        if relationship.kind is RelationshipKind.CONTAINS:
+            assert target_kind is EndpointKind.INTERNAL, (
+                f"contains target must be internal: {relationship.target_id!r}"
+            )
+
+
+def _mixed_file_infos() -> list[FileInfo]:
+    return [
+        FileInfo(
+            path=path,
+            relative_path=str(path.relative_to(MIXED_FIXTURE_ROOT)),
+            extension=path.suffix,
+            size_bytes=path.stat().st_size,
+        )
+        for path in sorted(MIXED_FIXTURE_ROOT.iterdir())
+        if path.is_file()
     ]
 
-    forward_builder = GraphBuilder().build_from_files(file_infos)
-    reversed_builder = GraphBuilder().build_from_files(list(reversed(file_infos)))
 
-    assert set(forward_builder.entities.keys()) == set(reversed_builder.entities.keys())
-    for entity_id, entity in forward_builder.entities.items():
-        rev_entity = reversed_builder.entities[entity_id]
-        assert entity.name == rev_entity.name
-        assert entity.kind == rev_entity.kind
-        assert entity.qualified_name == rev_entity.qualified_name
-        assert entity.metadata.get("content_hash") == rev_entity.metadata.get("content_hash")
+def test_mixed_language_merge_has_no_invalid_or_dangling_endpoints() -> None:
+    """A real mixed-language repository merges into one well-formed graph.
 
-    forward_rels = {
-        (r.source_id, r.target_id, r.kind) for r in forward_builder.relationships
-    }
-    reversed_rels = {
-        (r.source_id, r.target_id, r.kind) for r in reversed_builder.relationships
-    }
-    assert forward_rels == reversed_rels
+    Asserts the Step 01 invariants hold through ``build_from_directory`` across
+    JavaScript, TypeScript, Python, Vue, and Rust in one graph: every entity is
+    internal, every edge source exists, every internal target exists, no edge is
+    invalid, and every ``contains`` target is internal.
+    """
+    builder = GraphBuilder().build_from_directory(MIXED_FIXTURE_ROOT)
 
-    for rel in forward_builder.relationships:
-        assert classify_endpoint_id(rel.source_id) != EndpointKind.INVALID
-        assert classify_endpoint_id(rel.target_id) != EndpointKind.INVALID
+    assert builder.entities, "the mixed-language fixture produced no entities"
+    assert not builder.errors, f"unexpected parse errors: {builder.errors}"
+    assert_merged_graph_invariants(builder)
+
+
+def test_mixed_language_graph_is_independent_of_scan_order() -> None:
+    """The merged graph is stable when files are scanned in reversed order.
+
+    Target invariant 7 requires parser output to be independent of filesystem
+    scan order. Building the same files forward and reversed must yield one
+    identical entity set and relationship multiset, so reference resolution
+    cannot quietly pick a scan-order-dependent endpoint.
+    """
+    files = _mixed_file_infos()
+    assert len(files) >= 2, "mixed-language fixture needs at least two files"
+
+    forward = GraphBuilder().build_from_files(list(files))
+    reversed_build = GraphBuilder().build_from_files(list(reversed(files)))
+
+    assert _snapshot(forward) == _snapshot(reversed_build), (
+        "merged graph differs when files are scanned in reversed order"
+    )

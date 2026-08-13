@@ -73,6 +73,9 @@ dev = [
 [tool.ruff]
 line-length = 88
 target-version = "py310"
+# Negative parser fixtures intentionally contain syntax errors to prove visible,
+# deterministic failure handling; they are test data, not lintable source.
+extend-exclude = ["tests/fixtures/parser_contracts/negative"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/fixtures/parser_contracts/**/*.py" = ["F821"]

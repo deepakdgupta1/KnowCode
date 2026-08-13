@@ -21,7 +21,9 @@ def _fixture_sources() -> list[Path]:
     return sorted(
         path
         for path in FIXTURE_ROOT.rglob("*")
-        if path.is_file() and not path.name.endswith(".expected.json")
+        if path.is_file()
+        and not path.name.endswith(".expected.json")
+        and path.with_name(f"{path.name}.expected.json").exists()
     )
 
 
@@ -35,7 +37,7 @@ def test_all_parser_fixture_contracts_are_well_formed() -> None:
         "typescript",
         "vue",
     }
-    assert len(contracts) == 9
+    assert len(contracts) == 10
 
 
 def test_exact_parse_assertion_accepts_only_the_committed_graph() -> None:

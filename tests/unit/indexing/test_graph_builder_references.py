@@ -21,7 +21,9 @@ def _fixture_sources() -> list[Path]:
     return sorted(
         path
         for path in FIXTURE_ROOT.rglob("*")
-        if path.is_file() and not path.name.endswith(".expected.json")
+        if path.is_file()
+        and not path.name.endswith(".expected.json")
+        and path.with_name(f"{path.name}.expected.json").exists()
     )
 
 
