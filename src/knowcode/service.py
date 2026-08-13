@@ -477,19 +477,15 @@ class KnowCodeService:
 
         output_path = Path(output)
         db_path = output_path / "knowledge.db" if output_path.is_dir() else output_path.with_suffix(".db")
-        
+
         sqlite_store = SqliteKnowledgeStore(db_path)
-        sqlite_store._conn.execute("BEGIN")
-        try:
-            for entity in builder.entities.values():
-                sqlite_store.add_entity(entity)
-            for rel in builder.relationships:
-                sqlite_store.add_relationship(rel)
-            sqlite_store._conn.execute("COMMIT")
-        except Exception:
-            sqlite_store._conn.execute("ROLLBACK")
-            raise
-            
+        # bulk_insert owns its connection, lock, and transaction (ADR 2): callers
+        # must not drive a manual BEGIN/COMMIT around individually locking methods.
+        sqlite_store.bulk_insert(
+            entities=list(builder.entities.values()),
+            relationships=list(builder.relationships),
+        )
+
         self._store = sqlite_store
 
         if export_json:
@@ -618,7 +614,17 @@ class KnowCodeService:
         total_entities = 0
         total_relationships = 0
 
-        if hasattr(self.store, "entities"):
+        # SqliteKnowledgeStore defines an ``entities`` property, so the
+        # ``hasattr`` branch below is True for it and would hydrate every row
+        # into Python just to count them. Dispatch on the capability first so
+        # the SQLite path uses server-side GROUP BY and never materializes.
+        if isinstance(self.store, SqliteKnowledgeStore):
+            counts = self.store.count_by_kind()
+            by_kind = counts["entities"]
+            rel_types = counts["relationships"]
+            total_entities = sum(by_kind.values())
+            total_relationships = sum(rel_types.values())
+        elif hasattr(self.store, "entities"):
             total_entities = len(self.store.entities)
             for entity in self.store.entities.values():
                 kind = entity.kind.value
@@ -628,16 +634,6 @@ class KnowCodeService:
             for rel in self.store.relationships:
                 kind = rel.kind.value
                 rel_types[kind] = rel_types.get(kind, 0) + 1
-        elif isinstance(self.store, SqliteKnowledgeStore):
-            cursor = self.store._conn.execute("SELECT kind, COUNT(*) as c FROM entities GROUP BY kind")
-            for row in cursor:
-                by_kind[row["kind"]] = row["c"]
-            total_entities = sum(by_kind.values())
-
-            cursor = self.store._conn.execute("SELECT kind, COUNT(*) as c FROM relationships GROUP BY kind")
-            for row in cursor:
-                rel_types[row["kind"]] = row["c"]
-            total_relationships = sum(rel_types.values())
 
         stats = {
             "total_entities": total_entities,

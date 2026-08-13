@@ -1,11 +1,13 @@
 """Unit tests for SQLite-backed knowledge store."""
 
+import sqlite3
 import threading
 from pathlib import Path
 
 import pytest
 
 from knowcode.data_models import Entity, EntityKind, Location, Relationship, RelationshipKind
+from knowcode.errors import RepositoryClosedError
 from knowcode.storage.knowledge_store import KnowledgeStore
 from knowcode.storage.sqlite_knowledge_store import SqliteKnowledgeStore
 
@@ -217,7 +219,178 @@ def test_sqlite_knowledge_store_helpers(tmp_path: Path) -> None:
     assert impact_cls["risk_score"] > 0
     impact_mod = store.get_impact(mod.id)
     assert impact_mod["risk_score"] > 0
-    
+
     # Test close
     store.close()
+
+
+# ---------------------------------------------------------------------------
+# Connection ownership, batch transactions, and aggregates (Step 09 — ADR 2)
+# ---------------------------------------------------------------------------
+
+
+def test_bulk_insert_never_leaks_uncommitted_state(tmp_path: Path) -> None:
+    """A reader on the shared store must not see an uncommitted bulk_insert.
+
+    The writer's transaction is held open via the ``_commit_bulk`` seam while a
+    reader thread on the SAME instance checks for the in-flight entity. With
+    thread-local reader connections, the reader sees only the committed WAL
+    snapshot.
+    """
+    store = SqliteKnowledgeStore(tmp_path / "k.db")
+    store.add_entity(_make_entity("file.py::seed", EntityKind.FUNCTION, "seed"))
+
+    observed: list[bool] = []
+    barrier = threading.Barrier(2, timeout=5.0)
+    original = store._commit_bulk
+
+    def pausing_commit(conn, entities, relationships) -> None:
+        original(conn, entities, relationships)  # insert within the open txn
+        barrier.wait()  # release the reader to observe
+        barrier.wait()  # hold until the reader has observed
+
+    def reader() -> None:
+        barrier.wait()  # wait until the writer has inserted
+        observed.append(store.get_entity("file.py::inflight") is not None)
+        barrier.wait()  # release the writer to commit
+
+    store._commit_bulk = pausing_commit  # type: ignore[assignment]
+    inflight = _make_entity("file.py::inflight", EntityKind.FUNCTION, "inflight")
+    writer = threading.Thread(target=store.bulk_insert, args=([inflight], []))
+    reader_t = threading.Thread(target=reader)
+    try:
+        writer.start()
+        reader_t.start()
+        writer.join(timeout=10)
+        reader_t.join(timeout=10)
+    finally:
+        store._commit_bulk = original  # type: ignore[assignment]
+        store.close()
+
+    assert observed == [False], "reader observed an uncommitted entity"
+    assert not writer.is_alive() and not reader_t.is_alive()
+
+
+def test_bulk_insert_rolls_back_on_injected_failure(tmp_path: Path) -> None:
+    """A failure inside bulk_insert leaves the prior committed state intact."""
+    store = SqliteKnowledgeStore(tmp_path / "k.db")
+    store.add_entity(_make_entity("file.py::seed", EntityKind.FUNCTION, "seed"))
+
+    original = store._commit_bulk
+
+    def failing_commit(conn, entities, relationships) -> None:
+        # Perform the inserts, then fail so the whole transaction rolls back.
+        original(conn, entities, relationships)
+        raise sqlite3.OperationalError("injected failure during bulk_insert")
+
+    store._commit_bulk = failing_commit  # type: ignore[assignment]
+    new_entity = _make_entity("file.py::new", EntityKind.FUNCTION, "new")
+    try:
+        with pytest.raises(sqlite3.OperationalError):
+            store.bulk_insert([new_entity], [])
+    finally:
+        store._commit_bulk = original  # type: ignore[assignment]
+
+    # The rollback left the prior committed state intact; reads use a reader
+    # connection that observes the committed snapshot.
+    assert store.get_entity("file.py::seed") is not None
+    assert store.get_entity("file.py::new") is None
+    store.close()
+
+
+def test_count_by_kind(tmp_path: Path) -> None:
+    """count_by_kind returns server-side GROUP BY counts, not materialized rows."""
+    store = SqliteKnowledgeStore(tmp_path / "k.db")
+    store.bulk_insert(
+        entities=[
+            _make_entity("file.py::f1", EntityKind.FUNCTION, "f1"),
+            _make_entity("file.py::f2", EntityKind.FUNCTION, "f2"),
+            _make_entity("file.py::Cls", EntityKind.CLASS, "Cls"),
+        ],
+        relationships=[
+            Relationship(
+                source_id="file.py::Cls",
+                target_id="file.py::f1",
+                kind=RelationshipKind.CONTAINS,
+            ),
+            Relationship(
+                source_id="file.py::Cls",
+                target_id="file.py::f2",
+                kind=RelationshipKind.CONTAINS,
+            ),
+        ],
+    )
+    try:
+        counts = store.count_by_kind()
+        assert counts["entities"] == {"function": 2, "class": 1}
+        assert counts["relationships"] == {"contains": 2}
+    finally:
+        store.close()
+
+
+def test_concurrent_readers_see_committed_snapshot(tmp_path: Path) -> None:
+    """Multiple reader threads each see the committed snapshot."""
+    store = SqliteKnowledgeStore(tmp_path / "k.db")
+    store.add_entity(_make_entity("file.py::foo", EntityKind.FUNCTION, "foo"))
+
+    errors: list[str] = []
+    seen: list[bool] = []
+
+    def reader() -> None:
+        try:
+            for _ in range(5):
+                seen.append(store.get_entity("file.py::foo") is not None)
+        except Exception as exc:  # noqa: BLE001
+            errors.append(str(exc))
+
+    threads = [threading.Thread(target=reader) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=10)
+    store.close()
+
+    assert not errors
+    assert all(seen)
+
+
+def test_close_is_idempotent_and_drains_in_flight_reader(tmp_path: Path) -> None:
+    """close() waits for an in-flight reader to release its lease."""
+    store = SqliteKnowledgeStore(tmp_path / "k.db")
+    store.add_entity(_make_entity("file.py::x", EntityKind.FUNCTION, "x"))
+
+    entered = threading.Event()
+    proceed = threading.Event()
+
+    def slow_reader() -> None:
+        with store._read_lease() as conn:
+            entered.set()
+            conn.execute("SELECT COUNT(*) FROM entities").fetchone()
+            assert proceed.wait(timeout=5), "reader never released"
+
+    reader_t = threading.Thread(target=slow_reader)
+    reader_t.start()
+    assert entered.wait(timeout=5)
+
+    closer = threading.Thread(target=store.close)
+    closer.start()
+    closer.join(timeout=0.5)
+    assert closer.is_alive(), "close did not wait for the reader to drain"
+
+    proceed.set()
+    closer.join(timeout=5)
+    reader_t.join(timeout=5)
+    assert not closer.is_alive() and not reader_t.is_alive()
+    store.close()  # idempotent
+
+
+def test_closed_store_raises(tmp_path: Path) -> None:
+    """Operations after close() raise RepositoryClosedError."""
+    store = SqliteKnowledgeStore(tmp_path / "k.db")
+    store.close()
+    with pytest.raises(RepositoryClosedError):
+        store.get_entity("anything")
+    with pytest.raises(RepositoryClosedError):
+        store.add_entity(_make_entity("file.py::y", EntityKind.FUNCTION, "y"))
+    store.close()  # idempotent
 

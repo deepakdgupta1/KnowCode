@@ -34,3 +34,15 @@ class MissingSemanticIndexError(KnowCodePrerequisiteError):
             code="missing_semantic_index",
             hint="Run `knowcode build <dir>` first.",
         )
+
+
+class RepositoryClosedError(RuntimeError):
+    """Raised when an operation is attempted on a closed repository handle.
+
+    A closed handle is not a missing prerequisite (the file may still exist),
+    so this deliberately derives from ``RuntimeError`` rather than from
+    :class:`KnowCodePrerequisiteError`, whose ``__init__`` requires a
+    ``code``/``hint`` pair. Step 09 (ADR 2) introduces it so that a reader or
+    writer touching a connection torn down by ``close()``/``load()`` gets an
+    actionable, typed error instead of a low-level ``sqlite3.ProgrammingError``.
+    """

@@ -13,6 +13,7 @@ from typing import Generator
 import pytest
 
 from knowcode.data_models import CodeChunk
+from knowcode.errors import RepositoryClosedError
 
 # Import will fail until we create the implementation — that's TDD.
 # The test file defines expected behavior; implementation follows.
@@ -734,7 +735,7 @@ class TestSchemaVersioning:
     ) -> None:
         assert repo.schema_version == SqliteChunkRepository.SCHEMA_VERSION
         # schema_meta table is the source of truth on disk.
-        row = repo._conn.execute(
+        row = repo._reader_conn().execute(
             "SELECT version FROM schema_meta LIMIT 1"
         ).fetchone()
         assert row is not None and row[0] == SqliteChunkRepository.SCHEMA_VERSION
@@ -744,7 +745,7 @@ class TestSchemaVersioning:
     ) -> None:
         columns = {
             row[1]
-            for row in repo._conn.execute("PRAGMA table_info(chunks)").fetchall()
+            for row in repo._reader_conn().execute("PRAGMA table_info(chunks)").fetchall()
         }
         assert "embedding" in columns
         assert "embedding_dim" in columns
@@ -779,7 +780,7 @@ class TestSchemaVersioning:
         repo.load(tmp_path / "fresh_dir")
         try:
             assert repo.schema_version == SqliteChunkRepository.SCHEMA_VERSION
-            row = repo._conn.execute(
+            row = repo._reader_conn().execute(
                 "SELECT version FROM schema_meta LIMIT 1"
             ).fetchone()
             assert row is not None
@@ -809,10 +810,10 @@ class TestEmbeddingAndMetadataValidation:
             )
         )
         # Corrupt the stored dimension so byte length no longer matches.
-        repo._conn.execute(
+        repo._writer_conn.execute(
             "UPDATE chunks SET embedding_dim = 3 WHERE chunk_id = ?", ("corrupt",)
         )
-        repo._conn.commit()
+        repo._writer_conn.commit()
         with pytest.raises(ValueError):
             repo.get("corrupt")
 
@@ -820,12 +821,12 @@ class TestEmbeddingAndMetadataValidation:
         self, repo: SqliteChunkRepository
     ) -> None:
         """A truncated BLOB that is not a multiple of four bytes fails."""
-        repo._conn.execute(
+        repo._writer_conn.execute(
             "INSERT INTO chunks (chunk_id, entity_id, content, tokens_text, "
             "metadata_json, file_path, embedding, embedding_dim) "
             "VALUES ('odd', '/x.py::X', 'c', 't', '{}', '/x.py', X'0102', NULL)"
         )
-        repo._conn.commit()
+        repo._writer_conn.commit()
         with pytest.raises(ValueError):
             repo.get("odd")
 
@@ -833,12 +834,12 @@ class TestEmbeddingAndMetadataValidation:
         self, repo: SqliteChunkRepository
     ) -> None:
         """Invalid or non-dict metadata must not break row hydration."""
-        repo._conn.execute(
+        repo._writer_conn.execute(
             "INSERT INTO chunks (chunk_id, entity_id, content, tokens_text, "
             "metadata_json, file_path, embedding, embedding_dim) "
             "VALUES ('badmeta', '/x.py::X', 'c', 't', 'not-json', '/x.py', NULL, NULL)"
         )
-        repo._conn.commit()
+        repo._writer_conn.commit()
         chunk = repo.get("badmeta")
         assert chunk is not None
         assert chunk.metadata == {}
@@ -848,13 +849,13 @@ class TestEmbeddingAndMetadataValidation:
     ) -> None:
         """A valid BLOB with a null dimension still decodes by byte length."""
         blob, _ = repo._encode_embedding([0.25, 0.75, 1.0])
-        repo._conn.execute(
+        repo._writer_conn.execute(
             "INSERT INTO chunks (chunk_id, entity_id, content, tokens_text, "
             "metadata_json, file_path, embedding, embedding_dim) "
             "VALUES ('nodim', '/x.py::X', 'c', 't', '{}', '/x.py', ?, NULL)",
             (blob,),
         )
-        repo._conn.commit()
+        repo._writer_conn.commit()
         chunk = repo.get("nodim")
         assert chunk is not None
         assert chunk.embedding is not None
@@ -890,3 +891,216 @@ class TestEmptyInputs:
         self, repo: SqliteChunkRepository
     ) -> None:
         assert repo.search_exact("", limit=5) == []
+
+
+# ---------------------------------------------------------------------------
+# Shared-instance connection ownership (Step 09 — ADR 2)
+# ---------------------------------------------------------------------------
+
+
+class TestSharedInstanceConcurrency:
+    """Barrier/event-synchronized tests over the real shared-service topology.
+
+    Unlike ``test_concurrent_read_under_wal`` (which opens separate repository
+    instances), these exercises the *single shared instance* served to many
+    request threads. WAL alone is not accepted as evidence of thread safety
+    (ADR 2): the writer's open transaction must not leak to a reader.
+    """
+
+    def test_shared_reader_never_observes_uncommitted_batch(
+        self, repo: SqliteChunkRepository
+    ) -> None:
+        """A reader on the shared repo must not see an uncommitted writer batch.
+
+        The writer's transaction is held open via the ``_commit_rows`` seam
+        while a reader thread on the SAME instance checks for the in-flight row.
+        With thread-local reader connections, the reader sees only the
+        committed WAL snapshot and finds nothing. On the old shared connection
+        the reader would have observed the dirty row.
+        """
+        repo.add(_chunk("seed", "/x.py::Seed", "seed body", "seed"))
+
+        observed: list[bool] = []
+        barrier = threading.Barrier(2, timeout=5.0)
+        original_commit = repo._commit_rows
+
+        def pausing_commit(rows: list) -> None:
+            # Insert within the open writer transaction, then hold it open.
+            original_commit(rows)
+            barrier.wait()  # release the reader to observe (txn still open)
+            barrier.wait()  # hold until the reader has observed, then return
+
+        def reader() -> None:
+            barrier.wait()  # wait until the writer has inserted (txn open)
+            observed.append(repo.get("inflight") is not None)
+            barrier.wait()  # release the writer to commit
+
+        repo._commit_rows = pausing_commit  # type: ignore[assignment]
+        writer = threading.Thread(
+            target=repo.replace_file,
+            args=(
+                "/x.py",
+                [_chunk("inflight", "/x.py::Inflight", "inflight body", "inflight")],
+            ),
+        )
+        reader_t = threading.Thread(target=reader)
+        try:
+            writer.start()
+            reader_t.start()
+            writer.join(timeout=10)
+            reader_t.join(timeout=10)
+        finally:
+            repo._commit_rows = original_commit  # type: ignore[assignment]
+
+        assert not writer.is_alive(), "writer deadlocked"
+        assert not reader_t.is_alive(), "reader deadlocked"
+        assert observed == [False], "reader observed an uncommitted row"
+        # After the writer commits, the reader does see it.
+        assert repo.get("inflight") is not None
+
+    def test_concurrent_replace_file_writers_serialize(
+        self, repo: SqliteChunkRepository
+    ) -> None:
+        """N writers on disjoint files converge on a deterministic final state."""
+        errors: list[str] = []
+
+        def writer(file_idx: int) -> None:
+            try:
+                fp = f"/src/file_{file_idx}.py"
+                chunks = [
+                    _chunk(f"f{file_idx}_c{j}", f"{fp}::C{j}", f"body{j}", f"t{j}")
+                    for j in range(5)
+                ]
+                # Repeated replacement of the same file generation.
+                for _ in range(3):
+                    repo.replace_file(fp, chunks)
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"writer {file_idx}: {exc}")
+
+        threads = [threading.Thread(target=writer, args=(i,)) for i in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=10)
+
+        assert not errors
+        assert repo.count() == 20  # 4 files x 5 stable chunk IDs
+        for i in range(4):
+            for j in range(5):
+                assert repo.get(f"f{i}_c{j}") is not None
+
+    def test_concurrent_readers_see_committed_snapshot(
+        self, repo: SqliteChunkRepository
+    ) -> None:
+        """Multiple reader threads each see the committed snapshot."""
+        repo.add_batch(
+            [_chunk(f"c{i}", f"/x.py::X{i}", f"body{i}", f"tok{i}") for i in range(20)]
+        )
+
+        errors: list[str] = []
+        seen: list[bool] = []
+
+        def reader() -> None:
+            try:
+                for _ in range(10):
+                    seen.append(repo.get("c5") is not None)
+                    seen.append(repo.count() == 20)
+            except Exception as exc:  # noqa: BLE001
+                errors.append(str(exc))
+
+        threads = [threading.Thread(target=reader) for _ in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=10)
+
+        assert not errors
+        assert all(seen)
+
+    def test_close_is_idempotent_and_drains_in_flight_reader(
+        self, repo: SqliteChunkRepository
+    ) -> None:
+        """close() waits for an in-flight reader to release its lease."""
+        repo.add(_chunk("drain", "/x.py::D", "body", "tok"))
+
+        entered = threading.Event()
+        proceed = threading.Event()
+
+        def slow_reader() -> None:
+            with repo._read_lease() as conn:
+                entered.set()
+                conn.execute("SELECT COUNT(*) FROM chunks").fetchone()
+                assert proceed.wait(timeout=5), "reader never released"
+
+        reader_t = threading.Thread(target=slow_reader)
+        reader_t.start()
+        assert entered.wait(timeout=5), "reader never entered"
+
+        closer = threading.Thread(target=repo.close)
+        closer.start()
+        # close() must block while the reader holds its lease.
+        closer.join(timeout=0.5)
+        assert closer.is_alive(), "close did not wait for the reader to drain"
+
+        proceed.set()
+        closer.join(timeout=5)
+        reader_t.join(timeout=5)
+
+        assert not closer.is_alive()
+        assert not reader_t.is_alive()
+        repo.close()  # idempotent
+
+    def test_load_drains_reader_and_reinits_schema(
+        self, repo: SqliteChunkRepository, tmp_path: Path
+    ) -> None:
+        """load() drains an in-flight reader and re-inits schema at a new path."""
+        repo.add(_chunk("keep", "/x.py::K", "body", "tok"))
+
+        entered = threading.Event()
+        proceed = threading.Event()
+        observed: list[int] = []
+
+        def slow_reader() -> None:
+            with repo._read_lease() as conn:
+                entered.set()
+                observed.append(
+                    int(conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0])
+                )
+                assert proceed.wait(timeout=5), "reader never released"
+
+        reader_t = threading.Thread(target=slow_reader)
+        reader_t.start()
+        assert entered.wait(timeout=5)
+
+        new_dir = tmp_path / "fresh"
+        loader = threading.Thread(target=repo.load, args=(new_dir,))
+        loader.start()
+        loader.join(timeout=0.5)
+        assert loader.is_alive(), "load did not wait for the reader to drain"
+
+        proceed.set()
+        loader.join(timeout=5)
+        reader_t.join(timeout=5)
+        assert not loader.is_alive()
+
+        # Schema re-initialized at the new path; old data is gone.
+        assert observed == [1]
+        assert repo.schema_version == SqliteChunkRepository.SCHEMA_VERSION
+        assert repo.count() == 0
+        row = repo._reader_conn().execute(
+            "SELECT version FROM schema_meta LIMIT 1"
+        ).fetchone()
+        assert row is not None and row[0] == SqliteChunkRepository.SCHEMA_VERSION
+
+    def test_closed_repository_raises_on_operations(
+        self, repo: SqliteChunkRepository
+    ) -> None:
+        """Operations after close() raise RepositoryClosedError."""
+        repo.close()
+        with pytest.raises(RepositoryClosedError):
+            repo.add(_chunk("x", "/x.py::X", "b", "t"))
+        with pytest.raises(RepositoryClosedError):
+            repo.get("x")
+        with pytest.raises(RepositoryClosedError):
+            repo.count()
+        repo.close()  # idempotent
