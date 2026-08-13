@@ -89,7 +89,7 @@ class ContractService:
         }
 
 
-def _make_agent(service: ContractService, threshold: float = 0.8) -> Agent:
+def _make_agent(service: ContractService, threshold: float = 0.8, floor: float = 0.9) -> Agent:
     config = AppConfig(
         models=[
             ModelConfig(
@@ -99,6 +99,7 @@ def _make_agent(service: ContractService, threshold: float = 0.8) -> Agent:
             )
         ],
         sufficiency_threshold=threshold,
+        routing_quality_floor=floor,
         local_answer_task_types=[TaskType.LOCATE.value, TaskType.EXPLAIN.value],
     )
     agent = Agent(service, config)  # type: ignore[arg-type]
@@ -131,3 +132,21 @@ def test_agent_routes_minimal_projection_to_llm_once(tmp_path: Path) -> None:
     assert result["task_type"] == TaskType.EXPLAIN.value
     assert result["answer"] == "LLM answer"
     assert service.retrieve_calls == 3
+
+
+def test_routing_quality_floor_overrides_a_lower_nominal_threshold(
+    tmp_path: Path,
+) -> None:
+    """The adjudicated floor is a real runtime gate, not load-time provenance.
+
+    Sufficiency 0.90 clears the nominal threshold (0.85) but falls below the
+    floor (0.95), so the effective threshold is 0.95 and the query must route
+    to the LLM rather than be answered locally.
+    """
+    service = ContractService(tmp_path, sufficiency=0.90)
+    agent = _make_agent(service, threshold=0.85, floor=0.95)
+
+    result = agent.smart_answer("Explain foo")
+
+    assert result["source"] == "llm"
+    assert result["sufficiency_score"] == 0.90

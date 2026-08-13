@@ -112,6 +112,40 @@ def test_unblessed_machine_artifact_cannot_enable_routing(tmp_path: Path) -> Non
 
 
 @pytest.mark.parametrize(
+    "expected_sha256",
+    [None, "f" * 64],
+    ids=["missing_checksum_env", "wrong_checksum"],
+)
+def test_unverifiable_artifact_fails_closed_without_raising(
+    tmp_path: Path,
+    expected_sha256: str | None,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """An unverifiable artifact must fail closed, not crash the service.
+
+    A missing ``KNOWCODE_ROUTING_POLICY_SHA256`` (operator forgot to set it)
+    and a checksum mismatch are both operator/integrity problems whose secure
+    resolution is identical: disable local answering and keep running LLM-only.
+    Neither should propagate out of ``apply_machine_verification_artifact``.
+    """
+    artifact = tmp_path / "machine-verification.json"
+    artifact.write_text('{"status": "blessed"}', encoding="utf-8")
+    config = AppConfig(local_answer_task_types=["locate"])
+
+    with caplog.at_level(logging.WARNING, logger="knowcode.config"):
+        config.apply_machine_verification_artifact(
+            artifact,
+            source_root=tmp_path,
+            expected_sha256=expected_sha256,
+        )
+
+    assert config.local_answer_task_types == []
+    assert any(
+        "local answering disabled" in rec.message for rec in caplog.records
+    )
+
+
+@pytest.mark.parametrize(
     ("config_yaml", "message"),
     [
         ("local_answer_task_types: locate", "must be a list"),

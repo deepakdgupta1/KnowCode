@@ -118,6 +118,28 @@ def test_service_resolves_policy_sources_from_store_root(
     assert service.app_config.sufficiency_threshold == 0.91
 
 
+def test_service_fails_closed_when_artifact_checksum_env_missing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A missing checksum env must not crash service construction.
+
+    Regression guard: previously a set ``KNOWCODE_ROUTING_POLICY_ARTIFACT``
+    without ``KNOWCODE_ROUTING_POLICY_SHA256`` raised out of the service
+    constructor. It must instead construct and stay fail-closed.
+    """
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    artifact = _write_blessed_artifact(repository)
+    monkeypatch.setenv("KNOWCODE_ROUTING_POLICY_ARTIFACT", str(artifact))
+    monkeypatch.delenv("KNOWCODE_ROUTING_POLICY_SHA256", raising=False)
+    config = AppConfig.default()
+
+    service = KnowCodeService(store_path=repository, app_config=config)
+
+    assert service.app_config.local_answer_task_types == []
+
+
 def test_blessed_policy_rejects_source_drift(tmp_path: Path) -> None:
     artifact = _write_blessed_artifact(tmp_path)
     (tmp_path / "src" / "example.py").write_text("VALUE = 2\n", encoding="utf-8")

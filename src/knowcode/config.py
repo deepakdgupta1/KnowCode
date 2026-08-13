@@ -119,15 +119,32 @@ class AppConfig:
         source_root: Path,
         expected_sha256: str | None,
     ) -> None:
-        """Apply a verified policy artifact; unblessed artifacts stay closed."""
+        """Apply a verified policy artifact; unverifiable artifacts stay closed.
+
+        Any verification failure -- a missing or mismatched checksum, source
+        drift, a version mismatch, or a malformed artifact -- fails closed:
+        local answering stays disabled and the rest of the service keeps
+        running LLM-only. "No local answering" is the secure state, so
+        degrading is always safer than raising and taking the whole service
+        down with an operator misconfiguration.
+        """
         from knowcode.routing_policy import load_routing_policy
 
+        # Fail closed by default; only a fully verified artifact re-enables this.
         self.local_answer_task_types = []
-        policy = load_routing_policy(
-            path,
-            source_root=source_root,
-            expected_sha256=expected_sha256,
-        )
+        try:
+            policy = load_routing_policy(
+                path,
+                source_root=source_root,
+                expected_sha256=expected_sha256,
+            )
+        except ValueError as exc:
+            logger.warning(
+                "Routing policy artifact %s rejected; local answering disabled: %s",
+                path,
+                exc,
+            )
+            return
         if policy is None:
             return
         self.sufficiency_threshold = policy.sufficiency_threshold
