@@ -26,6 +26,7 @@ from knowcode.parsers.vue_symbols import (
 from knowcode.utils.entity_identity import (
     build_external_reference_id,
     build_internal_entity_id,
+    dedupe_entities_by_id,
 )
 
 
@@ -208,6 +209,14 @@ class VueParser(TreeSitterParser):
                 symbols,
             )
             relationships.extend(style_rels)
+
+        # Two declarations in one file cannot share one canonical ID; keep the
+        # first and surface the dropped duplicate instead of letting it collapse
+        # silently in GraphBuilder. Vue binding declarations already report
+        # collisions through the symbol table; this is the final safety net for
+        # any path (for example duplicate Options API methods) that bypasses it.
+        entities, dedupe_errors = dedupe_entities_by_id(entities)
+        errors.extend(dedupe_errors)
 
         return ParseResult(
             file_path=str(file_path),

@@ -16,7 +16,10 @@ from knowcode.data_models import (
     ParseResult,
     Relationship,
 )
-from knowcode.utils.entity_identity import build_internal_entity_id
+from knowcode.utils.entity_identity import (
+    build_internal_entity_id,
+    dedupe_entities_by_id,
+)
 
 
 class TreeSitterParser:
@@ -100,6 +103,12 @@ class TreeSitterParser:
              # We might want to be more specific here, but for now just flag it
              # Don't fail completely, as partial AST is often useful
              errors.append("Tree-sitter reported syntax errors in file")
+
+        # Two declarations in one file cannot share one canonical ID; keep the
+        # first and surface the dropped duplicate instead of letting it collapse
+        # silently in GraphBuilder.
+        entities, dedupe_errors = dedupe_entities_by_id(entities)
+        errors.extend(dedupe_errors)
 
         return ParseResult(
             file_path=str(file_path),

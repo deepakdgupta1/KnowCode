@@ -152,3 +152,30 @@ def ensure_entity_content_hash(entity: Entity) -> None:
     if isinstance(existing, str) and existing:
         return
     entity.metadata["content_hash"] = compute_entity_content_hash(entity)
+
+
+def dedupe_entities_by_id(
+    entities: list[Entity],
+) -> tuple[list[Entity], list[str]]:
+    """Drop entities that share a canonical ID, keeping the first occurrence.
+
+    A parser must never emit two entities with the same canonical ID. When two
+    declarations collide (for example ``class A {}`` twice in one file), the
+    second is a silent drop that :class:`GraphBuilder` would otherwise collapse
+    by dict assignment. This helper makes that drop visible instead: it keeps
+    the first entity per ID and returns one diagnostic message per collision so
+    the limitation is classified through ``ParseResult.errors`` rather than lost.
+    """
+    seen: set[str] = set()
+    deduped: list[Entity] = []
+    errors: list[str] = []
+    for entity in entities:
+        if entity.id in seen:
+            errors.append(
+                f"Duplicate entity identity {entity.qualified_name!r}; "
+                "keeping the first declaration"
+            )
+            continue
+        seen.add(entity.id)
+        deduped.append(entity)
+    return deduped, errors

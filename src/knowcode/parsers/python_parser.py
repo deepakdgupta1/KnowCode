@@ -35,6 +35,7 @@ from knowcode.utils.entity_identity import (
     build_external_reference_id,
     build_internal_entity_id,
     build_unresolved_reference_id,
+    dedupe_entities_by_id,
 )
 
 
@@ -131,11 +132,16 @@ class PythonParser:
             relationships=relationships,
         )
 
+        # Two declarations in one file cannot share one canonical ID; keep the
+        # first and surface the dropped duplicate instead of letting it collapse
+        # silently in GraphBuilder.
+        entities, dedupe_errors = dedupe_entities_by_id(entities)
+
         return ParseResult(
             file_path=str(file_path),
             entities=entities,
             relationships=relationships,
-            errors=[],
+            errors=dedupe_errors,
         )
 
     # ------------------------------------------------------------------
