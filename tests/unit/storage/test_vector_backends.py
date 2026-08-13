@@ -92,7 +92,13 @@ def test_inspect_unknown_vector_backend_fails(tmp_path: Path) -> None:
     assert "unsupported vector backend: 'weaviate'" in inspection.failures
 
 
-def test_schema_warning_uses_selected_backend(tmp_path: Path) -> None:
+def test_schema_check_uses_selected_backend(tmp_path: Path) -> None:
+    """LanceDB stays at schema 1; a legacy FAISS envelope now fails closed.
+
+    Step 11 stopped migrating v1/v2 FAISS metadata in memory: those artifacts
+    describe a plain ``IndexFlatIP`` whose rows carry no native IDs, so doctor
+    reports an actionable failure instead of a migration warning.
+    """
     _write_vectors_json(
         tmp_path,
         {"schema_version": 1, "dimension": 1024, "backend": "lancedb"},
@@ -101,6 +107,7 @@ def test_schema_warning_uses_selected_backend(tmp_path: Path) -> None:
 
     lancedb_inspection = inspect_vector_index(tmp_path, configured_backend="lancedb")
 
+    assert lancedb_inspection.ok
     assert lancedb_inspection.warnings == ()
 
     faiss_path = tmp_path / "faiss"
@@ -112,7 +119,12 @@ def test_schema_warning_uses_selected_backend(tmp_path: Path) -> None:
 
     faiss_inspection = inspect_vector_index(faiss_path, configured_backend="faiss")
 
-    assert "vector metadata was migrated in memory" in faiss_inspection.warnings
+    assert not faiss_inspection.ok
+    assert faiss_inspection.warnings == ()
+    assert any(
+        "invalid vectors.json" in failure and "knowcode build" in failure
+        for failure in faiss_inspection.failures
+    )
 
 
 def test_create_vector_store_rejects_unknown_backend() -> None:

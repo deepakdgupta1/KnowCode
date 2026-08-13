@@ -112,7 +112,10 @@ def inspect_vector_index(
     missing_artifacts = _missing_artifacts(index_path, backend)
     failures.extend(missing_artifacts)
 
-    if raw_metadata and not _schema_is_current(
+    # Only a payload that validated can be reported as migrated. A FAISS/NumPy
+    # envelope below the current version now fails closed (Step 11), so it is a
+    # failure with rebuild guidance rather than a migration warning.
+    if metadata and not _schema_is_current(
         raw_metadata,
         _current_schema_version(backend),
     ):
@@ -136,7 +139,7 @@ def _validate_vector_metadata(data: dict[str, Any]) -> dict[str, Any]:
 
     from knowcode.storage.vector_store import VectorStore
 
-    return VectorStore._validate_and_migrate_metadata(data)
+    return VectorStore._validate_metadata(data)
 
 
 def _infer_backend(

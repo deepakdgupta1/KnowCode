@@ -89,51 +89,16 @@ def test_vector_contract_green_core(backend: str, make_store, tmp_path) -> None:
 
 # Native-tombstone parity and removed-ID slot consumption are VectorStore
 # defects only (the ``.index.ntotal`` native row count). LanceDB has no such
-# attribute, so it is excluded from these two cases.
+# attribute, so it is excluded from these two cases. Step 11 repaired both
+# VectorStore engines, so they are live gates here rather than xfails.
 
 
-@pytest.mark.parametrize(
-    "backend",
-    [
-        pytest.param(
-            "faiss",
-            marks=pytest.mark.xfail(
-                strict=True,
-                reason="FAISS leaves dead native rows; ntotal > count. Step 11.",
-            ),
-        ),
-        pytest.param(
-            "numpy",
-            marks=pytest.mark.xfail(
-                strict=True,
-                reason="numpy fallback shares VectorStore tombstone leak. Step 11.",
-            ),
-        ),
-    ],
-)
+@pytest.mark.parametrize("backend", ["faiss", "numpy"])
 def test_native_tombstone_parity(backend: str, make_store) -> None:
     assert_native_tombstone_parity(lambda: make_store(backend))
 
 
-@pytest.mark.parametrize(
-    "backend",
-    [
-        pytest.param(
-            "faiss",
-            marks=pytest.mark.xfail(
-                strict=True,
-                reason="FAISS dead row consumes a top-k slot. Step 11.",
-            ),
-        ),
-        pytest.param(
-            "numpy",
-            marks=pytest.mark.xfail(
-                strict=True,
-                reason="numpy fallback shares the VectorStore slot defect. Step 11.",
-            ),
-        ),
-    ],
-)
+@pytest.mark.parametrize("backend", ["faiss", "numpy"])
 def test_removed_id_does_not_consume_top_k_slot(backend: str, make_store) -> None:
     assert_removed_id_does_not_consume_top_k_slot(lambda: make_store(backend))
 
@@ -141,20 +106,8 @@ def test_removed_id_does_not_consume_top_k_slot(backend: str, make_store) -> Non
 @pytest.mark.parametrize(
     "backend",
     [
-        pytest.param(
-            "faiss",
-            marks=pytest.mark.xfail(
-                strict=True,
-                reason="VectorStore accepts duplicate IDs (count==2). Step 11.",
-            ),
-        ),
-        pytest.param(
-            "numpy",
-            marks=pytest.mark.xfail(
-                strict=True,
-                reason="numpy fallback shares the VectorStore duplicate defect. Step 11.",
-            ),
-        ),
+        "faiss",
+        "numpy",
         pytest.param(
             "lancedb",
             marks=pytest.mark.xfail(
@@ -171,20 +124,8 @@ def test_duplicate_add_is_prevented(backend: str, make_store) -> None:
 @pytest.mark.parametrize(
     "backend",
     [
-        pytest.param(
-            "faiss",
-            marks=pytest.mark.xfail(
-                strict=True,
-                reason="VectorStore returns duplicate result IDs. Step 11.",
-            ),
-        ),
-        pytest.param(
-            "numpy",
-            marks=pytest.mark.xfail(
-                strict=True,
-                reason="numpy fallback returns duplicate result IDs. Step 11.",
-            ),
-        ),
+        "faiss",
+        "numpy",
         pytest.param(
             "lancedb",
             marks=pytest.mark.xfail(
