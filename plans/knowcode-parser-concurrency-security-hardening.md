@@ -452,7 +452,7 @@ attributed across lexical scope boundaries.
 **Rollback:** Revert the scoped visitor as a unit. Generated stores must be
 rebuilt after either applying or reverting this step because entity IDs change.
 
-### [ ] Step 04 — Parse Vue SFC sections robustly and rebase exact locations
+### [~] Step 04 — Parse Vue SFC sections robustly and rebase exact locations
 
 **Execution tier:** strongest available model; embedded-language parsing.
 
@@ -1420,8 +1420,8 @@ commit SHA, or durable local handoff note until a PR exists.
 | --- | --- | --- | --- | --- | --- | --- |
 | 01 | `[x]` | [PR #21](https://github.com/deepakdgupta1/KnowCode/pull/21) (`codex/hardening-s01-contracts`) | 2026-08-12 | 2026-08-12 | Merged to `main` as `ecee1a3`; 150 focused and 368 global tests passed; Ruff, mypy, strict MkDocs, dependency audit, and diff checks passed. | Contracts, fixtures, helpers, and ADRs are now the required baseline for dependent steps. |
 | 02 | `[x]` | [PR #23](https://github.com/deepakdgupta1/KnowCode/pull/23) (`codex/hardening-s02-js-ts`) | 2026-08-12 | 2026-08-13 | Merged to `main` as `cbfec89`; 14 focused and 378 global tests passed; Ruff, mypy, strict MkDocs, and diff checks passed. | Canonical endpoints and newly extracted TS entities required generated graphs to be rebuilt after applying this step. |
-| 03 | `[~]` | [PR #25](https://github.com/deepakdgupta1/KnowCode/pull/25) (`codex/hardening-s03-python-parser`) | 2026-08-13 | — | Red phase had 9 intended failures; green phase has 21 focused python-parser tests plus parser-contract tests passing at 98% `python_parser.py` coverage; 399 global tests pass; Ruff, mypy, strict MkDocs, and diff checks passed. | Exit criteria complete; PR review and merge remain before `[x]`. Python entity IDs now use the canonical identity builder, and nested/decorator/module-variable entities are new, so generated graphs must be rebuilt after applying or reverting this step. |
-| 04 | `[ ]` | — | — | — | — | — |
+| 03 | `[x]` | [PR #25](https://github.com/deepakdgupta1/KnowCode/pull/25) (`codex/hardening-s03-python-parser`) | 2026-08-13 | 2026-08-13 | Merged to `main` as `e66bf75`; red phase had 9 intended failures; green phase has 21 focused python-parser tests plus parser-contract tests passing at 98% `python_parser.py` coverage; 399 global tests pass; Ruff, mypy, strict MkDocs, and diff checks passed. | Python entity IDs now use the canonical identity builder, and nested/decorator/module-variable entities are new, so generated graphs must be rebuilt after applying or reverting this step. |
+| 04 | `[~]` | `codex/hardening-s04-vue-locations` | 2026-08-13 | — | — | Step 04 owns SFC section scanning and exact locations only; entity ID/kind/qualified-name identity stays with Step 05. |
 | 05 | `[ ]` | — | — | — | — | — |
 | 06 | `[ ]` | — | — | — | — | — |
 | 07 | `[ ]` | — | — | — | — | — |
