@@ -285,8 +285,13 @@ const b = useStore()
 
 
 def test_no_relationship_is_emitted_twice(parser: VueParser, tmp_path: Path) -> None:
-    """Duplicate edges bias any downstream weighting and cannot be expressed
-    by the exact fixture contract, which rejects repeated edges."""
+    """Repeating a binding in the template or style is one relationship.
+
+    The identity of a Vue edge is its source, target, kind, and binding type. A
+    name bound by both ``v-model`` and CSS ``v-bind()`` is deliberately two
+    edges, because dropping either would lose a distinct fact about the
+    component; the same name bound twice the same way is one.
+    """
     path = write(
         tmp_path,
         "Dense.vue",
@@ -313,6 +318,21 @@ function save() { useStore() }
     result = parser.parse_file(path)
 
     keys = [
-        (r.source_id, r.target_id, r.kind) for r in result.relationships
+        (
+            r.source_id,
+            r.target_id,
+            r.kind,
+            r.metadata.get("binding_type") or r.metadata.get("usage_type"),
+        )
+        for r in result.relationships
     ]
     assert len(keys) == len(set(keys)), f"duplicate relationships: {keys}"
+
+    # The two distinct facts about `draft` are both retained.
+    draft_bindings = {
+        r.metadata.get("binding_type")
+        for r in result.relationships
+        if r.target_id.endswith("::Dense.draft")
+        and r.kind is RelationshipKind.REFERENCES
+    }
+    assert draft_bindings == {"model", "css_variable"}

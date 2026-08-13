@@ -207,9 +207,11 @@ const title = ref('Contract')
 """,
     )
 
-    assert result.errors == []
     assert "title" in _names(result)
     assert _entity(result, "Widget").metadata["vue_api"] == "composition"
+    # The plain block's own declarations are not indexed, which is a reported
+    # limitation rather than a silent omission.
+    assert [error for error in result.errors if "companion" in error]
 
 
 def test_imports_are_collected_from_every_script_block(tmp_path: Path) -> None:

@@ -10,6 +10,7 @@ from knowcode.parsers.base import TreeSitterParser
 from knowcode.parsers.javascript_parser import JavaScriptParser
 from knowcode.parsers.typescript_parser import TypeScriptParser
 from knowcode.parsers.vue_imports import scan_imports
+from knowcode.parsers.vue_object_scan import find_balanced_block, top_level_keys
 from knowcode.parsers.vue_script_index import (
     TYPESCRIPT_LANGS,
     DeclarationSpan,
@@ -25,6 +26,15 @@ from knowcode.parsers.vue_symbols import (
 from knowcode.utils.entity_identity import (
     build_external_reference_id,
     build_internal_entity_id,
+)
+
+
+#: Component name used when a file stem yields no PascalCase name at all.
+DEFAULT_COMPONENT_NAME = "AnonymousComponent"
+
+#: Keywords that a ``name(args) {`` regex cannot distinguish from a declaration.
+_CONTROL_FLOW_KEYWORDS = frozenset(
+    {"if", "for", "while", "switch", "catch", "with", "return", "function"}
 )
 
 
@@ -146,13 +156,27 @@ class VueParser(TreeSitterParser):
         seen_imports: set[tuple[str, RelationshipKind]] = set()
         for section in scan.all("script"):
             for relationship in self._extract_component_imports(
-                section, component_id, symbols
+                section, component_id, symbols, errors
             ):
                 key = (relationship.target_id, relationship.kind)
                 if key in seen_imports:
                     continue
                 seen_imports.add(key)
                 relationships.append(relationship)
+
+        # Vue merges a plain <script>'s Options API into a <script setup>
+        # component, but only the setup block's declarations are indexed. Report
+        # the companion block so its missing bindings are a visible limitation
+        # rather than silent unresolved template references.
+        skipped_scripts = [
+            section for section in scan.all("script") if section is not script_section
+        ]
+        if skipped_scripts:
+            errors.append(
+                f"Indexed only the <script setup> block; {len(skipped_scripts)} "
+                "companion <script> block(s) contributed imports but no "
+                "declarations, so their template names may appear unresolved"
+            )
 
         # Parse <script> section. This populates the component's symbol table,
         # so it must run before template and style references are resolved.
@@ -297,13 +321,19 @@ class VueParser(TreeSitterParser):
         )
 
     def _get_component_name(self, file_path: Path) -> str:
-        """Get component name from file name (PascalCase convention)."""
+        """Get component name from file name (PascalCase convention).
+
+        A stem made only of separators, such as the Nuxt catch-all route
+        ``pages/_.vue``, leaves nothing to capitalize. Since the component name
+        becomes a canonical entity ID, which cannot be empty, such a file falls
+        back to a fixed name rather than aborting the parse.
+        """
         # Convert kebab-case or snake_case to PascalCase
         name = file_path.stem
         # Replace hyphens and underscores with spaces, title case, remove spaces
         name = name.replace("-", " ").replace("_", " ")
         name = "".join(word.capitalize() for word in name.split())
-        return name
+        return name or DEFAULT_COMPONENT_NAME
 
     def _parse_script_section(
         self,
@@ -443,7 +473,8 @@ class VueParser(TreeSitterParser):
 
         # Extract composables (useXxx). A component may define its own, so these
         # resolve against the symbol table before falling back to external.
-        for composable in self._extract_composables(script_content):
+        # Calling one twice is one dependency, not two.
+        for composable in _ordered_unique(self._extract_composables(script_content)):
             relationships.append(
                 self._reference_edge(
                     context.component_id,
@@ -575,6 +606,7 @@ class VueParser(TreeSitterParser):
         script_section: VueSection,
         parent_id: str,
         symbols: VueSymbolTable,
+        errors: list[str],
     ) -> list[Relationship]:
         """Extract import edges from a script section.
 
@@ -582,11 +614,16 @@ class VueParser(TreeSitterParser):
         ``'@/components'`` names project source, so each binding it introduces
         becomes an explicit external Vue-component reference that template usage
         can line up with. A bare specifier names a package, so the statement
-        produces one external module reference instead.
+        produces one external module reference instead. A type-only import names
+        neither, so it contributes no component reference.
         """
         relationships = []
 
         for statement in scan_imports(script_section.content):
+            if not statement.is_valid:
+                errors.append("Ignored an import with an empty module specifier")
+                continue
+
             for binding in statement.bindings:
                 symbols.declare_import(binding, statement.module)
 
@@ -599,6 +636,9 @@ class VueParser(TreeSitterParser):
                         metadata={"import_path": statement.module},
                     )
                 )
+                continue
+
+            if statement.is_type_only:
                 continue
 
             for binding in statement.bindings:
@@ -683,10 +723,16 @@ class VueParser(TreeSitterParser):
                     # Note: This is less useful but we still track it
                     pass
 
-            # Also check runtime object
+            # Also check runtime object. Only its own keys are props: the keys
+            # of a nested option object such as { type: String, default: 'x' }
+            # describe one prop, they are not further props.
             if runtime_param and runtime_param.strip():
-                prop_names = re.findall(r"(\w+)\s*:", runtime_param)
-                props.extend(prop_names)
+                brace = runtime_param.find("{")
+                if brace == -1:
+                    props.extend(top_level_keys(runtime_param))
+                else:
+                    body = find_balanced_block(runtime_param, brace)
+                    props.extend(top_level_keys(body if body is not None else ""))
 
         return _ordered_unique(props)
 
@@ -777,73 +823,52 @@ class VueParser(TreeSitterParser):
             composables.append(match.group(1))
         return composables
 
+    def _option_block_keys(self, script_content: str, option: str) -> list[str]:
+        """Return the top-level keys of an Options API block such as ``methods``."""
+        start = re.search(rf"\b{option}\s*:\s*\{{", script_content)
+        if start is None:
+            return []
+        body = find_balanced_block(script_content, start.end() - 1)
+        return [] if body is None else _ordered_unique(top_level_keys(body))
+
     def _extract_data_properties(self, script_content: str) -> list[str]:
-        """Extract data properties from Options API."""
-        data_props = []
-        # Match: data() { return { foo: '', bar: 0 } }
-        data_match = re.search(
-            r"data\s*\(\s*\)\s*\{[\s\S]*?return\s*\{([\s\S]*?)\}", script_content
+        """Extract data properties from Options API.
+
+        Matches ``data() { return { foo: '', bar: 0 } }``. Only the keys of the
+        returned object itself are data properties; a nested object's keys are
+        part of a property's value.
+        """
+        data_start = re.search(r"\bdata\s*\(\s*\)\s*\{", script_content)
+        if data_start is None:
+            return []
+        data_body = find_balanced_block(script_content, data_start.end() - 1)
+        if data_body is None:
+            return []
+
+        returned = re.search(r"\breturn\s*\{", data_body)
+        if returned is None:
+            return []
+        returned_object = find_balanced_block(data_body, returned.end() - 1)
+        return [] if returned_object is None else _ordered_unique(
+            top_level_keys(returned_object)
         )
-        if data_match:
-            data_obj = data_match.group(1)
-            # Extract property names
-            prop_names = re.findall(r"(\w+)\s*:", data_obj)
-            data_props.extend(prop_names)
-        return data_props
 
     def _extract_methods(self, script_content: str) -> list[str]:
-        """Extract methods from Options API."""
-        methods = []
-        # Match: methods: { foo() {}, bar() {} }
-        # Find the start of methods block
-        methods_start = re.search(r"methods\s*:\s*\{", script_content)
-        if methods_start:
-            # Find matching closing brace using bracket counting
-            start_pos = methods_start.end() - 1  # Position of opening {
-            brace_count = 0
-            end_pos = start_pos
-            for i in range(start_pos, len(script_content)):
-                if script_content[i] == '{':
-                    brace_count += 1
-                elif script_content[i] == '}':
-                    brace_count -= 1
-                    if brace_count == 0:
-                        end_pos = i
-                        break
+        """Extract methods from Options API.
 
-            if end_pos > start_pos:
-                methods_obj = script_content[start_pos + 1:end_pos]
-                # Extract method names
-                method_names = re.findall(r"(\w+)\s*\([^)]*\)\s*\{", methods_obj)
-                methods.extend(method_names)
-        return methods
+        Matches ``methods: { foo() {}, bar() {} }``. Statements inside a method
+        body are nested, so ``if (...) {`` cannot be mistaken for a declaration.
+        """
+        return self._option_block_keys(script_content, "methods")
 
     def _extract_computed_properties(self, script_content: str) -> list[str]:
-        """Extract computed properties from Options API."""
-        computed = []
-        # Match: computed: { foo() {}, bar: { get() {}, set() {} } }
-        # Find the start of computed block
-        computed_start = re.search(r"computed\s*:\s*\{", script_content)
-        if computed_start:
-            # Find matching closing brace using bracket counting
-            start_pos = computed_start.end() - 1  # Position of opening {
-            brace_count = 0
-            end_pos = start_pos
-            for i in range(start_pos, len(script_content)):
-                if script_content[i] == '{':
-                    brace_count += 1
-                elif script_content[i] == '}':
-                    brace_count -= 1
-                    if brace_count == 0:
-                        end_pos = i
-                        break
+        """Extract computed properties from Options API.
 
-            if end_pos > start_pos:
-                computed_obj = script_content[start_pos + 1:end_pos]
-                # Extract computed names - match identifiers before ( or :
-                computed_names = re.findall(r"(\w+)\s*[:(]", computed_obj)
-                computed.extend(computed_names)
-        return computed
+        Matches ``computed: { foo() {}, bar: { get() {}, set() {} } }``. The
+        ``get``/``set`` pair of a writable computed belongs to ``bar``, so only
+        ``bar`` itself is a computed property.
+        """
+        return self._option_block_keys(script_content, "computed")
 
     def _extract_event_handlers(self, template_content: str) -> list[str]:
         """Extract event handlers from template (@click, v-on:click, etc.).

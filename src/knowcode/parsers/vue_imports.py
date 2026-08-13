@@ -17,9 +17,14 @@ from dataclasses import dataclass
 #: Specifier prefixes that denote project source rather than a package.
 _PATH_PREFIXES = ("./", "../", "/", "@/", "~/")
 
+# Anchored to the start of a line so a commented-out import, or the word
+# "import" inside a string literal, cannot register a phantom dependency. A
+# clause may still span lines, because the negated class matches newlines.
 _IMPORT_STATEMENT = re.compile(
-    r"\bimport\s+(?P<clause>[^'\";]*?)\s+from\s*['\"](?P<module>[^'\"]+)['\"]"
+    r"^[ \t]*import\s+(?P<clause>[^'\";]*?)\s+from\s*['\"](?P<module>[^'\"]*)['\"]",
+    re.MULTILINE,
 )
+_TYPE_ONLY_CLAUSE = re.compile(r"^type\b")
 _NAMED_CLAUSE = re.compile(r"\{(?P<names>[^}]*)\}")
 _NAMESPACE_CLAUSE = re.compile(r"\*\s+as\s+(?P<name>[A-Za-z_$][\w$]*)")
 _IDENTIFIER = re.compile(r"^[A-Za-z_$][\w$]*$")
@@ -31,11 +36,17 @@ class VueImport:
 
     module: str
     bindings: tuple[str, ...]
+    is_type_only: bool = False
 
     @property
     def is_path_import(self) -> bool:
         """True when the specifier points at project source, not a package."""
         return self.module.startswith(_PATH_PREFIXES)
+
+    @property
+    def is_valid(self) -> bool:
+        """True when the specifier names something at all."""
+        return bool(self.module.strip())
 
 
 def _binding_name(fragment: str) -> str | None:
@@ -87,6 +98,8 @@ def scan_imports(script_content: str) -> list[VueImport]:
         VueImport(
             module=match.group("module"),
             bindings=_clause_bindings(match.group("clause")),
+            is_type_only=_TYPE_ONLY_CLAUSE.match(match.group("clause").strip())
+            is not None,
         )
         for match in _IMPORT_STATEMENT.finditer(script_content)
     ]
