@@ -6,12 +6,15 @@ import os
 import re
 import shutil
 import logging
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
 from knowcode.analysis.context_synthesizer import ContextSynthesizer
 from knowcode.config import AppConfig
 from knowcode.errors import MissingKnowledgeStoreError, MissingSemanticIndexError
+from knowcode.indexing import generations
+from knowcode.indexing.generations import ResolvedGeneration
 from knowcode.indexing.graph_builder import GraphBuilder
 from knowcode.retrieval.orchestrator import RetrievalOrchestrator
 from knowcode.storage.knowledge_store import KnowledgeStore
@@ -27,6 +30,31 @@ from knowcode.data_models import TaskType
 
 if TYPE_CHECKING:
     from knowcode.retrieval.orchestrator import SearchEngineProtocol
+
+logger = logging.getLogger(__name__)
+
+#: Build stages a generation can fail in, reported as ``index_error_stage``.
+STAGE_KNOWLEDGE_STORE = "knowledge_store"
+STAGE_SEMANTIC_INDEX = "semantic_index"
+STAGE_PUBLICATION = "publication"
+
+
+@dataclass(frozen=True)
+class GenerationBuildResult:
+    """Outcome of one complete-generation build (Step 14).
+
+    ``published`` is the only success signal. A build that failed anywhere
+    after the graph was parsed reports ``published=False`` with a classified
+    stage, and the previously published generation is still the current one.
+    """
+
+    published: bool
+    generation_id: Optional[str] = None
+    kind: Optional[str] = None
+    chunk_count: int = 0
+    error: Optional[str] = None
+    stage: Optional[str] = None
+    graph_stats: dict[str, Any] = field(default_factory=dict)
 
 
 class KnowCodeService:
@@ -56,6 +84,8 @@ class KnowCodeService:
         self._store: Any = None
         self._search_engine: Optional["SearchEngine"] = None
         self._indexer: Optional["Indexer"] = None
+        self._generation: Optional[ResolvedGeneration] = None
+        self._generation_resolved = False
         self._retrieval_orchestrator = RetrievalOrchestrator(self)
 
     @property
@@ -66,15 +96,64 @@ class KnowCodeService:
             if store_file.suffix == ".db":
                 self._store = SqliteKnowledgeStore(store_file)
             else:
-                self._store = KnowledgeStore.load(self.store_path)
+                self._store = KnowledgeStore.load(store_file)
         return self._store
 
     def _store_root(self) -> Path:
         """Resolve the root directory where store/index artifacts live."""
         return self.store_path if self.store_path.is_dir() else self.store_path.parent
 
+    # ------------------------------------------------------------------
+    # Index generations (Step 14, ADR 4)
+    # ------------------------------------------------------------------
+
+    def current_generation(self) -> Optional[ResolvedGeneration]:
+        """Resolve the published generation this service reads from.
+
+        Resolved once and cached so the knowledge store, chunk repository,
+        vector store, and search engine handed out by this instance all come
+        from one generation. ``reload()`` is the only way to move onto a newer
+        one; handing *concurrent readers* between generations is Step 18.
+        """
+        if not self._generation_resolved:
+            self._generation = generations.resolve_current_generation(
+                self._index_path()
+            )
+            self._generation_resolved = True
+        return self._generation
+
+    def _artifact_dir(self, index_path: Optional[str | Path] = None) -> Path:
+        """Directory holding the chunk/vector artifacts a reader should open.
+
+        A published generation with a semantic index owns its own directory.
+        Otherwise this is the flat index root, which is both the pre-Step-14
+        layout and where a not-yet-built index would go. A graph-only
+        generation deliberately does not route here: opening a chunk store
+        inside it would create ``chunks.db`` in an immutable generation.
+        """
+        if index_path is not None:
+            root = Path(index_path)
+            generation = generations.resolve_current_generation(root)
+            if generation is not None and generation.has_semantic_index:
+                return generation.path
+            return root
+
+        generation = self.current_generation()
+        if generation is not None and generation.has_semantic_index:
+            return generation.path
+        return self._index_path()
+
     def _store_file(self) -> Path:
-        """Resolve the knowledge store file path."""
+        """Resolve the knowledge store file path.
+
+        A published generation owns the authoritative ``knowledge.db``. Without
+        one, the legacy flat layout is used so pre-Step-14 installs stay
+        readable.
+        """
+        generation = self.current_generation()
+        if generation is not None:
+            return generation.knowledge_db
+
         if self.store_path.is_dir():
             db_path = self.store_path / "knowledge.db"
             if db_path.exists():
@@ -83,7 +162,7 @@ class KnowCodeService:
         return self.store_path
 
     def _index_path(self) -> Path:
-        """Resolve the semantic index directory path."""
+        """Resolve the semantic index root (the generation artifact root)."""
         return self._store_root() / "knowcode_index"
 
     def _assert_store_exists(self) -> Path:
@@ -94,7 +173,18 @@ class KnowCodeService:
         return store_file
 
     def _assert_index_exists(self) -> Path:
-        """Validate that the persisted semantic index exists."""
+        """Validate that a searchable semantic index exists.
+
+        A graph-only generation has a knowledge store but no chunks or vectors,
+        so it fails here with the same actionable error as a missing index
+        rather than presenting an empty index as a working one.
+        """
+        generation = self.current_generation()
+        if generation is not None:
+            if not generation.has_semantic_index:
+                raise MissingSemanticIndexError(self._index_path())
+            return generation.path
+
         index_path = self._index_path()
         if not index_path.exists():
             raise MissingSemanticIndexError(index_path)
@@ -122,6 +212,9 @@ class KnowCodeService:
             temporal=temporal,
             coverage=coverage,
         )
+        resolved = self._store_file()
+        if resolved.exists():
+            return resolved
         db_path = output_path / "knowledge.db" if output_path.is_dir() else output_path.with_suffix(".db")
         if db_path.exists():
             return db_path
@@ -136,11 +229,18 @@ class KnowCodeService:
         directory: Optional[str | Path] = None,
         index_path: Optional[str | Path] = None,
     ) -> Path:
-        """Ensure the semantic index exists, building it only if missing."""
+        """Ensure a complete published generation exists, building if not.
+
+        "Exists" means a validated generation carrying a semantic index — not
+        merely a directory. A pre-Step-14 flat index, a half-published
+        generation, or a graph-only generation all rebuild, because none of
+        them can be proven to match the graph they are searched alongside.
+        """
         resolved_index_path = (
             Path(index_path) if index_path is not None else self._index_path()
         )
-        if resolved_index_path.exists():
+        generation = generations.resolve_current_generation(resolved_index_path)
+        if generation is not None and generation.has_semantic_index:
             return resolved_index_path
 
         source_dir = Path(directory) if directory is not None else self._store_root()
@@ -151,7 +251,7 @@ class KnowCodeService:
         """Get or create the indexer.
 
         Args:
-            index_path: Optional path to load an existing index from.
+            index_path: Optional index root to resolve a generation from.
 
         Returns:
             Initialized Indexer instance.
@@ -159,21 +259,21 @@ class KnowCodeService:
         if self._indexer is None:
 
             provider = create_embedding_provider(app_config=self.app_config)
-            resolved_index_path = Path(index_path) if index_path else self._index_path()
-            db_path = resolved_index_path / "chunks.db"
+            artifact_dir = self._artifact_dir(index_path)
+            db_path = artifact_dir / "chunks.db"
             chunk_repo = SqliteChunkRepository(db_path)
 
             dimension = provider.config.dimension
             vector_store = create_vector_store(
                 self.app_config.vector_backend,
                 dimension=dimension,
-                index_dir=resolved_index_path,
+                index_dir=artifact_dir,
             )
 
             self._indexer = Indexer(provider, chunk_repo=chunk_repo, vector_store=vector_store)
 
-            if resolved_index_path.exists():
-                self._indexer.load(resolved_index_path)
+            if artifact_dir.exists():
+                self._indexer.load(artifact_dir)
 
         return self._indexer
 
@@ -290,9 +390,15 @@ class KnowCodeService:
         if store_file.exists():
             last_store_rebuild = os.path.getmtime(store_file)
 
-        index_manifest = self._index_path() / "index_manifest.json"
+        # The generation pointer is the publication timestamp: it is written
+        # last, so its mtime is the moment the index became searchable. Fall
+        # back to the flat manifest for a pre-Step-14 layout.
         last_index_rebuild = 0.0
-        if index_manifest.exists():
+        pointer = generations.pointer_path(self._index_path())
+        index_manifest = self._index_path() / "index_manifest.json"
+        if pointer.exists():
+            last_index_rebuild = os.path.getmtime(pointer)
+        elif index_manifest.exists():
             last_index_rebuild = os.path.getmtime(index_manifest)
 
         latest_source_change = 0.0
@@ -334,42 +440,267 @@ class KnowCodeService:
             "stale_reasons": stale_reasons,
         }
 
-    def _build_index(self, directory: str | Path, index_path: str | Path, incremental: bool = False) -> int:
-        """Build a semantic index for a directory and persist it."""
+    def _build_index(
+        self, directory: str | Path, index_path: str | Path, incremental: bool = False
+    ) -> int:
+        """Publish a complete generation for ``directory`` and return its chunk count.
+
+        Raises:
+            RuntimeError: The generation could not be published. The previously
+                published generation, if any, is untouched.
+        """
+        result = self.build_generation(
+            directory, index_path, incremental=incremental
+        )
+        if not result.published or result.kind != generations.KIND_FULL:
+            raise RuntimeError(
+                f"Semantic index build failed at stage {result.stage!r}: "
+                f"{result.error}"
+            )
+        return result.chunk_count
+
+    def build_generation(
+        self,
+        directory: str | Path,
+        index_path: str | Path,
+        *,
+        ignore: list[str] | None = None,
+        temporal: bool = False,
+        coverage: Path | None = None,
+        incremental: bool = False,
+        builder: Optional[GraphBuilder] = None,
+    ) -> GenerationBuildResult:
+        """Stage, validate, and atomically publish one complete generation.
+
+        Every artifact — ``knowledge.db``, ``chunks.db``, the vector index, and
+        the manifest describing them — is built inside a staging directory that
+        no reader can see. Only after they validate *together* is the staging
+        directory renamed into ``generations/`` and the pointer replaced. A
+        failure at any point leaves the previously published generation
+        current, which is the defect this step exists to fix.
+
+        A graph parse failure propagates: nothing has been staged and there is
+        no artifact story to tell. Every failure after that is classified into
+        :class:`GenerationBuildResult` so a caller can report it without
+        mistaking it for success.
+        """
         from knowcode.llm.embedding import create_embedding_provider
         from knowcode.indexing.indexer import Indexer
         from knowcode.storage.sqlite_chunk_repository import SqliteChunkRepository
 
-        provider = create_embedding_provider(app_config=self.app_config)
-        resolved_index_path = Path(index_path)
-        
-        if not incremental:
-            # Clear/initialize directory
-            if resolved_index_path.exists():
-                shutil.rmtree(resolved_index_path)
-        
-        resolved_index_path.mkdir(parents=True, exist_ok=True)
-        
-        db_path = resolved_index_path / "chunks.db"
-        chunk_repo = SqliteChunkRepository(db_path)
+        index_root = Path(index_path)
+        index_root.mkdir(parents=True, exist_ok=True)
 
+        # Startup hygiene: a staging generation from a crashed writer is never
+        # a publication candidate, so remove it before adding another.
+        generations.cleanup_staging_generations(index_root)
+
+        previous = generations.resolve_current_generation(index_root)
+
+        if builder is None:
+            builder = GraphBuilder()
+            builder.build_from_directory(
+                root_dir=directory,
+                additional_ignores=ignore,
+                analyze_temporal=temporal,
+                coverage_path=coverage,
+            )
+        graph_stats: dict[str, Any] = builder.stats()
+
+        provider = create_embedding_provider(app_config=self.app_config)
         dimension = provider.config.dimension
-        vector_store = create_vector_store(
-            self.app_config.vector_backend,
-            dimension=dimension,
-            index_dir=resolved_index_path,
+
+        with generations.staged_generation(index_root) as staging:
+            entity_ids = list(builder.entities)
+            try:
+                self._write_staged_knowledge_store(staging.path, builder)
+            except Exception as exc:  # noqa: BLE001 - classified, not swallowed
+                logger.exception("Failed to write the staged knowledge store")
+                return GenerationBuildResult(
+                    published=False,
+                    error=str(exc),
+                    stage=STAGE_KNOWLEDGE_STORE,
+                    graph_stats=graph_stats,
+                )
+
+            chunk_count = 0
+            chunk_ids: list[str] = []
+            vector_count = 0
+            semantic_error: Optional[Exception] = None
+
+            chunk_repo: Optional[SqliteChunkRepository] = None
+            try:
+                if incremental and previous is not None and previous.has_semantic_index:
+                    self._seed_staging_from(previous, staging.path)
+
+                chunk_repo = SqliteChunkRepository(
+                    staging.path / "chunks.db", dimension=dimension
+                )
+                vector_store = create_vector_store(
+                    self.app_config.vector_backend,
+                    dimension=dimension,
+                    index_dir=staging.path,
+                )
+                indexer = Indexer(
+                    provider, chunk_repo=chunk_repo, vector_store=vector_store
+                )
+                if incremental and (staging.path / "index_manifest.json").exists():
+                    indexer.load(staging.path)
+                    chunk_count = indexer.index_incremental(directory)
+                else:
+                    chunk_count = indexer.index_directory(directory, builder=builder)
+
+                indexer.save(staging.path)
+                vector_count = vector_store.count()
+            except Exception as exc:  # noqa: BLE001 - classified, not swallowed
+                semantic_error = exc
+                logger.warning("Semantic index build failed: %s", exc)
+            finally:
+                if chunk_repo is not None:
+                    # Close before digesting: an open WAL connection means the
+                    # committed rows are not all in ``chunks.db`` yet.
+                    chunk_repo.close()
+
+            if semantic_error is not None:
+                if previous is not None and previous.has_semantic_index:
+                    # Never trade a searchable generation for one without an
+                    # index; the caller reports the failure instead.
+                    return GenerationBuildResult(
+                        published=False,
+                        error=str(semantic_error),
+                        stage=STAGE_SEMANTIC_INDEX,
+                        graph_stats=graph_stats,
+                    )
+                kind = generations.KIND_GRAPH_ONLY
+                self._discard_semantic_artifacts(staging.path)
+                chunk_ids = []
+                chunk_count = 0
+                vector_count = 0
+            else:
+                kind = generations.KIND_FULL
+                chunk_ids = generations.read_chunk_ids(staging.path / "chunks.db")
+                self._assert_chunk_vector_parity(chunk_ids, vector_count)
+
+            try:
+                manifest = generations.build_manifest(
+                    staging.path,
+                    generation_id=staging.generation_id,
+                    kind=kind,
+                    entity_ids=entity_ids,
+                    relationship_count=len(builder.relationships),
+                    chunk_ids=chunk_ids,
+                    vector_count=vector_count,
+                    embedding=self._embedding_metadata(provider),
+                    vector={
+                        "backend": self.app_config.vector_backend,
+                        "dimension": dimension,
+                    },
+                    schema_versions={
+                        "chunks": SqliteChunkRepository.SCHEMA_VERSION,
+                        "index_manifest": Indexer.SCHEMA_VERSION,
+                    },
+                )
+                published = generations.publish_generation(
+                    index_root, staging.path, manifest
+                )
+            except Exception as exc:  # noqa: BLE001 - classified, not swallowed
+                logger.exception("Failed to publish index generation")
+                return GenerationBuildResult(
+                    published=False,
+                    error=str(exc),
+                    stage=STAGE_PUBLICATION,
+                    graph_stats=graph_stats,
+                )
+
+            staging.published = True
+
+        self._adopt_generation(published)
+        return GenerationBuildResult(
+            published=True,
+            generation_id=published.generation_id,
+            kind=published.kind,
+            chunk_count=chunk_count,
+            error=str(semantic_error) if semantic_error is not None else None,
+            stage=STAGE_SEMANTIC_INDEX if semantic_error is not None else None,
+            graph_stats=graph_stats,
         )
 
-        indexer = Indexer(provider, chunk_repo=chunk_repo, vector_store=vector_store)
-        
-        if incremental and (resolved_index_path / "index_manifest.json").exists():
-            indexer.load(resolved_index_path)
-            count = indexer.index_incremental(directory)
-        else:
-            count = indexer.index_directory(directory)
-            
-        indexer.save(resolved_index_path)
-        return count
+    def _write_staged_knowledge_store(
+        self, staging_dir: Path, builder: GraphBuilder
+    ) -> None:
+        """Write ``knowledge.db`` into a staging generation and close it."""
+        store = SqliteKnowledgeStore(staging_dir / "knowledge.db")
+        try:
+            # bulk_insert owns its connection, lock, and transaction (ADR 2):
+            # callers must not drive a manual BEGIN/COMMIT around individually
+            # locking methods.
+            store.bulk_insert(
+                entities=list(builder.entities.values()),
+                relationships=list(builder.relationships),
+            )
+        finally:
+            store.close()
+
+    def _seed_staging_from(
+        self, previous: ResolvedGeneration, staging_dir: Path
+    ) -> None:
+        """Copy a previous generation's semantic artifacts into staging.
+
+        Incremental builds start from the last published generation instead of
+        mutating it. Step 15 replaces this full copy with a validated
+        copy-on-write delta; until then correctness outranks the copy cost,
+        which is documented alongside retention.
+        """
+        for name in ("chunks.db", "index_manifest.json", "vectors.json"):
+            source = previous.path / name
+            if source.exists():
+                shutil.copy2(source, staging_dir / name)
+        for name in generations.NATIVE_VECTOR_ARTIFACTS:
+            source = previous.path / name
+            if source.is_dir():
+                shutil.copytree(source, staging_dir / name)
+            elif source.exists():
+                shutil.copy2(source, staging_dir / name)
+
+    @staticmethod
+    def _discard_semantic_artifacts(staging_dir: Path) -> None:
+        """Remove partial semantic artifacts from a graph-only generation."""
+        for name in ("chunks.db", "index_manifest.json", "vectors.json"):
+            for path in staging_dir.glob(f"{name}*"):
+                path.unlink(missing_ok=True)
+        for name in generations.NATIVE_VECTOR_ARTIFACTS:
+            path = staging_dir / name
+            if path.is_dir():
+                shutil.rmtree(path, ignore_errors=True)
+            elif path.exists():
+                path.unlink()
+
+    @staticmethod
+    def _assert_chunk_vector_parity(chunk_ids: list[str], vector_count: int) -> None:
+        """Fail a staged generation whose chunk and vector membership disagree."""
+        if len(chunk_ids) != vector_count:
+            raise generations.GenerationValidationError(
+                Path("<staged>"),
+                [
+                    "chunk/vector count mismatch before publication: "
+                    f"chunks={len(chunk_ids)} vectors={vector_count}"
+                ],
+            )
+
+    @staticmethod
+    def _embedding_metadata(provider: Any) -> dict[str, Any]:
+        """Serialize the embedding configuration recorded in a generation."""
+        from dataclasses import asdict
+
+        return dict(asdict(provider.config))
+
+    def _adopt_generation(self, published: ResolvedGeneration) -> None:
+        """Point this service at a generation it just published."""
+        self._generation = published
+        self._generation_resolved = True
+        self._store = None
+        self._indexer = None
+        self._search_engine = None
 
     def _extract_query_keywords(self, query: str) -> list[str]:
         """Extract identifier-like keywords from a natural-language query."""
@@ -456,6 +787,11 @@ class KnowCodeService:
     ) -> dict[str, Any]:
         """Analyze a codebase and persist the resulting knowledge store.
 
+        The knowledge graph is no longer committed before the semantic index is
+        proven. Both are staged into one generation and published together, so
+        a failed rebuild leaves the previous generation searchable instead of
+        replacing it with a graph that has no index (Step 14).
+
         Args:
             directory: Root directory to scan and parse.
             output: Destination path for the knowledge store JSON.
@@ -465,7 +801,9 @@ class KnowCodeService:
             incremental: Whether to use incremental index build.
 
         Returns:
-            Statistics from the graph builder.
+            Statistics from the graph builder plus the publication outcome:
+            ``published``, ``generation_id``, ``indexed_chunks``, and — when
+            something failed — ``index_error`` and ``index_error_stage``.
         """
         builder = GraphBuilder()
         builder.build_from_directory(
@@ -476,39 +814,33 @@ class KnowCodeService:
         )
 
         output_path = Path(output)
-        db_path = output_path / "knowledge.db" if output_path.is_dir() else output_path.with_suffix(".db")
-
-        sqlite_store = SqliteKnowledgeStore(db_path)
-        # bulk_insert owns its connection, lock, and transaction (ADR 2): callers
-        # must not drive a manual BEGIN/COMMIT around individually locking methods.
-        sqlite_store.bulk_insert(
-            entities=list(builder.entities.values()),
-            relationships=list(builder.relationships),
-        )
-
-        self._store = sqlite_store
+        store_root = output_path if output_path.is_dir() else output_path.parent
+        index_path = store_root / "knowcode_index"
 
         if export_json:
+            # The legacy JSON exporter is deliberately outside the generation:
+            # ADR 7 allows reading it, never mixing it into a published one.
             store = KnowledgeStore.from_graph_builder(builder)
             json_path = output_path / KnowledgeStore.DEFAULT_FILENAME if output_path.is_dir() else output_path.with_suffix(".json")
             store.save(json_path)
 
-        store_root = output_path if output_path.is_dir() else output_path.parent
-        index_path = store_root / "knowcode_index"
-        index_count = 0
-        index_error: str | None = None
-        try:
-            index_count = self._build_index(Path(directory), index_path, incremental=incremental)
-        except Exception as e:
-            # Keep analyze usable without embedding credentials; semantic
-            # indexing can still be built later with `knowcode index`.
-            index_error = str(e)
+        result = self.build_generation(
+            Path(directory),
+            index_path,
+            incremental=incremental,
+            builder=builder,
+        )
 
         stats: dict[str, Any] = builder.stats()
-        stats["indexed_chunks"] = index_count
+        stats["indexed_chunks"] = result.chunk_count
         stats["index_path"] = str(index_path)
-        if index_error:
-            stats["index_error"] = index_error
+        stats["published"] = result.published
+        stats["generation_id"] = result.generation_id
+        stats["generation_kind"] = result.kind
+        stats["store_path"] = str(self._store_file())
+        if result.error:
+            stats["index_error"] = result.error
+            stats["index_error_stage"] = result.stage
         return stats
 
     def search(self, pattern: str) -> list[dict[str, Any]]:
@@ -645,11 +977,15 @@ class KnowCodeService:
         # Add index stats if indexer is loaded
         if self._indexer:
             stats["total_chunks"] = self._indexer.chunk_repo.count()
-            if (
-                hasattr(self._indexer.vector_store, "index")
-                and self._indexer.vector_store.index
-            ):
-                stats["vector_index_size"] = self._indexer.vector_store.index.ntotal
+            # ``count()`` is the protocol's live-vector count, so both backends
+            # report it; the old ``index.ntotal`` probe silently omitted the
+            # field for LanceDB and counted FAISS tombstones before Step 11.
+            stats["vector_index_size"] = self._indexer.vector_store.count()
+
+        generation = self.current_generation()
+        if generation is not None:
+            stats["generation_id"] = generation.generation_id
+            stats["generation_kind"] = generation.kind
 
         return stats
 
@@ -669,18 +1005,27 @@ class KnowCodeService:
         ]
 
     def reload(self) -> None:
-        """Reload the knowledge store from disk.
+        """Re-resolve the current generation and drop every derived component.
 
-        Useful when the underlying JSON file has been updated by a
-        separate process (e.g., a CLI scan).
+        The store, chunk repository, vector store, and search engine are all
+        released together so a reload can never leave one of them on an older
+        generation than the others. Retired resources are dropped rather than
+        closed: an in-flight reader may still hold them, and the reference
+        counting that makes closing safe is Step 18.
         """
         self._store = None
+        self._indexer = None
+        self._search_engine = None
+        self._generation = None
+        self._generation_resolved = False
         try:
             # Force reload by accessing the property
             _ = self.store
         except FileNotFoundError as e:
             # If the file is gone, keep _store as None
-            logging.getLogger(__name__).warning("Knowledge store file not found during reload: %s", e)
+            logger.warning("Knowledge store file not found during reload: %s", e)
+        except MissingKnowledgeStoreError as e:
+            logger.warning("Knowledge store missing during reload: %s", e)
 
     def get_entity_details(self, entity_id: str) -> Optional[dict[str, Any]]:
         """Get detailed information about an entity as a dictionary.

@@ -66,8 +66,6 @@ def test_analyze_routes_through_bulk_insert(tmp_path: Path, monkeypatch) -> None
     (src / "m.py").write_text("def foo():\n    return 1\n", encoding="utf-8")
 
     service = KnowCodeService(store_path=tmp_path, app_config=AppConfig.default())
-    # Avoid the embedding provider entirely; only the bulk_insert path is under test.
-    service._build_index = lambda *a, **k: 0  # type: ignore[assignment]
 
     captured: dict = {}
     real_bulk = SqliteKnowledgeStore.bulk_insert
@@ -79,9 +77,12 @@ def test_analyze_routes_through_bulk_insert(tmp_path: Path, monkeypatch) -> None
 
     monkeypatch.setattr(SqliteKnowledgeStore, "bulk_insert", spy)
 
-    service.analyze(directory=src, output=tmp_path)
+    stats = service.analyze(directory=src, output=tmp_path)
+    assert stats["published"] is True
 
-    store = service._store
+    # The store is re-opened from the published generation, not from the
+    # staging directory it was written into.
+    store = service.store
     assert isinstance(store, SqliteKnowledgeStore)
     try:
         # bulk_insert was invoked with the parsed entities, not a manual BEGIN.

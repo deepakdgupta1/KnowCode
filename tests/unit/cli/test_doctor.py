@@ -11,6 +11,7 @@ from click.testing import CliRunner
 import pytest
 
 from knowcode.data_models import Entity, EntityKind, Location
+from knowcode.indexing import generations
 from knowcode.indexing.indexer import Indexer
 from knowcode import readiness
 from knowcode.storage.knowledge_store import KnowledgeStore
@@ -113,6 +114,50 @@ def _write_index(path: Path, *, dimension: int = 1024, backend: str | None = Non
         (path / "vectors.index").write_bytes(b"placeholder")
 
 
+def _publish_generation(
+    index_root: Path,
+    *,
+    dimension: int = 1024,
+    backend: str | None = None,
+    kind: str = generations.KIND_FULL,
+) -> Path:
+    """Publish a complete generation the way a real build does (Step 14)."""
+    with generations.staged_generation(index_root) as staging:
+        _write_sqlite_store(staging.path / "knowledge.db")
+        chunk_ids: list[str] = []
+        if kind == generations.KIND_FULL:
+            _write_index(staging.path, dimension=dimension, backend=backend)
+            _write_chunks_db(staging.path / "chunks.db")
+
+        manifest = generations.build_manifest(
+            staging.path,
+            generation_id=staging.generation_id,
+            kind=kind,
+            entity_ids=["sample.py::foo"],
+            relationship_count=0,
+            chunk_ids=chunk_ids,
+            vector_count=0,
+            embedding={
+                "provider": "voyageai",
+                "model_name": "voyage-code-3",
+                "dimension": dimension,
+                "normalize": True,
+            },
+            vector={"backend": backend or "faiss", "dimension": dimension},
+        )
+        published = generations.publish_generation(index_root, staging.path, manifest)
+        staging.published = True
+    return published.path
+
+
+def _write_chunks_db(path: Path) -> None:
+    """Create a current-schema, empty chunk store."""
+    from knowcode.storage.sqlite_chunk_repository import SqliteChunkRepository
+
+    repo = SqliteChunkRepository(path)
+    repo.close()
+
+
 @pytest.fixture(autouse=True)
 def _api_keys(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("KC_TEST_LLM_KEY", "test-llm")
@@ -127,8 +172,7 @@ def test_doctor_passes_with_valid_store_index_and_config(tmp_path: Path) -> None
     rules_dir.mkdir(parents=True, exist_ok=True)
     (rules_dir / "context.md").write_text("refer to docs/mcp-contract.md", encoding="utf-8")
 
-    _write_store(tmp_path)
-    _write_index(tmp_path / "knowcode_index")
+    _publish_generation(tmp_path / "knowcode_index")
 
     result = CliRunner().invoke(
 
@@ -143,6 +187,7 @@ def test_doctor_passes_with_valid_store_index_and_config(tmp_path: Path) -> None
         "Config",
         "API keys",
         "Knowledge store",
+        "Index generation",
         "Semantic index",
         "Disk footprint",
         "Agent rules",
@@ -151,7 +196,93 @@ def test_doctor_passes_with_valid_store_index_and_config(tmp_path: Path) -> None
         "Native dependencies",
         "Optional dependencies",
     }
-    assert all(check["status"] == "pass" for check in payload["checks"])
+    assert all(check["status"] == "pass" for check in payload["checks"]), payload
+
+
+def test_doctor_warns_about_the_pre_generation_flat_layout(tmp_path: Path) -> None:
+    config = tmp_path / "aimodels.yaml"
+    _write_config(config)
+    _write_store(tmp_path)
+    _write_index(tmp_path / "knowcode_index")
+
+    report = doctor_module.run_doctor(store_path=tmp_path, config_path=config)
+
+    check = next(c for c in report.checks if c.name == "Index generation")
+    assert check.status == "warn"
+    assert "flat layout" in check.message
+
+
+def test_doctor_fails_a_generation_whose_artifact_was_tampered_with(
+    tmp_path: Path,
+) -> None:
+    """The generation check is what proves the four artifacts still match."""
+    config = tmp_path / "aimodels.yaml"
+    _write_config(config)
+    generation_path = _publish_generation(tmp_path / "knowcode_index")
+    (generation_path / "vectors.index").write_bytes(b"tampered")
+
+    report = doctor_module.run_doctor(store_path=tmp_path, config_path=config)
+
+    check = next(c for c in report.checks if c.name == "Index generation")
+    assert check.status == "fail"
+    assert "checksum mismatch" in check.message
+    assert report.ok is False
+
+
+def test_doctor_fails_when_no_retained_generation_validates(tmp_path: Path) -> None:
+    config = tmp_path / "aimodels.yaml"
+    _write_config(config)
+    generation_path = _publish_generation(tmp_path / "knowcode_index")
+    (generation_path / generations.MANIFEST_FILENAME).unlink()
+
+    report = doctor_module.run_doctor(store_path=tmp_path, config_path=config)
+
+    check = next(c for c in report.checks if c.name == "Index generation")
+    assert check.status == "fail"
+    assert "No usable index generation" in check.message
+
+
+def test_doctor_warns_about_a_graph_only_generation(tmp_path: Path) -> None:
+    config = tmp_path / "aimodels.yaml"
+    _write_config(config)
+    _publish_generation(tmp_path / "knowcode_index", kind=generations.KIND_GRAPH_ONLY)
+
+    report = doctor_module.run_doctor(store_path=tmp_path, config_path=config)
+
+    check = next(c for c in report.checks if c.name == "Index generation")
+    assert check.status == "warn"
+    assert "graph-only" in check.message
+
+
+def test_doctor_warns_when_readers_fall_back_past_the_pointer(tmp_path: Path) -> None:
+    import shutil
+
+    config = tmp_path / "aimodels.yaml"
+    _write_config(config)
+    index_root = tmp_path / "knowcode_index"
+    _publish_generation(index_root)
+    newest = _publish_generation(index_root)
+    shutil.rmtree(newest)
+
+    report = doctor_module.run_doctor(store_path=tmp_path, config_path=config)
+
+    check = next(c for c in report.checks if c.name == "Index generation")
+    assert check.status == "warn"
+    assert "readers fall back" in check.message
+
+
+def test_doctor_reads_the_store_from_the_published_generation(tmp_path: Path) -> None:
+    """A stale flat knowledge.db must not be preferred over the generation."""
+    config = tmp_path / "aimodels.yaml"
+    _write_config(config)
+    generation_path = _publish_generation(tmp_path / "knowcode_index")
+    (tmp_path / "knowledge.db").write_bytes(b"not a database")
+
+    report = doctor_module.run_doctor(store_path=tmp_path, config_path=config)
+
+    store_check = next(c for c in report.checks if c.name == "Knowledge store")
+    assert store_check.status == "pass"
+    assert str(generation_path) in store_check.message
 
 
 def test_doctor_uses_current_sqlite_store_built_by_cli(tmp_path: Path) -> None:

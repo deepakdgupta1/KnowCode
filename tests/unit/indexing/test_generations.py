@@ -1,0 +1,392 @@
+"""Contract tests for complete index generations (Step 14).
+
+ADR 4 requires that a full or incremental build stage every artifact in a
+unique directory, validate them together, and publish one atomic pointer last.
+These tests exercise the staging/validation/publication primitive directly; the
+service-level rebuild that uses it lives in
+``tests/unit/service/test_generation_publication.py``.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import sqlite3
+from pathlib import Path
+
+import pytest
+
+from knowcode.indexing import generations
+from knowcode.indexing.generations import (
+    GenerationValidationError,
+    GenerationManifest,
+    MANIFEST_FILENAME,
+    MANIFEST_SCHEMA_VERSION,
+    cleanup_staging_generations,
+    generations_dir,
+    list_generations,
+    new_generation_id,
+    pointer_path,
+    publish_generation,
+    resolve_current_generation,
+    stage_generation,
+    validate_generation,
+)
+
+
+# ----------------------------------------------------------------------
+# Helpers: a minimal but structurally complete staged generation
+# ----------------------------------------------------------------------
+
+
+def _write_ids(path: Path, table: str, column: str, ids: list[str]) -> None:
+    """Create a SQLite artifact matching the real store's identifier column."""
+    conn = sqlite3.connect(str(path))
+    try:
+        conn.execute(f"CREATE TABLE IF NOT EXISTS {table} ({column} TEXT PRIMARY KEY)")
+        conn.execute(f"DELETE FROM {table}")
+        conn.executemany(
+            f"INSERT INTO {table} ({column}) VALUES (?)", [(i,) for i in ids]
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _stage(
+    root: Path,
+    *,
+    entity_ids: list[str] | None = None,
+    chunk_ids: list[str] | None = None,
+    kind: str = generations.KIND_FULL,
+) -> tuple[Path, GenerationManifest]:
+    """Stage a structurally complete generation and return its path/manifest."""
+    entity_ids = ["m.py::alpha"] if entity_ids is None else entity_ids
+    chunk_ids = ["m.py::alpha::0"] if chunk_ids is None else chunk_ids
+
+    staging = stage_generation(root)
+    _write_ids(staging / "knowledge.db", "entities", "entity_id", entity_ids)
+    if kind == generations.KIND_FULL:
+        _write_ids(staging / "chunks.db", "chunks", "chunk_id", chunk_ids)
+        (staging / "vectors.index").write_bytes(b"native-index-bytes")
+        (staging / "vectors.json").write_text(
+            json.dumps({"schema_version": 3, "backend": "faiss", "dimension": 4}),
+            encoding="utf-8",
+        )
+        (staging / "index_manifest.json").write_text(
+            json.dumps({"schema_version": 2, "embedding": {"dimension": 4}}),
+            encoding="utf-8",
+        )
+
+    manifest = generations.build_manifest(
+        staging,
+        generation_id=generations.staging_generation_id(staging),
+        kind=kind,
+        entity_ids=entity_ids,
+        relationship_count=0,
+        chunk_ids=chunk_ids if kind == generations.KIND_FULL else [],
+        vector_count=len(chunk_ids) if kind == generations.KIND_FULL else 0,
+        embedding={"provider": "dummy", "model_name": "m", "dimension": 4},
+        vector={"backend": "faiss", "dimension": 4, "schema_version": 3},
+    )
+    generations.write_manifest(staging, manifest)
+    return staging, manifest
+
+
+# ----------------------------------------------------------------------
+# Staging
+# ----------------------------------------------------------------------
+
+
+def test_generation_ids_are_unique(tmp_path: Path) -> None:
+    ids = {new_generation_id() for _ in range(50)}
+    assert len(ids) == 50
+
+
+def test_generation_ids_sort_in_publication_order() -> None:
+    """Retention and pointer fallback both mean "the newest id"."""
+    ids = [new_generation_id() for _ in range(50)]
+
+    assert ids == sorted(ids)
+
+
+def test_staging_directory_lives_beside_the_generations_directory(
+    tmp_path: Path,
+) -> None:
+    """Staging must share the filesystem with its publication target."""
+    staging = stage_generation(tmp_path)
+
+    assert staging.is_dir()
+    assert staging.parent == tmp_path
+    assert staging.name.startswith(generations.STAGING_PREFIX)
+    # Nothing is published yet.
+    assert not pointer_path(tmp_path).exists()
+
+
+def test_staging_never_touches_the_live_generation(tmp_path: Path) -> None:
+    staging, manifest = _stage(tmp_path)
+    published = publish_generation(tmp_path, staging, manifest)
+
+    live_bytes = (published.path / "knowledge.db").read_bytes()
+    second, _ = _stage(tmp_path, entity_ids=["m.py::beta"])
+
+    assert second.exists()
+    assert (published.path / "knowledge.db").read_bytes() == live_bytes
+    assert resolve_current_generation(tmp_path).generation_id == published.generation_id
+
+
+# ----------------------------------------------------------------------
+# Publication
+# ----------------------------------------------------------------------
+
+
+def test_publish_moves_the_staged_directory_and_writes_the_pointer_last(
+    tmp_path: Path,
+) -> None:
+    staging, manifest = _stage(tmp_path)
+
+    resolved = publish_generation(tmp_path, staging, manifest)
+
+    assert not staging.exists()
+    assert resolved.path == generations_dir(tmp_path) / resolved.generation_id
+    assert (resolved.path / "knowledge.db").exists()
+    assert (resolved.path / MANIFEST_FILENAME).exists()
+
+    pointer = json.loads(pointer_path(tmp_path).read_text(encoding="utf-8"))
+    assert pointer["generation_id"] == resolved.generation_id
+    assert pointer["schema_version"] == generations.POINTER_SCHEMA_VERSION
+
+
+def test_pointer_write_failure_leaves_the_previous_generation_current(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failure at the last publication step must not retire the old pointer."""
+    first_staging, first_manifest = _stage(tmp_path)
+    first = publish_generation(tmp_path, first_staging, first_manifest)
+
+    second_staging, second_manifest = _stage(tmp_path, entity_ids=["m.py::beta"])
+
+    def explode(*args: object, **kwargs: object) -> None:
+        raise OSError("no space left on device")
+
+    monkeypatch.setattr(generations, "publish_pointer", explode)
+
+    with pytest.raises(OSError):
+        publish_generation(tmp_path, second_staging, second_manifest)
+
+    monkeypatch.undo()
+    assert resolve_current_generation(tmp_path).generation_id == first.generation_id
+    # The renamed-but-unpointed directory is rolled back, so a later pointer
+    # fallback cannot select a generation that was never published.
+    assert list_generations(tmp_path) == [first.generation_id]
+
+
+def test_publish_rejects_an_invalid_staged_generation(tmp_path: Path) -> None:
+    staging, manifest = _stage(tmp_path)
+    (staging / "vectors.index").unlink()
+
+    with pytest.raises(GenerationValidationError) as excinfo:
+        publish_generation(tmp_path, staging, manifest)
+
+    assert "vectors.index" in str(excinfo.value)
+    assert not pointer_path(tmp_path).exists()
+
+
+def test_publish_of_an_invalid_generation_keeps_the_previous_one_searchable(
+    tmp_path: Path,
+) -> None:
+    first_staging, first_manifest = _stage(tmp_path)
+    first = publish_generation(tmp_path, first_staging, first_manifest)
+
+    bad_staging, bad_manifest = _stage(tmp_path, entity_ids=["m.py::beta"])
+    (bad_staging / "chunks.db").unlink()
+
+    with pytest.raises(GenerationValidationError):
+        publish_generation(tmp_path, bad_staging, bad_manifest)
+
+    assert resolve_current_generation(tmp_path).generation_id == first.generation_id
+
+
+# ----------------------------------------------------------------------
+# Validation
+# ----------------------------------------------------------------------
+
+
+def test_validation_rejects_a_chunk_vector_count_mismatch(tmp_path: Path) -> None:
+    staging, manifest = _stage(tmp_path)
+    broken = manifest.with_counts(vectors=manifest.counts["chunks"] + 1)
+    generations.write_manifest(staging, broken)
+
+    failures = validate_generation(staging, expected_id=broken.generation_id)
+
+    assert any("vector" in failure and "chunk" in failure for failure in failures)
+
+
+def test_validation_rejects_a_chunk_id_digest_mismatch(tmp_path: Path) -> None:
+    """A chunk store whose membership drifted from the manifest is not usable."""
+    staging, manifest = _stage(tmp_path, chunk_ids=["a", "b"])
+    _write_ids(staging / "chunks.db", "chunks", "chunk_id", ["a", "c"])
+
+    failures = validate_generation(
+        staging, expected_id=manifest.generation_id, verify_digests=True
+    )
+
+    assert any("chunk id digest mismatch" in failure for failure in failures)
+
+
+def test_validation_rejects_an_entity_id_digest_mismatch(tmp_path: Path) -> None:
+    staging, manifest = _stage(tmp_path, entity_ids=["m.py::alpha"])
+    _write_ids(staging / "knowledge.db", "entities", "entity_id", ["m.py::beta"])
+
+    failures = validate_generation(
+        staging, expected_id=manifest.generation_id, verify_digests=True
+    )
+
+    assert any("entity id digest mismatch" in failure for failure in failures)
+
+
+def test_validation_rejects_a_tampered_artifact_checksum(tmp_path: Path) -> None:
+    staging, manifest = _stage(tmp_path)
+    (staging / "vectors.index").write_bytes(b"tampered")
+
+    failures = validate_generation(
+        staging, expected_id=manifest.generation_id, verify_digests=True
+    )
+
+    assert any("checksum" in failure for failure in failures)
+
+
+def test_validation_rejects_a_generation_id_mismatch(tmp_path: Path) -> None:
+    staging, manifest = _stage(tmp_path)
+
+    failures = validate_generation(staging, expected_id="not-this-generation")
+
+    assert any("generation id" in failure for failure in failures)
+
+
+def test_validation_fails_closed_on_an_unsupported_manifest_schema(
+    tmp_path: Path,
+) -> None:
+    staging, manifest = _stage(tmp_path)
+    payload = json.loads((staging / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    payload["schema_version"] = MANIFEST_SCHEMA_VERSION + 1
+    (staging / MANIFEST_FILENAME).write_text(json.dumps(payload), encoding="utf-8")
+
+    failures = validate_generation(staging, expected_id=manifest.generation_id)
+
+    assert any("schema" in failure for failure in failures)
+    assert any("knowcode build" in failure for failure in failures)
+
+
+def test_validation_fails_closed_on_a_truncated_manifest(tmp_path: Path) -> None:
+    staging, manifest = _stage(tmp_path)
+    (staging / MANIFEST_FILENAME).write_text('{"schema_version": 3', encoding="utf-8")
+
+    failures = validate_generation(staging, expected_id=manifest.generation_id)
+
+    assert failures
+    assert any("knowcode build" in failure for failure in failures)
+
+
+def test_graph_only_generation_is_valid_without_semantic_artifacts(
+    tmp_path: Path,
+) -> None:
+    staging, manifest = _stage(tmp_path, kind=generations.KIND_GRAPH_ONLY)
+
+    assert validate_generation(staging, expected_id=manifest.generation_id) == []
+
+    resolved = publish_generation(tmp_path, staging, manifest)
+    assert resolved.kind == generations.KIND_GRAPH_ONLY
+    assert resolved.has_semantic_index is False
+
+
+# ----------------------------------------------------------------------
+# Resolution, fallback, and retention
+# ----------------------------------------------------------------------
+
+
+def test_resolve_returns_none_when_nothing_was_ever_published(tmp_path: Path) -> None:
+    assert resolve_current_generation(tmp_path) is None
+
+
+def test_resolve_falls_back_to_the_last_valid_generation(tmp_path: Path) -> None:
+    """An unreadable pointer may only select a *complete* retained generation."""
+    first_staging, first_manifest = _stage(tmp_path)
+    first = publish_generation(tmp_path, first_staging, first_manifest)
+
+    second_staging, second_manifest = _stage(tmp_path, entity_ids=["m.py::beta"])
+    second = publish_generation(tmp_path, second_staging, second_manifest)
+
+    # Corrupt the newest generation and point at nothing readable.
+    (second.path / MANIFEST_FILENAME).write_text("{ truncated", encoding="utf-8")
+    pointer_path(tmp_path).write_text("{ truncated", encoding="utf-8")
+
+    resolved = resolve_current_generation(tmp_path)
+
+    assert resolved is not None
+    assert resolved.generation_id == first.generation_id
+
+
+def test_resolve_returns_none_when_no_retained_generation_is_valid(
+    tmp_path: Path,
+) -> None:
+    staging, manifest = _stage(tmp_path)
+    published = publish_generation(tmp_path, staging, manifest)
+    (published.path / "knowledge.db").unlink()
+
+    assert resolve_current_generation(tmp_path) is None
+
+
+def test_resolve_never_mixes_artifacts_from_two_generations(tmp_path: Path) -> None:
+    first_staging, first_manifest = _stage(tmp_path, chunk_ids=["a", "b"])
+    first = publish_generation(tmp_path, first_staging, first_manifest)
+    second_staging, second_manifest = _stage(tmp_path, chunk_ids=["c"])
+    second = publish_generation(tmp_path, second_staging, second_manifest)
+
+    resolved = resolve_current_generation(tmp_path)
+
+    assert resolved.generation_id == second.generation_id
+    assert resolved.knowledge_db.parent == resolved.path
+    assert resolved.chunks_db.parent == resolved.path
+    assert resolved.path != first.path
+
+
+def test_retention_keeps_the_last_known_good_generation(tmp_path: Path) -> None:
+    published = []
+    for index in range(4):
+        staging, manifest = _stage(tmp_path, entity_ids=[f"m.py::e{index}"])
+        published.append(publish_generation(tmp_path, staging, manifest, retain=2))
+
+    remaining = set(list_generations(tmp_path))
+
+    assert remaining == {published[-1].generation_id, published[-2].generation_id}
+    assert resolve_current_generation(tmp_path).generation_id == published[-1].generation_id
+
+
+def test_retention_never_removes_the_current_generation(tmp_path: Path) -> None:
+    staging, manifest = _stage(tmp_path)
+    published = publish_generation(tmp_path, staging, manifest, retain=1)
+
+    assert list_generations(tmp_path) == [published.generation_id]
+    assert resolve_current_generation(tmp_path) is not None
+
+
+def test_cleanup_removes_abandoned_staging_directories_from_other_processes(
+    tmp_path: Path,
+) -> None:
+    mine = stage_generation(tmp_path)
+    abandoned = tmp_path / f"{generations.STAGING_PREFIX}20200101T000000Z-deadbe.pid1"
+    abandoned.mkdir()
+    (abandoned / "chunks.db").write_bytes(b"junk")
+
+    removed = cleanup_staging_generations(tmp_path)
+
+    assert abandoned not in [path for path in removed] or not abandoned.exists()
+    assert not abandoned.exists()
+    assert mine.exists(), "a staging directory owned by this process must survive"
+
+
+def test_staging_directory_name_carries_the_owning_pid(tmp_path: Path) -> None:
+    staging = stage_generation(tmp_path)
+
+    assert f".pid{os.getpid()}" in staging.name

@@ -29,6 +29,46 @@ def cli() -> None:
     pass
 
 
+def _report_generation(stats: dict[str, Any]) -> None:
+    """Report where a build published its generation, or why it did not.
+
+    Step 14 made publication all-or-nothing: the knowledge graph, chunks,
+    vectors, and manifest move together. A build that published nothing is an
+    error, not a warning with a partially usable result, so it exits non-zero.
+    """
+    if stats.get("store_path"):
+        click.echo(f"\n  Knowledge store: {stats['store_path']}")
+    if stats.get("index_path"):
+        click.echo(f"  Semantic index: {stats['index_path']}")
+    if stats.get("generation_id"):
+        click.echo(f"  Generation: {stats['generation_id']}")
+
+    if not stats.get("published", True):
+        click.echo(
+            "\n  Nothing was published: the previous index generation is still "
+            "the current one.",
+            err=True,
+        )
+        click.echo(
+            f"    Failed at stage {stats.get('index_error_stage')!r}: "
+            f"{stats.get('index_error')}",
+            err=True,
+        )
+        sys.exit(1)
+
+    if stats.get("index_error"):
+        click.echo(
+            "\n  Note: this generation has no semantic index "
+            "(the knowledge graph was still published).",
+            err=True,
+        )
+        click.echo(f"    {stats['index_error']}", err=True)
+        click.echo(
+            "    Build it later with `knowcode index` once embeddings are configured.",
+            err=True,
+        )
+
+
 @cli.command("install")
 @click.option(
     "--upgrade",
@@ -117,15 +157,8 @@ def analyze(directory: str, output: str, ignore: tuple[str, ...], temporal: bool
         click.echo(f"  Errors: {stats['total_errors']}")
     if stats.get("indexed_chunks") is not None:
         click.echo(f"  Indexed chunks: {stats['indexed_chunks']}")
-    if stats.get("index_error"):
-        click.echo("  Indexing warning: semantic index build skipped.", err=True)
-        click.echo(f"    {stats['index_error']}", err=True)
 
-    output_path = Path(output)
-    save_path = output_path / KnowledgeStore.DEFAULT_FILENAME if output_path.is_dir() else output_path
-    click.echo(f"\n  Saved to: {save_path}")
-    if stats.get("index_path"):
-        click.echo(f"  Index saved to: {stats['index_path']}")
+    _report_generation(stats)
 
 
 @cli.command()
@@ -196,20 +229,7 @@ def build(
     if stats.get("indexed_chunks") is not None:
         click.echo(f"  Indexed chunks: {stats['indexed_chunks']}")
 
-    save_path = target / KnowledgeStore.DEFAULT_FILENAME
-    click.echo(f"\n  Knowledge store: {save_path}")
-    if stats.get("index_path"):
-        click.echo(f"  Semantic index: {stats['index_path']}")
-    if stats.get("index_error"):
-        click.echo(
-            "\n  Note: semantic index was skipped (knowledge store still built).",
-            err=True,
-        )
-        click.echo(f"    {stats['index_error']}", err=True)
-        click.echo(
-            "    Build it later with `knowcode index` once embeddings are configured.",
-            err=True,
-        )
+    _report_generation(stats)
 
 
 @cli.command()
@@ -240,43 +260,39 @@ def index(directory: str, output: str, config: Optional[str], incremental: bool)
 
     try:
         from knowcode.config import AppConfig
-        from knowcode.llm.embedding import create_embedding_provider
-        from knowcode.indexing.indexer import Indexer
-        from knowcode.storage.sqlite_chunk_repository import SqliteChunkRepository
-        from knowcode.storage.vector_backends import create_vector_store
 
         app_config = AppConfig.load(config)
         if app_config.vector_backend == "lancedb":
             require_extra("search", "knowcode index", ("lancedb",))
-        provider = create_embedding_provider(app_config=app_config)
+
         index_path = Path(output)
-        vector_store = create_vector_store(
-            app_config.vector_backend,
-            dimension=provider.config.dimension,
-            index_dir=index_path,
+        # A semantic index is one artifact class of a generation, never a
+        # standalone directory: publishing it alone would leave chunks and
+        # vectors that no reader resolves and that match no knowledge graph.
+        service = KnowCodeService(store_path=directory, app_config=app_config)
+        result = service.build_generation(
+            directory, index_path, incremental=incremental
         )
-        indexer = Indexer(
-            provider,
-            chunk_repo=SqliteChunkRepository(
-                index_path / "chunks.db",
-                dimension=provider.config.dimension,
-            ),
-            vector_store=vector_store,
-        )
-
-        if incremental and (index_path / "index_manifest.json").exists():
-            indexer.load(index_path)
-            count = indexer.index_incremental(directory)
-        else:
-            count = indexer.index_directory(directory)
-            
-        indexer.save(output)
-
-        click.echo(f"✓ Indexing complete! Created {count} chunks.")
-        click.echo(f"  Saved to: {output}")
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
         sys.exit(1)
+
+    if not result.published:
+        click.echo(
+            f"Error: nothing was published (stage {result.stage!r}): {result.error}",
+            err=True,
+        )
+        click.echo(
+            "  The previous index generation, if any, is still the current one.",
+            err=True,
+        )
+        sys.exit(1)
+
+    click.echo(f"✓ Indexing complete! Created {result.chunk_count} chunks.")
+    click.echo(f"  Saved to: {output}")
+    click.echo(f"  Generation: {result.generation_id}")
+    if result.error:
+        click.echo(f"  Note: {result.error}", err=True)
 
 
 @cli.command()

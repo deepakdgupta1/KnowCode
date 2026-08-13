@@ -15,6 +15,8 @@ from typing import Any, Literal, Optional
 
 from knowcode.config import AppConfig
 from knowcode.data_models import EmbeddingConfig
+from knowcode.indexing import generations
+from knowcode.indexing.generations import ResolvedGeneration
 from knowcode.indexing.indexer import Indexer
 from knowcode.readiness import (
     IDEAL_SETUP_FEATURE_KEYS,
@@ -62,6 +64,16 @@ class ReadinessContext:
     config_path: Optional[Path]
     config: AppConfig
     vector_backend: str
+    #: The published generation readers use, when one exists (Step 14).
+    generation: Optional["ResolvedGeneration"] = None
+    #: Directory actually holding the chunk/vector artifacts: the generation
+    #: directory when one is published, otherwise the flat legacy index root.
+    artifact_path: Optional[Path] = None
+
+    @property
+    def artifacts(self) -> Path:
+        """Directory to inspect for chunk and vector artifacts."""
+        return self.artifact_path if self.artifact_path is not None else self.index_path
 
 
 @dataclass(frozen=True)
@@ -107,11 +119,25 @@ def run_doctor(
     checks: list[DoctorCheck] = []
 
     config, resolved_config = _check_config(config_path, checks)
-    store_file = _resolve_store_file(store_path)
-    store_root = store_file.parent
+    store_root = _resolve_store_root(store_path)
     resolved_index = (
         Path(index_path) if index_path is not None else store_root / "knowcode_index"
     )
+
+    # A published generation owns the authoritative knowledge store; the flat
+    # layout is only consulted when nothing has been published (Step 14).
+    generation = generations.resolve_current_generation(resolved_index)
+    store_file = (
+        generation.knowledge_db
+        if generation is not None
+        else _resolve_store_file(store_path)
+    )
+    artifact_path = (
+        generation.path
+        if generation is not None and generation.has_semantic_index
+        else resolved_index
+    )
+
     context = ReadinessContext(
         cwd=Path.cwd(),
         store_path=Path(store_path),
@@ -121,6 +147,8 @@ def run_doctor(
         config_path=resolved_config,
         config=config,
         vector_backend=config.vector_backend,
+        generation=generation,
+        artifact_path=artifact_path,
     )
 
     _check_api_keys(context.config, checks)
@@ -129,6 +157,7 @@ def run_doctor(
     _check_dependencies(checks)
     _check_python_runtime(checks)
 
+    _check_index_generation(context, checks)
     _check_semantic_index(context, checks)
 
     _check_disk_footprint(
@@ -501,9 +530,146 @@ def _check_knowledge_store(
     )
 
 
-def _check_semantic_index(context: ReadinessContext, checks: list[DoctorCheck]) -> None:
-    """Validate semantic index files, schemas, and embedding dimensions."""
+def _check_index_generation(
+    context: ReadinessContext, checks: list[DoctorCheck]
+) -> None:
+    """Validate the published generation as one complete artifact set.
+
+    Unlike the per-artifact checks that follow, this proves the four artifact
+    classes were published *together*: it recomputes the entity and chunk id
+    digests and every artifact checksum recorded in the manifest.
+    """
     index_path = context.index_path
+    pointer = generations.pointer_path(index_path)
+    retained = generations.list_generations(index_path)
+    rebuild = (
+        DoctorSuggestion(
+            label="Rebuild the index generation",
+            command=f"knowcode build {context.store_root}",
+        ),
+    )
+
+    abandoned = [
+        entry.name
+        for entry in (index_path.iterdir() if index_path.is_dir() else [])
+        if entry.is_dir() and entry.name.startswith(generations.STAGING_PREFIX)
+    ]
+
+    if not pointer.exists() and not retained:
+        if index_path.exists():
+            checks.append(
+                DoctorCheck(
+                    name="Index generation",
+                    status="warn",
+                    message=(
+                        f"{index_path} uses the pre-generation flat layout "
+                        "(no current.json pointer)."
+                    ),
+                    hint=(
+                        "Rebuild to publish a validated generation; the flat "
+                        "artifacts cannot be proven to match each other."
+                    ),
+                    suggestions=rebuild,
+                )
+            )
+        return
+
+    generation = context.generation
+    if generation is None:
+        checks.append(
+            DoctorCheck(
+                name="Index generation",
+                status="fail",
+                message=(
+                    f"No usable index generation in {index_path} "
+                    f"(pointer={generations.read_pointer(index_path)!r}, "
+                    f"retained={retained})."
+                ),
+                hint="Rebuild the index; no retained generation validated.",
+                suggestions=rebuild,
+            )
+        )
+        return
+
+    failures = generations.validate_generation(
+        generation.path, expected_id=generation.generation_id, verify_digests=True
+    )
+    if failures:
+        checks.append(
+            DoctorCheck(
+                name="Index generation",
+                status="fail",
+                message=f"{generation.path}: {'; '.join(failures)}",
+                hint="Rebuild the index generation.",
+                suggestions=rebuild,
+            )
+        )
+        return
+
+    pointed = generations.read_pointer(index_path)
+    if pointed != generation.generation_id:
+        checks.append(
+            DoctorCheck(
+                name="Index generation",
+                status="warn",
+                message=(
+                    f"Pointer names {pointed!r} but the newest valid generation "
+                    f"is {generation.generation_id}; readers fall back to it."
+                ),
+                hint="Rebuild to republish a matching pointer.",
+                suggestions=rebuild,
+            )
+        )
+        return
+
+    if not generation.has_semantic_index:
+        checks.append(
+            DoctorCheck(
+                name="Index generation",
+                status="warn",
+                message=(
+                    f"Generation {generation.generation_id} is graph-only: it has "
+                    "a knowledge store but no chunks or vectors."
+                ),
+                hint="Run `knowcode index` once embeddings are configured.",
+                suggestions=rebuild,
+            )
+        )
+        return
+
+    counts = generation.manifest.counts
+    message = (
+        f"Generation {generation.generation_id} is complete "
+        f"({counts.get('entities', 0)} entities, "
+        f"{counts.get('chunks', 0)} chunks, {counts.get('vectors', 0)} vectors; "
+        f"{len(retained)} retained)."
+    )
+    if abandoned:
+        checks.append(
+            DoctorCheck(
+                name="Index generation",
+                status="warn",
+                message=(
+                    f"{message} {len(abandoned)} abandoned staging generation(s) "
+                    "remain from an interrupted build."
+                ),
+                hint="They are ignored by readers and removed by the next build.",
+            )
+        )
+        return
+
+    checks.append(
+        DoctorCheck(name="Index generation", status="pass", message=message)
+    )
+
+
+def _check_semantic_index(context: ReadinessContext, checks: list[DoctorCheck]) -> None:
+    """Validate semantic index files, schemas, and embedding dimensions.
+
+    Inspects the published generation's own directory when one exists, so the
+    artifacts checked are exactly the ones readers open.
+    """
+    index_path = context.artifacts
     if not index_path.exists():
         checks.append(
             DoctorCheck(
@@ -783,6 +949,17 @@ async def _check_mcp_handshake(
     if stderr:
         message = f"{message} Server stderr: {stderr}"
     return DoctorCheck(name="MCP handshake", status="pass", message=message)
+
+
+def _resolve_store_root(store_path: str | Path) -> Path:
+    """Resolve the project root that holds KnowCode's artifacts.
+
+    Derived from the *argument* rather than from the resolved store file: a
+    published generation's ``knowledge.db`` lives several directories deep
+    inside ``knowcode_index/generations/``, so its parent is not the root.
+    """
+    path = Path(store_path)
+    return path if path.is_dir() else path.parent
 
 
 def _resolve_store_file(store_path: str | Path) -> Path:

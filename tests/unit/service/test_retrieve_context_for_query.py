@@ -10,8 +10,41 @@ import pytest
 from knowcode.config import AppConfig
 from knowcode.data_models import CodeChunk, TaskType
 from knowcode.errors import MissingKnowledgeStoreError, MissingSemanticIndexError
+from knowcode.indexing import generations
 from knowcode.retrieval.search_engine import ScoredChunk
 from knowcode.service import KnowCodeService
+
+
+def _publish_stub_generation(index_root: Path) -> None:
+    """Publish an empty but structurally valid full generation."""
+    import sqlite3
+
+    with generations.staged_generation(index_root) as staging:
+        for name, table, column in (
+            ("knowledge.db", "entities", "entity_id"),
+            ("chunks.db", "chunks", "chunk_id"),
+        ):
+            conn = sqlite3.connect(str(staging.path / name))
+            conn.execute(f"CREATE TABLE {table} ({column} TEXT PRIMARY KEY)")
+            conn.commit()
+            conn.close()
+        (staging.path / "vectors.index").write_bytes(b"")
+        (staging.path / "vectors.json").write_text("{}", encoding="utf-8")
+        (staging.path / "index_manifest.json").write_text("{}", encoding="utf-8")
+
+        manifest = generations.build_manifest(
+            staging.path,
+            generation_id=staging.generation_id,
+            kind=generations.KIND_FULL,
+            entity_ids=[],
+            relationship_count=0,
+            chunk_ids=[],
+            vector_count=0,
+            embedding={},
+            vector={"backend": "faiss", "dimension": 8},
+        )
+        generations.publish_generation(index_root, staging.path, manifest)
+        staging.published = True
 
 
 class DummySearchEngine:
@@ -82,9 +115,15 @@ class BuilderTrackingService(KnowCodeService):
         )
         return {}
 
-    def _build_index(self, directory, index_path):  # type: ignore[override]
+    def _build_index(self, directory, index_path, incremental=False):  # type: ignore[override]
+        """Publish a minimal but real generation.
+
+        Step 14 made "the index exists" mean "a validated generation is
+        published", so a stub that only creates a directory would be rebuilt on
+        every call and could never prove the build-once contract.
+        """
         self.build_index_calls += 1
-        Path(index_path).mkdir(parents=True, exist_ok=True)
+        _publish_stub_generation(Path(index_path))
         return 0
 
 

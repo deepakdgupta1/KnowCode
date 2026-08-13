@@ -37,6 +37,13 @@ class GraphBuilder:
         self.relationships: list[Relationship] = []
         self.errors: list[str] = []
 
+        # Retained so a generation build chunks exactly the parse that produced
+        # the graph (Step 14). Re-scanning would apply a different ignore set
+        # and re-parsing would risk a chunk set that disagrees with the
+        # entities committed to ``knowledge.db`` in the same generation.
+        self.scanned_files: list[FileInfo] = []
+        self.parse_results: list[ParseResult] = []
+
     def build_from_directory(
         self,
         root_dir: str | Path,
@@ -87,8 +94,11 @@ class GraphBuilder:
         Returns:
             Self for method chaining.
         """
+        self.scanned_files = list(files)
+        self.parse_results = []
         for file_info in files:
             parse_result = self._parse_file(file_info)
+            self.parse_results.append(parse_result)
             self._merge_result(parse_result)
 
         # Resolve references after all files are parsed

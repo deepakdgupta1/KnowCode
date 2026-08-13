@@ -2,11 +2,25 @@
 
 import importlib
 import json
+from pathlib import Path
 
 from click.testing import CliRunner
 import pytest
 
 cli_module = importlib.import_module("knowcode.cli.cli")
+
+
+def _published_store(root: Path) -> Path:
+    """Resolve the knowledge store of the published generation (Step 14).
+
+    ``knowledge.db`` no longer sits beside the sources: it is one of the four
+    artifacts published together inside ``knowcode_index/generations/<id>/``.
+    """
+    from knowcode.indexing.generations import resolve_current_generation
+
+    generation = resolve_current_generation(root / "knowcode_index")
+    assert generation is not None, "build published no generation"
+    return generation.knowledge_db
 
 
 def test_cli_analyze_query_stats_context(tmp_path) -> None:  # type: ignore
@@ -17,7 +31,7 @@ def test_cli_analyze_query_stats_context(tmp_path) -> None:  # type: ignore
     analyze = runner.invoke(cli_module.cli, ["analyze", str(tmp_path), "--output", str(tmp_path)])
     assert analyze.exit_code == 0
 
-    store_path = tmp_path / "knowledge.db"
+    store_path = _published_store(tmp_path)
     import sqlite3
     conn = sqlite3.connect(store_path)
     entity_id = conn.execute("SELECT entity_id FROM entities LIMIT 1").fetchone()[0]
@@ -62,7 +76,8 @@ def test_cli_build_defaults_to_current_directory(tmp_path, monkeypatch) -> None:
 
     assert result.exit_code == 0, result.output
     assert "Build complete" in result.output
-    store_path = tmp_path / "knowledge.db"
+    assert "Generation:" in result.output
+    store_path = _published_store(tmp_path)
     assert store_path.exists()
     import sqlite3
     conn = sqlite3.connect(store_path)

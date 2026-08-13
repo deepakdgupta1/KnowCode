@@ -50,49 +50,54 @@ class Indexer:
         self.chunker = Chunker()
         self.manifest: dict[str, Any] = {}
 
-    def index_directory(self, root_dir: str | Path) -> int:
+    def index_directory(
+        self, root_dir: str | Path, *, builder: Optional[GraphBuilder] = None
+    ) -> int:
         """Index all supported files under a directory.
 
         Args:
             root_dir: Root directory to scan for supported files.
+            builder: An already-built graph whose scan and parse results should
+                be reused. A generation build passes the same builder it wrote
+                ``knowledge.db`` from, so the chunk set derives from exactly the
+                parse that produced the entities (Step 14). Re-scanning here
+                would apply a different ignore set.
 
         Returns:
             Total number of chunks added to the index.
         """
         root_path = Path(root_dir)
-        
-        # Use existing GraphBuilder to get semantic entities
-        builder = GraphBuilder()
-        builder.build_from_directory(root_path)
-        
-        # Extract files from scanner
-        scanner = Scanner(root_path)
-        files = scanner.scan_all()
-        
+
+        if builder is None:
+            builder = GraphBuilder()
+            builder.build_from_directory(root_path)
+
+        parse_results = builder.parse_results
+        if not parse_results:
+            # A builder supplied by an older caller (or one built from an empty
+            # directory) has nothing retained; fall back to a fresh scan.
+            scanner = Scanner(root_path)
+            parse_results = [
+                builder._parse_file(file_info) for file_info in scanner.scan_all()
+            ]
+
         total_chunks = 0
-        for file_info in files:
-            # Build ParseResult-like data or use parser directly
-            # For simplicity in this Task, we use the Chunker which can take a ParseResult or we can adapt it.
-            # I'll use the graph builder's internal logic or build the parse results first.
-            
-            # Re-parse file to get entities (ideally we reuse builder.entities but we need them per file)
-            # For now, let's assume we use the PythonParser etc via a helper
-            parse_result = builder._parse_file(file_info)
+        for parse_result in parse_results:
             chunks = self.chunker.process_parse_result(parse_result)
-            
+
             if not chunks:
                 continue
-                
+
             # Process embeddings in batches
             contents = [c.content for c in chunks]
             embeddings = self.embedding_provider.embed(contents)
-            
+
             for chunk, emb in zip(chunks, embeddings):
                 chunk.embedding = emb
                 self.chunk_repo.add(chunk)
                 self.vector_store.add(chunk.id, emb)
                 total_chunks += 1
-                
+
         # Store current commit hash for future incremental indexing
         try:
             import git
@@ -100,7 +105,7 @@ class Indexer:
             self.manifest["last_indexed_commit"] = repo.head.commit.hexsha
         except Exception as e:
             logger.warning("Failed to get git commit for manifest: %s", e)
-            
+
         return total_chunks
 
     def index_incremental(self, root_dir: str | Path) -> int:
