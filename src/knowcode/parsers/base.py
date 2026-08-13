@@ -94,21 +94,24 @@ class TreeSitterParser:
         child_entities, child_rels, child_errors = self._extract_file(
             tree.root_node, file_path, module_id, source_code, source_lines
         )
+        # Two declarations in one file cannot share one canonical ID. Dedupe the
+        # real declarations (children) and surface the dropped duplicate instead
+        # of letting it collapse silently in GraphBuilder. The synthetic module
+        # entity is intentionally excluded: a top-level declaration whose name
+        # matches the file stem (notably a Java public class) is a redundant
+        # wrapper collision, not a duplicate declaration, and is resolved by the
+        # graph merge keeping the declaration.
+        child_entities, dedupe_errors = dedupe_entities_by_id(child_entities)
         entities.extend(child_entities)
         relationships.extend(child_rels)
         errors.extend(child_errors)
+        errors.extend(dedupe_errors)
 
         # Handle errors from tree-sitter
         if tree.root_node.has_error:
              # We might want to be more specific here, but for now just flag it
              # Don't fail completely, as partial AST is often useful
              errors.append("Tree-sitter reported syntax errors in file")
-
-        # Two declarations in one file cannot share one canonical ID; keep the
-        # first and surface the dropped duplicate instead of letting it collapse
-        # silently in GraphBuilder.
-        entities, dedupe_errors = dedupe_entities_by_id(entities)
-        errors.extend(dedupe_errors)
 
         return ParseResult(
             file_path=str(file_path),

@@ -9,19 +9,15 @@ contract; the parametrized cases here close that gap.
 from __future__ import annotations
 
 from pathlib import Path
-from tempfile import TemporaryDirectory
 
 import pytest
 
-from knowcode.indexing.graph_builder import GraphBuilder
-from knowcode.indexing.scanner import FileInfo
 from knowcode.parsers.java_parser import JavaParser
 from knowcode.parsers.javascript_parser import JavaScriptParser
 from knowcode.parsers.python_parser import PythonParser
 from knowcode.parsers.rust_parser import RustParser
 from knowcode.parsers.typescript_parser import TypeScriptParser
 from knowcode.parsers.vue_parser import VueParser
-from knowcode.utils.entity_identity import EndpointKind, classify_endpoint_id
 
 
 # ---------------------------------------------------------------------------
@@ -99,3 +95,53 @@ def test_duplicate_declarations_never_produce_duplicate_entity_ids(
     assert any(
         "duplicate" in message.lower() for message in result.errors
     ), f"{parser_class.__name__} must report the dropped duplicate; errors={result.errors}"
+
+
+# ---------------------------------------------------------------------------
+# Mixed-language repository merge & scan-order determinism
+# ---------------------------------------------------------------------------
+
+MIXED_FIXTURE_ROOT = Path(__file__).parents[2] / "fixtures" / "mixed_language"
+
+
+def test_mixed_language_graph_merge_and_order_determinism() -> None:
+    """GraphBuilder produces identical entities and relationships regardless
+    of forward or reversed scan order, and leaves no invalid endpoints."""
+    from knowcode.indexing.graph_builder import GraphBuilder
+    from knowcode.indexing.scanner import FileInfo
+    from knowcode.utils.entity_identity import EndpointKind, classify_endpoint_id
+
+    files = sorted(MIXED_FIXTURE_ROOT.glob("*"))
+    file_infos = [
+        FileInfo(
+            path=p,
+            relative_path=str(p.relative_to(MIXED_FIXTURE_ROOT)),
+            extension=p.suffix,
+            size_bytes=p.stat().st_size,
+        )
+        for p in files
+        if p.is_file()
+    ]
+
+    forward_builder = GraphBuilder().build_from_files(file_infos)
+    reversed_builder = GraphBuilder().build_from_files(list(reversed(file_infos)))
+
+    assert set(forward_builder.entities.keys()) == set(reversed_builder.entities.keys())
+    for entity_id, entity in forward_builder.entities.items():
+        rev_entity = reversed_builder.entities[entity_id]
+        assert entity.name == rev_entity.name
+        assert entity.kind == rev_entity.kind
+        assert entity.qualified_name == rev_entity.qualified_name
+        assert entity.metadata.get("content_hash") == rev_entity.metadata.get("content_hash")
+
+    forward_rels = {
+        (r.source_id, r.target_id, r.kind) for r in forward_builder.relationships
+    }
+    reversed_rels = {
+        (r.source_id, r.target_id, r.kind) for r in reversed_builder.relationships
+    }
+    assert forward_rels == reversed_rels
+
+    for rel in forward_builder.relationships:
+        assert classify_endpoint_id(rel.source_id) != EndpointKind.INVALID
+        assert classify_endpoint_id(rel.target_id) != EndpointKind.INVALID

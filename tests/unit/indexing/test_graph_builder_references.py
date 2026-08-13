@@ -2,9 +2,54 @@
 
 from pathlib import Path
 
+import pytest
+
 from knowcode.indexing.graph_builder import GraphBuilder
-from knowcode.data_models import Entity, EntityKind, Location, Relationship, RelationshipKind
+from knowcode.indexing.scanner import FileInfo
+from knowcode.data_models import Entity, EntityKind, Location, ParseResult, Relationship, RelationshipKind
 from knowcode.utils.entity_identity import EndpointKind, classify_endpoint_id
+from tests.helpers.parser_assertions import (
+    assert_exact_parse_result,
+    load_parser_fixture_contract,
+)
+
+
+FIXTURE_ROOT = Path(__file__).parents[2] / "fixtures" / "parser_contracts"
+
+
+def _fixture_sources() -> list[Path]:
+    return sorted(
+        path
+        for path in FIXTURE_ROOT.rglob("*")
+        if path.is_file() and not path.name.endswith(".expected.json")
+    )
+
+
+@pytest.mark.parametrize("source", _fixture_sources(), ids=lambda p: p.name)
+def test_graph_builder_matches_fixture_contract(source: Path) -> None:
+    """Every committed fixture survives a GraphBuilder merge unchanged.
+
+    Language-local tests call a parser directly; this gate builds the graph
+    through ``GraphBuilder.build_from_files`` (which runs annotation,
+    content-hashing, and ``ref::`` reference resolution) and requires the merged
+    result to still match the exact fixture contract: identical entities,
+    relationships, locations, and endpoint classification.
+    """
+    contract = load_parser_fixture_contract(source)
+    file_info = FileInfo(
+        path=source,
+        relative_path=str(source),
+        extension=source.suffix,
+        size_bytes=source.stat().st_size,
+    )
+    builder = GraphBuilder().build_from_files([file_info])
+    merged = ParseResult(
+        file_path=str(source),
+        entities=list(builder.entities.values()),
+        relationships=list(builder.relationships),
+    )
+
+    assert_exact_parse_result(merged, contract)
 
 
 def test_reference_resolution() -> None:

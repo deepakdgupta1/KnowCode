@@ -132,10 +132,11 @@ class PythonParser:
             relationships=relationships,
         )
 
-        # Two declarations in one file cannot share one canonical ID; keep the
-        # first and surface the dropped duplicate instead of letting it collapse
-        # silently in GraphBuilder.
-        entities, dedupe_errors = dedupe_entities_by_id(entities)
+        # Two declarations in one file cannot share one canonical ID. Dedupe the
+        # real declarations only (the module entity at entities[0] is a synthetic
+        # wrapper; a same-named top-level declaration is left to the graph merge).
+        children, dedupe_errors = dedupe_entities_by_id(entities[1:])
+        entities = [entities[0], *children]
 
         return ParseResult(
             file_path=str(file_path),

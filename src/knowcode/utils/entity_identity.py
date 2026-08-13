@@ -7,7 +7,7 @@ from enum import Enum
 from pathlib import Path
 from urllib.parse import quote
 
-from knowcode.data_models import Entity
+from knowcode.data_models import Entity, EntityKind
 
 
 class EndpointKind(str, Enum):
@@ -165,17 +165,26 @@ def dedupe_entities_by_id(
     by dict assignment. This helper makes that drop visible instead: it keeps
     the first entity per ID and returns one diagnostic message per collision so
     the limitation is classified through ``ParseResult.errors`` rather than lost.
+
+    If a concrete declaration (class, function, etc.) shares an ID with a
+    preceding synthetic file-level MODULE entity, the concrete declaration
+    supersedes the module entity without collision reporting.
     """
-    seen: set[str] = set()
+    seen: dict[str, int] = {}
     deduped: list[Entity] = []
     errors: list[str] = []
     for entity in entities:
         if entity.id in seen:
+            prev_idx = seen[entity.id]
+            prev_entity = deduped[prev_idx]
+            if prev_entity.kind == EntityKind.MODULE and entity.kind != EntityKind.MODULE:
+                deduped[prev_idx] = entity
+                continue
             errors.append(
                 f"Duplicate entity identity {entity.qualified_name!r}; "
                 "keeping the first declaration"
             )
             continue
-        seen.add(entity.id)
+        seen[entity.id] = len(deduped)
         deduped.append(entity)
     return deduped, errors
