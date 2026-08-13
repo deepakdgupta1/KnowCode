@@ -8,6 +8,7 @@
   ],
   "relationships": [
     {"source": "SfcSections", "target": {"classification": "internal", "qualified_name": "SfcSections.title"}, "kind": "contains"},
-    {"source": "SfcSections", "target": {"classification": "internal", "qualified_name": "SfcSections.select"}, "kind": "contains"}
+    {"source": "SfcSections", "target": {"classification": "internal", "qualified_name": "SfcSections.select"}, "kind": "contains"},
+    {"source": "SfcSections", "target": {"classification": "internal", "qualified_name": "SfcSections.title"}, "kind": "references", "metadata": {"binding_type": "css_variable"}}
   ]
 }
