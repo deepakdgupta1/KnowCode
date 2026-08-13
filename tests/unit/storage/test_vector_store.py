@@ -24,6 +24,8 @@ import pytest
 from knowcode.errors import VectorArtifactVersionError, VectorDimensionError
 from knowcode.storage import vector_store as vector_store_module
 from knowcode.storage.vector_store import VectorStore
+from knowcode.utils import atomic_write
+from knowcode.utils.atomic_write import TEMP_SUFFIX
 
 ENGINES = ["faiss", "numpy"]
 
@@ -719,3 +721,76 @@ def test_validate_metadata_rejects_a_missing_version() -> None:
     """A pre-versioning payload is unverifiable, so it is rejected."""
     with pytest.raises(VectorArtifactVersionError, match="knowcode build"):
         VectorStore._validate_metadata({"id_map": {}, "dimension": 2})
+
+
+# --- Step 13: crash-safe artifact replacement ------------------------------
+
+
+def _boom(*_args: Any, **_kwargs: Any) -> None:
+    raise OSError("No space left on device")
+
+
+def test_metadata_write_failure_preserves_the_previous_generation(
+    store: VectorStore, engine: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed envelope replacement leaves the last saved generation loadable."""
+    path = _saved_store(store, tmp_path / "vectors")
+    previous = _read_metadata(path)
+
+    store.add("c3", [0.5, 0.5])
+    real_replace = atomic_write._replace
+    monkeypatch.setattr(atomic_write, "_replace", _boom)
+    with pytest.raises(OSError):
+        store.save(path)
+    # Restore only this seam: ``monkeypatch.undo()`` would also revert the
+    # engine fixture's ``faiss = None`` patch and reload with the wrong engine.
+    monkeypatch.setattr(atomic_write, "_replace", real_replace)
+
+    assert _read_metadata(path) == previous
+    reloaded = VectorStore(dimension=2)
+    reloaded.load(path)
+    assert sorted(reloaded.id_map.values()) == ["c1", "c2"]
+
+
+def test_save_publishes_the_native_artifact_before_the_metadata_envelope(
+    store: VectorStore, engine: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Data first, metadata last: an envelope must never name absent rows."""
+    path = tmp_path / "vectors"
+    store.add("c1", [1.0, 0.0])
+    published: list[str] = []
+
+    real_replace = atomic_write._replace
+
+    def spy(source: Path, destination: Path) -> None:
+        published.append(Path(destination).name)
+        real_replace(source, destination)
+
+    monkeypatch.setattr(atomic_write, "_replace", spy)
+    store.save(path)
+
+    assert published == [_native_artifact(path, engine).name, "vectors.json"]
+
+
+def test_save_leaves_no_temporary_files(
+    store: VectorStore, tmp_path: Path
+) -> None:
+    """Publication cleans up its staging files."""
+    path = _saved_store(store, tmp_path / "vectors")
+
+    leftovers = [p.name for p in path.parent.iterdir() if p.name.endswith(TEMP_SUFFIX)]
+    assert leftovers == []
+
+
+def test_load_rejects_a_truncated_metadata_envelope(
+    store: VectorStore, tmp_path: Path
+) -> None:
+    """A half-written pre-Step-13 envelope fails closed with rebuild guidance."""
+    path = _saved_store(store, tmp_path / "vectors")
+    json_file = path.with_suffix(".json")
+    text = json_file.read_text(encoding="utf-8")
+    json_file.write_text(text[: len(text) // 2], encoding="utf-8")
+
+    reloaded = VectorStore(dimension=2)
+    with pytest.raises(VectorArtifactVersionError, match="knowcode build"):
+        reloaded.load(path)

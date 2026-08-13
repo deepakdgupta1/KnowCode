@@ -37,6 +37,7 @@ from knowcode.errors import (
     VectorContractError,
     VectorDimensionError,
 )
+from knowcode.utils.atomic_write import atomic_write_json
 
 try:
     import lancedb
@@ -345,8 +346,10 @@ class LanceDBVectorStore:
                 "count": len(self._live_keys),
                 "generation": self._generation,
             }
-            with open(path.with_suffix(".json"), "w", encoding="utf-8") as file:
-                json.dump(payload, file)
+            # Metadata last: the envelope declares the table's dimension and
+            # live count, so it must never be published before the table it
+            # describes (Step 13 publication ordering).
+            atomic_write_json(path.with_suffix(".json"), payload)
 
     def _lives_at(self, target: Path) -> bool:
         """Whether this store already writes directly into ``target``."""
@@ -421,8 +424,15 @@ class LanceDBVectorStore:
                     f"({json_file.name} is missing)"
                 )
 
-            with open(json_file, encoding="utf-8") as file:
-                data = json.load(file)
+            try:
+                with open(json_file, encoding="utf-8") as file:
+                    data = json.load(file)
+            except json.JSONDecodeError as exc:
+                # A pre-Step-13 truncate-in-place write could be interrupted
+                # part-way; fail closed instead of surfacing a raw parse error.
+                raise self._artifact_error(
+                    f"invalid or truncated vector metadata in {json_file}: {exc}"
+                ) from exc
             if not isinstance(data, dict):
                 raise self._artifact_error(
                     f"invalid vector metadata in {json_file}: expected a JSON object"

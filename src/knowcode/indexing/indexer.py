@@ -11,6 +11,7 @@ from knowcode.indexing.chunker import Chunker
 from knowcode.indexing.graph_builder import GraphBuilder
 from knowcode.indexing.scanner import Scanner
 from knowcode.protocols import EmbeddingProviderProtocol, VectorStoreProtocol
+from knowcode.utils.atomic_write import atomic_write_json, cleanup_orphaned_temp_files
 from knowcode.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -219,10 +220,12 @@ class Indexer:
     def save(self, path: str | Path) -> None:
         """Persist vector index and chunk metadata to disk.
 
+        Writes data before metadata: vectors, then chunks, then the manifest
+        that describes both (Step 13 publication ordering).
+
         Args:
             path: Directory path to write index files into.
         """
-        import json
         import time
         from dataclasses import asdict
 
@@ -243,8 +246,10 @@ class Indexer:
             "embedding": asdict(self.embedding_provider.config),
             "chunking": asdict(self.chunker.config),
         })
-        with open(path / "index_manifest.json", "w", encoding="utf-8") as f:
-            json.dump(self.manifest, f, indent=2)
+        # Manifest last, and atomically (Step 13): it describes the vectors and
+        # chunks written above, so a crash may leave an older manifest beside
+        # present data but never a manifest naming data that does not exist.
+        atomic_write_json(path / "index_manifest.json", self.manifest, indent=2)
 
     def load(self, path: str | Path) -> None:
         """Load the entire vector index and chunk metadata from disk.
@@ -253,16 +258,28 @@ class Indexer:
             path: Directory path containing previously saved index files.
         """
         path = Path(path)
-        
+
+        # Startup hygiene: staging files left by a crashed writer are removed
+        # before anything reads the directory (Step 13).
+        cleanup_orphaned_temp_files(path)
+
         # Load vector store
         self.vector_store.load(path / "vectors")
-        
+
         # Load manifest (optional, for compatibility checks).
         import json
         manifest_file = path / "index_manifest.json"
         if manifest_file.exists():
-            with open(manifest_file, "r", encoding="utf-8") as f:
-                loaded_manifest = json.load(f)
+            try:
+                with open(manifest_file, "r", encoding="utf-8") as f:
+                    loaded_manifest = json.load(f)
+            except json.JSONDecodeError as exc:
+                # Pre-Step-13 manifests were truncated in place, so an
+                # interrupted write left exactly this file behind.
+                raise ValueError(
+                    f"Invalid or truncated index manifest in {manifest_file}: "
+                    f"{exc}. Rebuild with `knowcode build`."
+                ) from exc
             if not isinstance(loaded_manifest, dict):
                 raise ValueError(
                     f"Invalid index manifest format in {manifest_file}. "

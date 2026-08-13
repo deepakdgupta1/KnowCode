@@ -20,6 +20,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from knowcode.utils import atomic_write
+from knowcode.utils.atomic_write import TEMP_SUFFIX
 from knowcode.errors import (
     VectorArtifactVersionError,
     VectorContractError,
@@ -960,3 +962,58 @@ def test_concurrent_removal_and_search_never_expose_a_removed_id(make_store) -> 
     assert not errors, errors
     assert_live(store, [])
     assert store.search([1.0, 0.0], limit=5) == []
+
+
+# --- Step 13: crash-safe metadata replacement ------------------------------
+
+
+def test_metadata_write_failure_preserves_the_previous_generation(
+    make_store, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed envelope replacement leaves the last saved generation loadable."""
+    store = make_store()
+    store.add("c1", [1.0, 0.0])
+    path = tmp_path / "vectors"
+    store.save(path)
+    previous = json.loads(path.with_suffix(".json").read_text(encoding="utf-8"))
+
+    store.add("c2", [0.0, 1.0])
+
+    def boom(*_args: object, **_kwargs: object) -> None:
+        raise OSError("No space left on device")
+
+    real_replace = atomic_write._replace
+    monkeypatch.setattr(atomic_write, "_replace", boom)
+    with pytest.raises(OSError):
+        store.save(path)
+    monkeypatch.setattr(atomic_write, "_replace", real_replace)
+
+    assert json.loads(path.with_suffix(".json").read_text(encoding="utf-8")) == previous
+
+
+def test_save_leaves_no_temporary_files(make_store, tmp_path: Path) -> None:
+    """Publication cleans up its staging file."""
+    store = make_store()
+    store.add("c1", [1.0, 0.0])
+    path = tmp_path / "vectors"
+    store.save(path)
+
+    leftovers = [p.name for p in tmp_path.iterdir() if p.name.endswith(TEMP_SUFFIX)]
+    assert leftovers == []
+
+
+def test_load_rejects_a_truncated_metadata_envelope(
+    make_store, tmp_path: Path
+) -> None:
+    """A half-written pre-Step-13 envelope fails closed with rebuild guidance."""
+    store = make_store()
+    store.add("c1", [1.0, 0.0])
+    path = tmp_path / "vectors"
+    store.save(path)
+    json_file = path.with_suffix(".json")
+    text = json_file.read_text(encoding="utf-8")
+    json_file.write_text(text[: len(text) // 2], encoding="utf-8")
+
+    reloaded = make_store()
+    with pytest.raises(VectorArtifactVersionError, match="knowcode build"):
+        reloaded.load(path)

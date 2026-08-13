@@ -21,6 +21,7 @@ from typing import Any, Optional
 import numpy as np
 
 from knowcode.errors import VectorArtifactVersionError, VectorDimensionError
+from knowcode.utils.atomic_write import atomic_replacement, atomic_write_json
 
 faiss: Any | None
 try:
@@ -118,8 +119,15 @@ class MockVectorStore:
         return scores[positions].reshape(1, -1), self.ids[positions].reshape(1, -1)
 
     def save(self, path: Path) -> None:
-        """Save vectors to .npy file."""
-        np.save(str(path), self.index)
+        """Save vectors to the exact path given.
+
+        Written through an open handle deliberately: ``np.save`` appends
+        ``.npy`` to a *filename* that lacks it, which would silently miss the
+        staging path :func:`~knowcode.utils.atomic_write.atomic_replacement`
+        hands out and publish an empty artifact instead.
+        """
+        with open(path, "wb") as handle:
+            np.save(handle, self.index)
 
     def load(self, path: Path) -> None:
         """Load vectors from .npy file with sequential native IDs.
@@ -332,15 +340,24 @@ class VectorStore:
     # --- persistence ------------------------------------------------------
 
     def save(self, path: Path) -> None:
-        """Save the native index and the metadata envelope to disk."""
+        """Save the native index and the metadata envelope to disk.
+
+        Publication order is data first, metadata last (Step 13): the envelope
+        names rows, counts, and an ID map, so it must never become visible
+        before the native artifact those describe. Both writes replace their
+        target atomically, so a failure leaves the previously saved generation
+        loadable.
+        """
         path = Path(path)
         with self._lock:
             path.parent.mkdir(parents=True, exist_ok=True)
 
-            if faiss:
-                faiss.write_index(self.index, str(path.with_suffix(".index")))
-            else:
-                self.index.save(path.with_suffix(".npy"))
+            native_file = path.with_suffix(".index" if faiss else ".npy")
+            with atomic_replacement(native_file) as staged:
+                if faiss:
+                    faiss.write_index(self.index, str(staged))
+                else:
+                    self.index.save(staged)
 
             payload: dict[str, Any] = {
                 "schema_version": self.SCHEMA_VERSION,
@@ -357,8 +374,7 @@ class VectorStore:
                 # fallback records the ID of each saved row in order instead.
                 payload["row_ids"] = [int(value) for value in self.index.ids]
 
-            with open(path.with_suffix(".json"), "w", encoding="utf-8") as f:
-                json.dump(payload, f)
+            atomic_write_json(path.with_suffix(".json"), payload)
 
     def load(self, path: Path) -> None:
         """Load the native index and metadata envelope, validating both.
@@ -384,8 +400,15 @@ class VectorStore:
                     f"({json_file.name} is missing)"
                 )
 
-            with open(json_file, encoding="utf-8") as f:
-                data = json.load(f)
+            try:
+                with open(json_file, encoding="utf-8") as f:
+                    data = json.load(f)
+            except json.JSONDecodeError as exc:
+                # A pre-Step-13 truncate-in-place write could be interrupted
+                # part-way; fail closed instead of surfacing a raw parse error.
+                raise self._artifact_error(
+                    f"invalid or truncated vector metadata in {json_file}: {exc}"
+                ) from exc
             if not isinstance(data, dict):
                 raise self._artifact_error(
                     f"invalid vector metadata in {json_file}: expected a JSON object"

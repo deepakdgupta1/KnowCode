@@ -485,6 +485,90 @@ Artifact checksums, which ADR 7 lists in the same row, stay with Steps 13 and 14
 they belong to the crash-safe writer and the cross-artifact generation
 validation, not to one backend's envelope.
 
+## Crash-safe artifact replacement (Step 13)
+
+Before Step 13, every replace-style JSON artifact truncated its target in place
+(`open(path, "w")` followed by `json.dump`). The failure was reproducible
+without any fault injection: saving a `KnowledgeStore` whose entity metadata
+contained an unserializable value raised `TypeError` *after* the file had been
+emptied, and the previous graph then failed to load at all
+(`json.decoder.JSONDecodeError: Expecting value`).
+
+`knowcode.utils.atomic_write` is the one writer for these artifacts.
+
+### The replacement sequence
+
+1. Serialize the payload **before** touching the filesystem.
+2. Create a staging file in the **same directory** as the target, named
+   `.<target>.pid<pid>.<random>.knowcode-tmp`, so the later rename cannot cross
+   a filesystem boundary.
+3. Write, `flush`, and `fsync` that file.
+4. `chmod` to an explicit mode (`0644` by default, not the umask or `mkstemp`'s
+   `0600`) and `os.replace` it onto the target.
+5. `fsync` the parent directory where the platform supports it.
+
+`atomic_write_json` covers JSON payloads; the `atomic_replacement` context
+manager covers artifacts written by a third-party writer that owns the format
+(`faiss.write_index` and the numpy fallback's `.npy`).
+
+| Injected failure | Outcome |
+| --- | --- |
+| Serialization | `TypeError`; no staging file is ever created |
+| Short write (`ENOSPC`) | `OSError`; staging file removed |
+| File `fsync` | `OSError`; staging file removed |
+| `os.replace` | `OSError`; staging file removed |
+| Parent-directory `fsync` | logged, not raised: the replacement already succeeded |
+| Writer produced no staged file | `FileNotFoundError`; the target is not deleted |
+
+In every raising case the previous artifact is byte-identical and still loads.
+A directory `fsync` failure is deliberately non-fatal — by then `os.replace`
+has returned, so the caller's "the old file or the new file, never a partial
+one" invariant already holds and raising would misreport a successful write.
+
+One behavior change comes with the rename: `open(path, "w")` followed a
+symlinked target, whereas `os.replace` replaces the symlink itself with a
+regular file. That is inherent to atomic replacement — writing through the link
+would mean truncating the destination in place — and no KnowCode artifact is
+published through a symlink.
+
+### Publication ordering
+
+Data is published before the metadata naming it:
+
+| Writer | Order |
+| --- | --- |
+| `VectorStore.save` | `.index`/`.npy`, then `vectors.json` |
+| `LanceDBVectorStore.save` | table, then `vectors.json` |
+| `Indexer.save` | vectors, chunks, then `index_manifest.json` |
+
+A crash therefore leaves at worst an older manifest beside present data, never
+a manifest naming data that was never written. The generation pointer that
+makes this ordering a full commit protocol is Step 14; Step 13 supplies the
+primitive and the ordering it publishes with.
+
+### Startup hygiene
+
+`Indexer.load` and `KnowledgeStore.load` call `cleanup_orphaned_temp_files`,
+which removes staging files whose embedded PID is not the current process. Its
+own process's staging files are skipped, since another thread may be mid-write.
+ADR 4 gives one writer process per artifact root, so a staging file from any
+other PID is by definition abandoned.
+
+Truncated metadata now fails closed rather than surfacing a raw
+`json.JSONDecodeError`: both vector backends raise `VectorArtifactVersionError`
+and the knowledge store and index manifest raise `ValueError`, each naming the
+artifact and the `knowcode build` rebuild command.
+
+### Out of scope here
+
+Artifact checksums, cross-artifact generation validation, and the `current.json`
+pointer are Step 14. `LanceDBVectorStore._export_locked` still deletes its
+target directory before copying a replacement; that path runs only for a store
+that does not already live at the target (never on the production save path),
+and directory-level staging belongs to Step 14's generation directories.
+Append-only telemetry does not use this module: it has no previous version to
+preserve.
+
 ## Baseline evidence
 
 The baseline is `main` at `d239b22` on 2026-08-12. Before Step 01 additions,

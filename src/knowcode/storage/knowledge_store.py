@@ -15,6 +15,7 @@ from knowcode.data_models import (
     Relationship,
     RelationshipKind,
 )
+from knowcode.utils.atomic_write import atomic_write_json, cleanup_orphaned_temp_files
 from knowcode.utils.entity_identity import ensure_entity_content_hash
 
 
@@ -83,9 +84,9 @@ class KnowledgeStore:
             ],
         }
 
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
+        # Crash-safe replacement (Step 13): the previous graph stays loadable
+        # until the new one has been written and synced in full.
+        atomic_write_json(path, data, indent=2)
 
     @classmethod
     def load(cls, path: str | Path) -> "KnowledgeStore":
@@ -101,8 +102,20 @@ class KnowledgeStore:
         if path.is_dir():
             path = path / cls.DEFAULT_FILENAME
 
-        with open(path, "r", encoding="utf-8") as f:
-            loaded_data = json.load(f)
+        # A staging file present at load time was abandoned by a crashed
+        # process: this store is only ever published by one writer.
+        cleanup_orphaned_temp_files(path.parent)
+
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                loaded_data = json.load(f)
+        except json.JSONDecodeError as exc:
+            # Pre-Step-13 saves truncated in place, so an interrupted one left
+            # exactly this file behind. Fail closed with rebuild guidance.
+            raise ValueError(
+                f"Invalid or truncated knowledge store in {path}: {exc}. "
+                "Re-run `knowcode build` to rebuild it."
+            ) from exc
         if not isinstance(loaded_data, dict):
             raise ValueError(
                 f"Invalid knowledge store format in {path}. "
