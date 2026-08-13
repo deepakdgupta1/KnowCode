@@ -13,11 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from knowcode.parsers.javascript_parser import JavaScriptParser
-from knowcode.parsers.typescript_parser import TypeScriptParser
-
-
-_TYPESCRIPT_LANGS = frozenset({"ts", "tsx", "typescript"})
+TYPESCRIPT_LANGS = frozenset({"ts", "tsx", "typescript"})
 
 _DECLARATION_NODES = frozenset(
     {
@@ -62,12 +58,14 @@ def _unquote(value: str) -> str:
 class VueScriptIndex:
     """Maps names declared in a script block to their exact ``.vue`` spans."""
 
-    def __init__(self, content: str, lang: str | None, line_offset: int) -> None:
+    def __init__(self, content: str, parser: Any, line_offset: int) -> None:
         """Build the index.
 
         Args:
             content: Raw text of the script block.
-            lang: The block's ``lang`` attribute, if any.
+            parser: The ``TreeSitterParser`` whose grammar matches the block's
+                ``lang``. Callers own the parser so one instance is reused
+                across files.
             line_offset: One-based ``.vue`` line holding the block's first
                 content character. Node line 0 maps to exactly this line.
         """
@@ -77,11 +75,6 @@ class VueScriptIndex:
         self._literals: dict[str, DeclarationSpan] = {}
         self._calls: dict[str, DeclarationSpan] = {}
 
-        parser = (
-            TypeScriptParser()
-            if (lang or "").lower() in _TYPESCRIPT_LANGS
-            else JavaScriptParser()
-        )
         try:
             tree = parser.parser.parse(bytes(content, "utf8"))
         except Exception:  # pragma: no cover - grammar failures are non-fatal

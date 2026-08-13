@@ -7,7 +7,12 @@ import re
 from knowcode.data_models import Entity, EntityKind, Relationship, RelationshipKind, Location, ParseResult
 from knowcode.parsers.base import TreeSitterParser
 from knowcode.parsers.javascript_parser import JavaScriptParser
-from knowcode.parsers.vue_script_index import DeclarationSpan, VueScriptIndex
+from knowcode.parsers.typescript_parser import TypeScriptParser
+from knowcode.parsers.vue_script_index import (
+    TYPESCRIPT_LANGS,
+    DeclarationSpan,
+    VueScriptIndex,
+)
 from knowcode.parsers.vue_sections import VueSection, scan_sfc_sections
 
 
@@ -28,7 +33,10 @@ class VueParser(TreeSitterParser):
         """
         # Don't call super().__init__ because vue language is not available
         self.language_name = "vue"
+        # Script blocks are parsed with the real JS/TS grammars. Both parsers are
+        # built once here and reused for every component.
         self.js_parser = JavaScriptParser()
+        self.ts_parser = TypeScriptParser()
         self.parser = cast(Any, None)  # No tree-sitter parser for Vue
         self.language = None
 
@@ -206,9 +214,10 @@ class VueParser(TreeSitterParser):
     ) -> tuple[list[Entity], list[Relationship]]:
         """Parse the <script> section of a Vue component."""
         script_content = script_section.content
+        lang = (script_section.lang or "").lower()
         index = VueScriptIndex(
             script_content,
-            script_section.lang,
+            self.ts_parser if lang in TYPESCRIPT_LANGS else self.js_parser,
             script_section.content_line_start,
         )
 
