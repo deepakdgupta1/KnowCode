@@ -1437,6 +1437,57 @@ rotate buckets there — so the secure assertions are detecting a real property,
 not passing vacuously. `limiter.reset()` isolates each test's shared bucket
 state.
 
+## Release gate and documented limitations (Step 22)
+
+The per-layer contracts above each hold in isolation. The release gate proves
+the *assembled* system over one adversarial repository, and it states plainly
+what the system does not yet do.
+
+### The adversarial repository
+
+`tests/helpers/adversarial_repo.py` builds a temporary mixed-language tree at
+runtime (never committed, so no exotic filename is ever checked out). It carries
+every C2 construct — decorated/nested Python, JavaScript `extends`, exported
+TypeScript interfaces/aliases/enums/classes/functions/arrows, a Vue SFC with
+root-`<template>` attributes and Composition-API bindings, and a Rust `impl`
+written before its `struct` with a trait implementation — plus three hostile
+inputs the security invariants exist to contain:
+
+- **A quoted/Unicode path.** One module lives under a directory named with an
+  apostrophe, a space, and non-ASCII letters, under a non-ASCII filename. The
+  apostrophe is SQL-hostile; it flows into the entity id and the chunk id, where
+  the LanceDB digest predicate (ADR: “Chunk IDs are data, not filter syntax”)
+  must neutralize it structurally.
+- **Hostile code comments** written as prompt-injection payloads.
+- **A secret-shaped token** in source, shaped like an Anthropic key.
+
+### What the gate proves
+
+| Suite | Property |
+| --- | --- |
+| `tests/e2e/test_release_gate_pipeline.py` | The merged graph has no invalid/dangling endpoint and every C2 construct extracts exactly; a full build on the adversarial repo publishes one generation whose knowledge/chunk/vector/manifest counts and checksums agree; the apostrophe path round-trips through both vector stores; a watch session's add/modify/duplicate/delete/move batch lands on a `doctor`-accepted generation; a failure before any publication boundary preserves the previous generation; concurrent readers never observe a mixed generation. Both backends. |
+| `tests/e2e/test_release_gate_security.py` | Through the production `retrieve_context_for_query → build_prompt_request` path, retrieved repository content stays in the untrusted-data channel as one escaped line; the repo's exact injection markers cannot reach the instruction channel; a repository-sourced secret is never persisted by telemetry; one query counts once and deletes cleanly. |
+| `tests/e2e/test_release_gate_soak.py` | A seeded, bounded add/modify/delete/move soak through the real watch worker under concurrent readers keeps every generation coherent; the seed and full op-log print on failure for exact replay. Both backends. |
+| `tests/e2e/test_release_gate_limitations.py` | Pins the four documented limitations below so none can change unnoticed. |
+
+Rate limiting through the real server stack with hostile input (spoofed
+forwarding headers) is proven by the Step 21 socket suite above and is not
+duplicated in the gate.
+
+### Documented limitations
+
+Four items were flagged during Steps 12–19 for Step 22 to resolve. Each is a
+pre-existing behavior, not a regression; each is **documented as a known
+limitation for this release and pinned by a test**, rather than patched in a
+tests-and-docs step. Fixing any of them is separately scoped product work.
+
+| # | Limitation | Current behavior (pinned) | Remedy / future work |
+| --- | --- | --- | --- |
+| 1 | Directory-level watch events are ignored | `IndexingHandler.on_moved`/`on_deleted` return on `is_directory`; a subtree rename reported only as a directory event does not re-key its files. Per-file events (the common editor/VCS case) are handled. | The next `knowcode build` re-keys the subtree. Expanding a directory event into its files is future work. |
+| 2 | An empty LanceDB index cannot be saved as a loadable artifact | `LanceDBVectorStore.save()` on a brand-new empty store writes an envelope that fails closed on load. `KnowCodeService._has_index_state` keeps `flush()` from ever calling it, so no production path hits the residual. | Fix belongs to the Step 12 artifact contract; the caller guard makes it unreachable today. |
+| 3 | A watched edit refreshes retrieval but not the graph | Chunk/vector membership follows a watched edit; `knowledge.db` does not. Retrieval (`retrieve_context_for_query`, the primary entry point) is fresh; graph queries (`search`) are stale for new symbols; `knowcode doctor` warns `store_stale_source_changed`; the generation still validates. | A full `knowcode build` refreshes the graph. Incremental `GraphBuilder` updates for watched edits are future product work. |
+| 4 | The prompt boundary adds instruction/envelope overhead | The fixed instruction policy is a few hundred words and the untrusted envelope adds a small constant plus proportional, *declared* per-field length. | Accepted: it buys the instruction/data separation, and the local-first router keeps most queries off any provider. Retrieval quality is measured offline by `tests/eval`. |
+
 ## Baseline evidence
 
 The baseline is `main` at `d239b22` on 2026-08-12. Before Step 01 additions,
