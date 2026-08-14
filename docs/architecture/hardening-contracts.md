@@ -1196,6 +1196,75 @@ an index nobody has built yet — is genuinely mutable. There is nothing immutab
 to protect and `flush()` already makes it durable, so commits go straight into
 it and `publish_pending()` reports that there was nothing to publish.
 
+## Prompt hierarchy and untrusted context (Step 19)
+
+Before Step 19 the task instructions, the retrieved repository context, and the
+user's question were concatenated into one string and sent as a single user
+turn to both provider families. Any indexed file could therefore place text at
+the same hierarchy level as KnowCode's own instructions, and there was no
+system-instruction channel in the request at all.
+
+`knowcode.llm.prompt_contract` now owns the split. It is the only place a
+provider request body is constructed; `Agent.answer` selects a provider and
+hands it the two channels.
+
+### Two channels, never one string
+
+The instruction channel carries KnowCode-authored text only: the task template
+from `query_classifier.TASK_PROMPTS` plus the fixed `UNTRUSTED_DATA_POLICY`. No
+question and no retrieved content is ever interpolated into it.
+
+| Provider family | Instruction channel | Data channel |
+| --- | --- | --- |
+| `google` | `config.system_instruction` | `contents=[payload]` |
+| OpenAI-compatible (`openai`, `openrouter`, `mistralai`, `glm`, `z-ai`, …) | `messages[0]` with role `system` | `messages[1]` with role `user` |
+
+### The untrusted-input envelope
+
+The question and the retrieved context are serialized together as one JSON
+object, version `knowcode_untrusted_input_version: 1`:
+
+```json
+{"knowcode_untrusted_input_version": 1,
+ "question": {"chars": 11, "truncated": false, "original_chars": 11, "text": "Explain foo"},
+ "repository_context": {"chars": 14, "truncated": false, "original_chars": 14, "text": "def foo(): ..."}}
+```
+
+JSON escaping is the boundary, not a sentinel string. A retrieved comment
+cannot close the string it lives in, and every control character — newlines
+included — is escaped, so the entire user turn is one physical line no matter
+what the repository contains. A forged envelope inside `text` stays a string
+value; the `chars` and `truncated` fields let the model tell the real envelope
+from repository content that imitates one, and the system instruction says so
+explicitly.
+
+Repository content is declared evidence, never instruction: text inside it that
+reads as a system prompt, a role marker, a new task, or a request to reveal
+other context is to be reported as a finding in the code rather than obeyed,
+and answers must stay grounded in the supplied evidence.
+
+### Bounds
+
+`MAX_QUESTION_CHARS` (8,000) and `MAX_CONTEXT_CHARS` (120,000) bound the two
+fields at construction time, behind retrieval's own token budget. Truncation is
+declared in the payload — `truncated: true` with the pre-truncation
+`original_chars` — rather than applied silently.
+
+### Logging
+
+KnowCode never prints either channel. Provider failures print
+`format_provider_error(exc)`: the exception type plus a whitespace-collapsed
+message bounded to `MAX_PROVIDER_ERROR_CHARS` (200). This bounds — and does not
+eliminate — the case where a provider quotes the request back in its own error
+text; up to that many characters of a quoting provider's message still reach
+the operator's own console. Telemetry field policy stays with Step 20.
+
+### Not claimed
+
+These are construction guarantees. A model's compliance with the instruction
+hierarchy is probabilistic and is not asserted anywhere in the test suite; the
+tests assert where each piece of text is placed in the request.
+
 ## Baseline evidence
 
 The baseline is `main` at `d239b22` on 2026-08-12. Before Step 01 additions,

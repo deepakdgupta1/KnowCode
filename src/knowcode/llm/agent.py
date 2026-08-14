@@ -6,7 +6,12 @@ from typing import Any, Optional
 from knowcode.service import KnowCodeService
 from knowcode.config import AppConfig, ModelConfig
 from knowcode.llm.rate_limiter import RateLimiter
-from knowcode.llm.query_classifier import get_prompt_template
+from knowcode.llm.prompt_contract import (
+    build_prompt_request,
+    format_provider_error,
+    google_request_kwargs,
+    openai_messages,
+)
 from knowcode.data_models import TaskType
 
 
@@ -102,10 +107,14 @@ class Agent:
                 "Answer based on general software engineering principles if possible."
             )
 
-        # 2. Construct Prompt with task-specific system instructions
-        system_instructions = get_prompt_template(task_type)
-        
-        prompt = f"{system_instructions}\n\nContext:\n{context_str}\n\nQuestion: {query}"
+        # 2. Split the request into instructions and untrusted data. The task
+        # instructions are KnowCode's; the question and retrieved context are
+        # not, so they travel as one escaped, length-bounded JSON payload.
+        request = build_prompt_request(
+            task_type=task_type,
+            question=query,
+            context=context_str,
+        )
 
         # 3. Call LLM with Failover
         last_error = None
@@ -129,7 +138,7 @@ class Agent:
                 if model_config.provider == "google":
                     response = client.models.generate_content(
                         model=model_config.name,
-                        contents=prompt,
+                        **google_request_kwargs(request),
                     )
                     response_text = response.text or "No response from LLM."
                 else:
@@ -140,12 +149,10 @@ class Agent:
                              "HTTP-Referer": "https://github.com/deepakdgupta1/KnowCode",
                              "X-Title": "KnowCode",
                          }
-                         
+
                     chat_completion = client.chat.completions.create(
                         model=model_config.name,
-                        messages=[
-                            {"role": "user", "content": prompt}
-                        ],
+                        messages=openai_messages(request),
                         extra_headers=extra_headers
                     )
                     response_text = chat_completion.choices[0].message.content or "No response from LLM."
@@ -159,7 +166,7 @@ class Agent:
                     print(f"  ⚠️ Rate limit exceeded (Server) for {model_config.name}. Switching...")
                     last_error = e
                     continue
-                print(f"  ❌ Error with {model_config.name}: {e}")
+                print(f"  ❌ Error with {model_config.name}: {format_provider_error(e)}")
                 last_error = e
                 continue
 
