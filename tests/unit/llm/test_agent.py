@@ -611,7 +611,12 @@ def test_smart_answer_respects_custom_config_threshold(tmp_path: Path) -> None:
 
 
 def test_smart_answer_emits_telemetry(tmp_path: Path) -> None:
-    """Test that Agent.smart_answer logs agent decisions to telemetry."""
+    """Agent.smart_answer logs a routing decision — with no query text (Step 20).
+
+    ``agent_decision`` used to carry the raw query. It now carries the keyed
+    correlation id of the one counted ``query`` event the same call emits, so
+    a routing decision is still joinable to its query without the text.
+    """
     service = DummyService(store_path=tmp_path)
     service.retrieval_result = {
         "query": "Explain Foo",
@@ -654,7 +659,8 @@ def test_smart_answer_emits_telemetry(tmp_path: Path) -> None:
     
     agent_decisions = [r for r in records if r.get("event_type") == "agent_decision"]
     assert len(agent_decisions) == 1
-    assert agent_decisions[0]["query"] == "Explain Foo"
+    assert "Explain Foo" not in log_file.read_text(encoding="utf-8")
+    assert "query" not in agent_decisions[0]
     assert agent_decisions[0]["source"] == "local"
     assert agent_decisions[0]["sufficiency_score"] == 0.95
     # The effective threshold is max(nominal, floor); both must be logged so the
@@ -662,3 +668,9 @@ def test_smart_answer_emits_telemetry(tmp_path: Path) -> None:
     assert agent_decisions[0]["sufficiency_threshold"] == 0.8
     assert agent_decisions[0]["routing_quality_floor"] == 0.9
     assert agent_decisions[0]["threshold"] == 0.9
+
+    # One logical question: one counted query event, joinable to the decision.
+    queries = [r for r in records if r.get("event_type") == "query"]
+    assert len(queries) == 1
+    assert queries[0]["entry_point"] == "agent"
+    assert queries[0]["query_id"] == agent_decisions[0]["query_id"]

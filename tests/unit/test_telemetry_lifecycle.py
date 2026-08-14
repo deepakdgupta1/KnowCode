@@ -15,9 +15,14 @@ from pathlib import Path
 
 import pytest
 
-from knowcode import telemetry
+from knowcode import telemetry, telemetry_files
 
 TIMEOUT = 5.0
+
+
+def _event(method: str) -> dict[str, object]:
+    """A policy-valid event (Step 20); the pool never sees raw text now."""
+    return {"event_type": "reranker_latency", "method": method, "num_chunks": 1}
 
 
 @pytest.fixture(autouse=True)
@@ -40,14 +45,14 @@ def test_shutdown_drains_a_queued_write(tmp_path: Path, monkeypatch: pytest.Monk
         original(store_path, event)
 
     monkeypatch.setattr(telemetry, "_write_event_sync", slow_write)
-    telemetry.log_event(tmp_path, {"query": "queued"})
+    telemetry.log_event(tmp_path, _event("queued"))
     released.set()
 
     assert telemetry.shutdown_telemetry(timeout=TIMEOUT)
 
-    log_file = tmp_path / "knowcode_telemetry.jsonl"
+    log_file = telemetry_files.telemetry_path(tmp_path)
     assert log_file.exists()
-    assert json.loads(log_file.read_text(encoding="utf-8").strip())["query"] == "queued"
+    assert json.loads(log_file.read_text(encoding="utf-8").strip())["method"] == "queued"
 
 
 def test_shutdown_is_idempotent() -> None:
@@ -65,8 +70,8 @@ def test_logging_after_shutdown_still_works(tmp_path: Path, monkeypatch: pytest.
     monkeypatch.delenv("KNOWCODE_TESTING", raising=False)
     telemetry.shutdown_telemetry(timeout=TIMEOUT)
 
-    telemetry.log_event(tmp_path, {"query": "after"})
+    telemetry.log_event(tmp_path, _event("after"))
     assert telemetry.shutdown_telemetry(timeout=TIMEOUT)
 
-    log_file = tmp_path / "knowcode_telemetry.jsonl"
-    assert json.loads(log_file.read_text(encoding="utf-8").strip())["query"] == "after"
+    log_file = telemetry_files.telemetry_path(tmp_path)
+    assert json.loads(log_file.read_text(encoding="utf-8").strip())["method"] == "after"

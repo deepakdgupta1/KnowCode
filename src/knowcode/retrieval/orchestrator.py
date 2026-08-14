@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, Optional, Protocol
 import logging
 
 from knowcode.llm.query_classifier import classify_query
-from knowcode.telemetry import log_event
+from knowcode.telemetry import current_query_scope, query_scope
 
 if TYPE_CHECKING:
     from knowcode.data_models import TaskType
@@ -71,6 +71,17 @@ class RetrievalOrchestrator:
     def __init__(self, service: RetrievalServiceProtocol) -> None:
         self._service = service
 
+    @staticmethod
+    def _record_retrieval(**fields: Any) -> None:
+        """Report one retrieval attempt to the active query scope, if any."""
+        scope = current_query_scope()
+        if scope is None:  # pragma: no cover - the public method always opens one
+            return
+        try:
+            scope.record_retrieval(**fields)
+        except Exception as exc:  # noqa: BLE001 - telemetry never fails a query
+            logging.getLogger(__name__).warning("Failed to log telemetry: %s", exc)
+
     def retrieve_context_for_query(
         self,
         query: str,
@@ -83,7 +94,44 @@ class RetrievalOrchestrator:
         include_metadata: bool = False,
         is_stale: bool = False,
     ) -> dict[str, Any]:
-        """Retrieve an evidence-backed context bundle for a query."""
+        """Retrieve an evidence-backed context bundle for a query.
+
+        The whole retrieval runs inside one telemetry query scope (Step 20).
+        The scope is joined rather than opened when a caller above already has
+        one, so an agent's three retrieval attempts stay one counted query, and
+        components with no store handle of their own — the reranker — resolve
+        their telemetry destination from it instead of the working directory.
+        """
+        with query_scope(
+            getattr(self._service, "store_path", None),
+            query=query,
+            entry_point="orchestrator",
+        ):
+            return self._retrieve_context(
+                query,
+                max_tokens=max_tokens,
+                task_type=task_type,
+                limit_entities=limit_entities,
+                per_entity_max_tokens=per_entity_max_tokens,
+                expand_deps=expand_deps,
+                verbosity=verbosity,
+                include_metadata=include_metadata,
+                is_stale=is_stale,
+            )
+
+    def _retrieve_context(
+        self,
+        query: str,
+        max_tokens: int = 4000,
+        task_type: Optional["TaskType"] = None,
+        limit_entities: int = 3,
+        per_entity_max_tokens: Optional[int] = None,
+        expand_deps: bool = True,
+        verbosity: str = "minimal",
+        include_metadata: bool = False,
+        is_stale: bool = False,
+    ) -> dict[str, Any]:
+        """Run one retrieval attempt and report it to the active query scope."""
         errors: list[str] = []
         self._service._assert_store_exists()
         index_path = self._service._assert_index_exists()
@@ -93,6 +141,18 @@ class RetrievalOrchestrator:
         task_confidence = 1.0 if task_type is not None else confidence
 
         if limit_entities <= 0 or max_tokens <= 0:
+            self._record_retrieval(
+                task_type=resolved_task_type.value,
+                task_confidence=task_confidence,
+                retrieval_mode="none",
+                sufficiency_score=0.0,
+                total_tokens=0,
+                max_tokens=max_tokens,
+                truncated=False,
+                selected_entity_count=0,
+                evidence_count=0,
+                error_count=1,
+            )
             return {
                 "query": query,
                 "task_type": resolved_task_type.value,
@@ -239,27 +299,21 @@ class RetrievalOrchestrator:
             "errors": errors,
         }
 
-        try:
-            store_path = self._service._assert_store_exists()
-            log_event(
-                store_path,
-                {
-                    "event_type": "retrieval_decision",
-                    "query": query,
-                    "task_type": resolved_task_type.value,
-                    "retrieval_mode": retrieval_mode,
-                    "sufficiency_score": sufficiency,
-                    "total_tokens": total_tokens,
-                    "max_tokens": max_tokens,
-                    "selected_entities": [
-                        e.get("entity_id")
-                        for e in selected_entities
-                        if "entity_id" in e
-                    ],
-                },
-            )
-        except Exception as e:
-            logging.getLogger(__name__).warning("Failed to log telemetry: %s", e)
+        # Counts, not identities: the entity ids this retrieval selected are
+        # absolute source paths, which are repository content rather than the
+        # aggregate metadata ADR 5 permits.
+        self._record_retrieval(
+            task_type=resolved_task_type.value,
+            task_confidence=task_confidence,
+            retrieval_mode=retrieval_mode,
+            sufficiency_score=sufficiency,
+            total_tokens=total_tokens,
+            max_tokens=max_tokens,
+            truncated=truncated,
+            selected_entity_count=len(selected_entities),
+            evidence_count=len(evidence),
+            error_count=len(errors),
+        )
 
         if verbosity == "diagnostic":
             return full_response

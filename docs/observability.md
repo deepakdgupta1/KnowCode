@@ -1,80 +1,152 @@
 # KnowCode Observability and Telemetry
 
-KnowCode implements a local, non-blocking telemetry system to monitor retrieval quality, detect stale states, and enable data-driven threshold tuning.
+KnowCode writes a small, local, aggregate-only telemetry log so you can tune
+retrieval thresholds with evidence instead of guesses. It is not analytics: it
+is never transmitted anywhere, it does not contain your questions or your code,
+and one command deletes it.
 
-## Telemetry Log Format
+## What is recorded
 
-All telemetry events are logged to an append-only JSON Lines (JSONL) file named `knowcode_telemetry.jsonl` located in the **store root directory** (the directory you pass to `--store`, typically the root of your project). For example, if you run `knowcode build .` from `/path/to/project`, the file is written to `/path/to/project/knowcode_telemetry.jsonl`.
+Telemetry is an append-only JSON Lines file, `knowcode_telemetry.jsonl`, in the
+**store root** — the directory you pass to `--store`, normally your project
+root. It is never written inside `knowcode_index/`, because index generations
+are immutable and are retired on a schedule you do not control.
 
-Each log entry is a single line containing a JSON object with at least the following standard fields:
-- `timestamp`: Epoch timestamp (integer seconds)
-- `event_type`: The type of event (e.g. `"query"`, `"retrieval_decision"`, `"tool_call"`, `"agent_decision"`)
+Every record carries `telemetry_schema_version`, `timestamp`, and `event_type`.
+Each event type has a fixed field allowlist defined in
+`src/knowcode/telemetry_policy.py`; a field outside it is dropped before the
+record is written, and an event type outside it is not written at all.
 
-### Event Types & Schemas
+### `query` — one per question
 
-#### 1. Retrieval Decision (`event_type: "retrieval_decision"`)
-Logged by the `RetrievalOrchestrator` when context is retrieved for a query:
-- `query`: The query string.
-- `task_type`: Resolved/detected query task type.
-- `retrieval_mode`: `"semantic"`, `"lexical"`, or `"none"`.
-- `sufficiency_score`: Average context sufficiency score.
-- `total_tokens`: Total tokens in retrieved context.
-- `max_tokens`: Configured max tokens.
-- `selected_entities`: List of retrieved entity IDs.
+This is the only event type counted as a query. One question produces exactly
+one, no matter how many retrieval attempts it takes or whether it arrived
+through the CLI, the API, or MCP.
 
-#### 2. Agent Decision (`event_type: "agent_decision"`)
-Logged by `Agent.smart_answer` during local-first routing decisions:
-- `query`: The query string.
-- `source`: `"local"` (answered locally) or `"llm"` (escalated to LLM).
-- `sufficiency_score`: Sufficiency score of the local context.
-- `threshold`: Configured sufficiency threshold.
-- `force_llm`: Boolean indicating if LLM was forced.
-- `task_type`: Resolved query task type.
-- `llm_tokens_saved`: Estimate of LLM tokens saved by answering locally.
+| Field | Meaning |
+| --- | --- |
+| `query_id` | Keyed correlation id (see below) — not the question |
+| `query_chars`, `query_length_bucket` | Length of the question |
+| `entry_point` | `agent`, `service`, `mcp`, or `orchestrator` |
+| `task_type`, `task_confidence` | Classification of the question |
+| `retrieval_mode` | `semantic`, `lexical`, `exact`, or `none` |
+| `verbosity`, `max_tokens`, `total_tokens`, `truncated` | Requested and produced context size |
+| `sufficiency_score`, `sufficiency_bucket` | Context quality |
+| `local_or_escalated`, `is_stale` | Routing outcome and index freshness |
+| `selected_entity_count`, `evidence_count`, `error_count` | Result shape — counts, never ids |
+| `retrievals`, `duration_ms`, `outcome` | Attempts, latency, and `ok`/`error` |
 
-#### 3. MCP Tool Call (`event_type: "tool_call"`)
-Logged by `KnowCodeMCPServer` on incoming tool calls from the IDE/client:
-- `tool_name`: Name of the tool called.
-- `arguments`: The arguments payload passed to the tool.
+### `agent_decision`, `tool_call`, `reranker_latency`
 
----
+These describe a query that has *already* been counted, so they are excluded
+from `total_queries`. `agent_decision` records local-versus-LLM routing and the
+thresholds that produced it. `tool_call` records which MCP tool ran, how many
+arguments it received, and whether it succeeded — never the arguments
+themselves, which are client-supplied and routinely contain pasted code.
+`reranker_latency` records reranking method and latency.
 
-## Retention Policy
+## What is deliberately not recorded
 
-By default, telemetry logs are retained indefinitely on the local disk. Because the log file is simple append-only JSONL, its storage footprint is extremely small (~150 bytes per query). For a typical repository with 10,000 queries, the log file occupies less than 2 MB.
+Query text, retrieved code, prompt bodies, MCP tool arguments, and entity ids
+(which are absolute source paths). None of these is representable in the
+schema, so no future call site can add one without editing the allowlist.
 
-If you wish to clear the logs, you can safely delete the `knowcode_telemetry.jsonl` file in your store directory at any time.
+As defense in depth, every value that *does* survive the allowlist is passed
+through recursive secret redaction — API-key formats, bearer tokens, JWTs,
+private-key markers, credentials in URLs, `password=`-style assignments, and
+long opaque tokens — and bounded in length, depth, and width. Redaction is a
+second control, not the first one: the schema is what keeps sensitive data out.
 
----
+## Correlation ids
 
-## Privacy Tradeoffs
+`query_id` is `HMAC-SHA256(key, question)` truncated to 16 hex characters. The
+key is 32 random bytes in `.knowcode_telemetry_key` beside the log, created on
+first use with mode `0600`. It makes repeated questions comparable across runs
+without storing what was asked, it cannot be joined across repositories, and
+deleting telemetry deletes the key — so deletion starts a fresh identifier
+space rather than merely truncating history.
 
-- **100% Local**: The telemetry system operates completely locally. Log entries are written to your local disk and are **never** transmitted to external servers by KnowCode.
-- **Sensitive Data**: Because queries and tool arguments (which may contain code snippets) are recorded, the telemetry file contains sensitive information. Avoid sharing the `knowcode_telemetry.jsonl` file publicly if your codebase contains proprietary information.
+## File protection, rotation, and retention
 
----
+- Files are created with mode `0600`, and an existing looser file is tightened
+  on the next write.
+- `knowcode_telemetry.jsonl` rotates at 5 MiB to `knowcode_telemetry.jsonl.1`,
+  keeping at most 3 rotations — roughly 20 MiB total.
+- Rotations older than 30 days are deleted on the next write. The *active*
+  file is bounded by size rather than by age, so on a rarely-used store it can
+  still hold records older than the window until it rotates; `knowcode
+  telemetry clear` removes them immediately.
+- Writes are queued on a single background thread, bounded at 512 pending
+  events. Beyond that, telemetry drops events rather than slowing a query; the
+  drop count is available through `knowcode.telemetry.dropped_event_count()`.
 
-## Threshold Tuning
+## Inspecting and deleting
 
-The sufficiency threshold (`sufficiency_threshold` in `aimodels.yaml`) controls the balance between:
-- **Local Routing Rate**: Answering locally saves API costs and reduces latency.
-- **Answer Accuracy**: Escalating to an LLM provides higher accuracy for complex queries.
+```bash
+knowcode telemetry show --store .
+```
 
-To tune the threshold for your repository:
-1. Inspect `knowcode_telemetry.jsonl` directly to review `source` ("local" vs "llm"), `sufficiency_score`, and `llm_tokens_saved` across recent queries. You can use any JSONL reader or a simple `jq` command:
-   ```bash
-   cat knowcode_telemetry.jsonl | jq 'select(.event_type == "agent_decision") | {source, sufficiency_score, query}'
-   ```
-2. If the `local` routing rate is too low but local answers are accurate, lower `sufficiency_threshold` (e.g. to `0.7`).
-3. If users frequently mark local answers as misses, raise `sufficiency_threshold` (e.g. to `0.85` or `0.9`).
+```bash
+knowcode telemetry clear --store . --yes
+```
 
----
+`clear` removes the log, every rotation, the opt-in raw file, and the
+correlation key. Deleting the files by hand is equally safe.
 
-## Future Spend-Metric Extension Path
+## Opt-in raw query capture
 
-> **Planned — not yet implemented.** The fields below are proposed additions to the telemetry schema for a future release.
+Debugging a retrieval problem sometimes requires the actual question. Set
+`KNOWCODE_TELEMETRY_RAW=1` to enable it:
 
-To enable cost optimization, the telemetry schema is fully extensible. Future versions of KnowCode will include:
-- `estimated_token_usage`: Exact input/output token counts for LLM calls.
-- `estimated_spend_usd`: API cost calculated using model pricing matrices.
-- `savings_usd`: Cost saved by routing to local context instead of the LLM.
+```bash
+KNOWCODE_TELEMETRY_RAW=1 knowcode ask "why does the order validator reject empty items?"
+```
+
+Raw capture is off by default and is not a redaction-only compromise:
+
+- it writes to a **separate** file, `knowcode_telemetry_raw.jsonl`, which is
+  never mixed into the default log;
+- it logs a warning the first time it writes in a process;
+- it applies the same secret redaction, so opting into your question text is
+  not opting into storing a credential you pasted into it;
+- it is bounded at 1 MiB with one rotation and a 7-day retention window, rather
+  than the default file's 30 days.
+
+**Threat model.** The default log is safe to attach to a bug report: it holds
+counts, buckets, and enum labels. The raw file is not — it holds what you
+asked, which for a private repository is itself sensitive, and redaction only
+covers credential formats KnowCode knows. Enable it while reproducing a
+problem, then run `knowcode telemetry clear`.
+
+## Threshold tuning
+
+The sufficiency threshold (`sufficiency_threshold` in `aimodels.yaml`) balances
+local routing (cheap and fast) against escalation to an LLM (accurate for
+complex questions). `knowcode telemetry show` reports the local routing rate
+and average sufficiency across all retained records:
+
+- if the local rate is low but local answers are good, lower the threshold;
+- if users mark local answers as misses, raise it.
+
+For per-record analysis, the file is ordinary JSONL:
+
+```bash
+jq 'select(.event_type == "query") | {local_or_escalated, sufficiency_bucket, duration_ms}' knowcode_telemetry.jsonl
+```
+
+## Upgrading from the pre-1 schema
+
+Logs written before the versioned schema contain raw query text and have no
+`telemetry_schema_version`. `knowcode telemetry show` still counts them
+correctly, so your history is preserved — but those records are exactly what
+this schema exists to stop writing. Deleting them with `knowcode telemetry
+clear` is recommended.
+
+## Future spend-metric extension path
+
+> **Planned — not yet implemented.** Any addition below is an edit to the
+> allowlist in `telemetry_policy.py`, reviewable on its own.
+
+- `estimated_token_usage`: input/output token counts for LLM calls.
+- `estimated_spend_usd`: cost from a model pricing matrix.
+- `savings_usd`: cost avoided by answering locally.

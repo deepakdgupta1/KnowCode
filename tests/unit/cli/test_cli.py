@@ -163,3 +163,55 @@ def test_server_watch_dependency_guard(monkeypatch) -> None:  # type: ignore
     result = runner.invoke(cli_module.cli, ["server", "--watch"])
     assert result.exit_code == 1
     assert "Install knowcode[watch] to use 'knowcode server --watch'." in result.output
+
+
+def _telemetry_event(store: Path) -> None:
+    """Emit one counted query event the way production does."""
+    from knowcode import telemetry
+
+    with telemetry.query_scope(store, query="who calls place_order?") as scope:
+        scope.record_retrieval(sufficiency_score=0.9, local_or_escalated="local")
+    telemetry.shutdown_telemetry(timeout=5.0)
+
+
+def test_cli_telemetry_show_reports_aggregates_only(tmp_path) -> None:  # type: ignore
+    """`knowcode telemetry show` is the documented inspection surface."""
+    _telemetry_event(tmp_path)
+
+    result = CliRunner().invoke(
+        cli_module.cli, ["telemetry", "show", "--store", str(tmp_path)]
+    )
+
+    assert result.exit_code == 0
+    assert "Total queries: 1" in result.output
+    assert "query: 1" in result.output
+    assert "place_order" not in result.output
+
+
+def test_cli_telemetry_clear_deletes_every_file(tmp_path) -> None:  # type: ignore
+    """`knowcode telemetry clear` is the documented deletion path (Step 20)."""
+    from knowcode import telemetry_files
+
+    _telemetry_event(tmp_path)
+    assert telemetry_files.existing_files(tmp_path)
+
+    result = CliRunner().invoke(
+        cli_module.cli, ["telemetry", "clear", "--store", str(tmp_path), "--yes"]
+    )
+
+    assert result.exit_code == 0
+    assert telemetry_files.existing_files(tmp_path) == []
+
+
+def test_cli_telemetry_clear_asks_before_deleting(tmp_path) -> None:  # type: ignore
+    """Declining the prompt leaves the files in place."""
+    from knowcode import telemetry_files
+
+    _telemetry_event(tmp_path)
+
+    result = CliRunner().invoke(
+        cli_module.cli, ["telemetry", "clear", "--store", str(tmp_path)], input="n\n"
+    )
+
+    assert result.exit_code == 1
+    assert telemetry_files.existing_files(tmp_path)

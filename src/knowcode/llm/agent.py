@@ -199,6 +199,23 @@ class Agent:
         query: str,
         force_llm: bool = False,
     ) -> dict[str, Any]:
+        """Answer one question, local-first, as one counted telemetry query.
+
+        The scope opened here is the outermost one, so the retrieval attempts
+        below — up to three, each of which opens its own — contribute to a
+        single ``query`` event instead of counting as three questions
+        (Step 20).
+        """
+        from knowcode.telemetry import query_scope
+
+        with query_scope(self.service.store_path, query=query, entry_point="agent"):
+            return self._smart_answer(query, force_llm=force_llm)
+
+    def _smart_answer(
+        self,
+        query: str,
+        force_llm: bool = False,
+    ) -> dict[str, Any]:
         """Smart answer with local-first mode.
 
         If context sufficiency >= threshold, returns local answer without LLM.
@@ -317,12 +334,15 @@ class Agent:
             }
 
         try:
-            from knowcode.telemetry import log_event
+            from knowcode.telemetry import current_query_id, log_event
             log_event(
                 self.service.store_path,
                 {
                     "event_type": "agent_decision",
-                    "query": query,
+                    # The routing decision is joined to its query by the keyed
+                    # correlation id of the enclosing scope, not by the text
+                    # (Step 20).
+                    "query_id": current_query_id(),
                     "source": res["source"],
                     "sufficiency_score": avg_sufficiency,
                     "threshold": threshold,

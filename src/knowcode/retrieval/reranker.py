@@ -102,11 +102,17 @@ class Reranker:
         return result
         
     def _log_telemetry(self, method: str, latency: float, num_chunks: int) -> None:
-        """Log reranking latency telemetry."""
+        """Log reranking latency telemetry.
+
+        The reranker holds no store handle, so the destination comes from the
+        active query scope. Passing ``"."`` used to write telemetry into
+        whatever directory the process was started from — outside the store,
+        and outside anything ``knowcode telemetry clear`` can find (Step 20).
+        """
         from knowcode.telemetry import log_event
         try:
             log_event(
-                ".",  # We don't have store_path here, telemetry.py handles fallback to current dir
+                None,
                 {
                     "event_type": "reranker_latency",
                     "method": method,

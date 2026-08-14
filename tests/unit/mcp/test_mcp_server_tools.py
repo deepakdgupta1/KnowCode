@@ -266,7 +266,13 @@ def test_retrieve_context_returns_expected_structure(tmp_path: Path) -> None:
 
 
 def test_handle_tool_call_emits_telemetry(tmp_path: Path) -> None:
-    """Test that handle_tool_call logs to telemetry."""
+    """handle_tool_call logs the call — without the arguments (Step 20).
+
+    The argument payload is entirely client-supplied and routinely contains the
+    user's question and pasted code. It used to be written to disk verbatim; it
+    is now reduced to a count and, for query-bearing tools, the keyed
+    correlation id.
+    """
     # Write empty knowledge store so it starts but does not raise missing_knowledge_store
     (tmp_path / "knowcode_knowledge.json").write_text("{}")
     
@@ -298,7 +304,9 @@ def test_handle_tool_call_emits_telemetry(tmp_path: Path) -> None:
     tool_call_events = [r for r in records if r.get("event_type") == "tool_call"]
     assert len(tool_call_events) == 1
     assert tool_call_events[0]["tool_name"] == "search_codebase"
-    assert tool_call_events[0]["arguments"]["query"] == "Foo"
+    assert tool_call_events[0]["argument_count"] == 2
+    assert "arguments" not in tool_call_events[0]
+    assert '"Foo"' not in log_file.read_text(encoding="utf-8")
 
 
 

@@ -304,31 +304,69 @@ class KnowCodeMCPServer:
     
     def handle_tool_call(self, name: str, arguments: dict[str, Any]) -> str:
         """Handle an MCP tool call.
-        
+
         Args:
             name: Tool name.
             arguments: Tool arguments.
-            
+
         Returns:
             JSON string result.
         """
         if not isinstance(arguments, dict):
             return json.dumps({"error": "arguments must be a dictionary"})
-            
+
+        from knowcode.telemetry import query_scope
+
+        # The argument payload is entirely client-supplied and routinely holds
+        # the user's question and pasted code, so it is never logged (Step 20).
+        # A query-bearing call opens the scope here so the tool event and the
+        # retrieval it triggers share one correlation id and one counted query.
+        query = arguments.get("query")
+        if isinstance(query, str):
+            with query_scope(self.store_path, query=query, entry_point="mcp"):
+                return self._dispatch_tool_call(name, arguments, len(query))
+        return self._dispatch_tool_call(name, arguments, None)
+
+    @staticmethod
+    def _payload_outcome(payload: str) -> str:
+        """Classify a tool result as ``ok`` or ``error`` without reading it."""
         try:
-            from knowcode.telemetry import log_event
-            log_event(
-                self.store_path,
-                {
-                    "event_type": "tool_call",
-                    "tool_name": name,
-                    "arguments": arguments,
-                }
-            )
+            parsed = json.loads(payload)
+        except ValueError:  # pragma: no cover - every branch emits JSON
+            return "error"
+        return "error" if isinstance(parsed, dict) and "error" in parsed else "ok"
+
+    def _log_tool_call(
+        self, name: str, argument_count: int, query_chars: Optional[int], payload: str
+    ) -> None:
+        """Record the call's shape: which tool, how many arguments, outcome."""
+        from knowcode.telemetry import current_query_id, log_event
+
+        event: dict[str, Any] = {
+            "event_type": "tool_call",
+            "tool_name": name,
+            "argument_count": argument_count,
+            "outcome": self._payload_outcome(payload),
+        }
+        if query_chars is not None:
+            event["query_id"] = current_query_id()
+            event["query_chars"] = query_chars
+        try:
+            log_event(self.store_path, event)
         except OSError as e:
             import logging
             logging.getLogger(__name__).warning("Ignored telemetry OS error: %s", e)
 
+    def _dispatch_tool_call(
+        self, name: str, arguments: dict[str, Any], query_chars: Optional[int]
+    ) -> str:
+        """Route one tool call and record it, whatever its outcome."""
+        payload = self._run_tool(name, arguments)
+        self._log_tool_call(name, len(arguments), query_chars, payload)
+        return payload
+
+    def _run_tool(self, name: str, arguments: dict[str, Any]) -> str:
+        """Execute one tool and return its JSON payload."""
         try:
             result: dict[str, Any] | list[dict[str, Any]]
             

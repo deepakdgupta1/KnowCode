@@ -585,7 +585,15 @@ class KnowCodeService:
         # One lease for the whole bundle: freshness, retrieval, and the
         # chunks the caller resolves afterwards must all describe one
         # generation, or a rebuild mid-query answers half from each.
-        with self.generation_lease():
+        from knowcode.telemetry import query_scope
+
+        # One lease for the whole bundle, and one telemetry query scope around
+        # it (Step 20): the retrieval below joins the scope rather than opening
+        # its own, so this call is counted exactly once no matter how many
+        # layers it passes through, and the query text stays out of the record.
+        with self.generation_lease(), query_scope(
+            self.store_path, query=query, entry_point="service"
+        ) as scope:
             freshness = self.get_freshness_metadata()
             is_stale = freshness.get("is_stale", False)
 
@@ -602,22 +610,13 @@ class KnowCodeService:
             )
             res["freshness"] = freshness
 
-            # Log query to telemetry
-            from knowcode.telemetry import log_event
-
             threshold = self.app_config.sufficiency_threshold
-
             score = res.get("sufficiency_score", 0.0)
-            local_or_escalated = "local" if score >= threshold else "escalated"
-            log_event(
-                self.store_path,
-                {
-                    "query": query,
-                    "verbosity": verbosity,
-                    "sufficiency_score": score,
-                    "is_stale": res["freshness"]["is_stale"],
-                    "local_or_escalated": local_or_escalated,
-                },
+            scope.annotate(
+                verbosity=verbosity,
+                sufficiency_score=float(score),
+                is_stale=bool(res["freshness"]["is_stale"]),
+                local_or_escalated="local" if score >= threshold else "escalated",
             )
 
             return res

@@ -524,6 +524,79 @@ def stats(store: str) -> None:
         click.echo(f"  {kind}: {count}")
 
 
+@cli.group()
+def telemetry() -> None:
+    """Inspect or delete the local telemetry log.
+
+    Telemetry never leaves this machine and never contains your questions or
+    your code — see docs/observability.md for the exact schema.
+    """
+
+
+@telemetry.command("show")
+@click.option(
+    "--store", "-s",
+    type=click.Path(exists=True),
+    default=".",
+    help="Path to the store directory whose telemetry should be summarized",
+)
+def telemetry_show(store: str) -> None:
+    """Summarize local telemetry."""
+    from knowcode import telemetry_files
+    from knowcode.telemetry import get_telemetry_summary, raw_capture_enabled
+
+    summary = get_telemetry_summary(store)
+    click.echo("Telemetry Summary")
+    click.echo("-" * 30)
+    click.echo(f"  Schema version: {summary['schema_version']}")
+    click.echo(f"  Total queries: {summary['total_queries']}")
+    click.echo(f"  Local routing rate: {summary['local_routing_rate']:.0%}")
+    click.echo(f"  Average sufficiency: {summary['average_sufficiency_score']:.2f}")
+    click.echo(f"  User-marked misses: {summary['user_marked_misses']}")
+
+    if summary["events_by_type"]:
+        click.echo("\n  Events by type:")
+        for event_type, count in sorted(summary["events_by_type"].items()):
+            click.echo(f"    {event_type}: {count}")
+
+    files = telemetry_files.existing_files(store)
+    click.echo(f"\n  Files ({len(files)}):")
+    for path in files:
+        click.echo(f"    {path}")
+    if raw_capture_enabled():
+        click.echo(
+            f"\n  WARNING: {telemetry_files.RAW_TELEMETRY_FILENAME} is enabled; "
+            "raw query text is being stored.",
+        )
+
+
+@telemetry.command("clear")
+@click.option(
+    "--store", "-s",
+    type=click.Path(exists=True),
+    default=".",
+    help="Path to the store directory whose telemetry should be deleted",
+)
+@click.option("--yes", is_flag=True, help="Delete without confirmation")
+def telemetry_clear(store: str, yes: bool) -> None:
+    """Delete every local telemetry file, including the correlation key."""
+    from knowcode import telemetry_files
+    from knowcode.telemetry import delete_telemetry
+
+    files = telemetry_files.existing_files(store)
+    if not files:
+        click.echo("No telemetry files to delete.")
+        return
+    if not yes:
+        click.echo("The following files will be deleted:")
+        for path in files:
+            click.echo(f"  {path}")
+        click.confirm("Delete them?", abort=True)
+
+    result = delete_telemetry(store)
+    click.echo(f"Deleted {result['removed']} telemetry file(s).")
+
+
 @cli.command()
 @click.option(
     "--store", "-s",

@@ -1265,6 +1265,104 @@ These are construction guarantees. A model's compliance with the instruction
 hierarchy is probabilistic and is not asserted anywhere in the test suite; the
 tests assert where each piece of text is placed in the request.
 
+## Telemetry minimization (Step 20)
+
+Before Step 20 the sink accepted any dict from any caller and appended it
+verbatim. Four production paths used that: the service wrote the raw query, the
+retrieval orchestrator wrote the raw query *and* the selected entity ids, the
+agent wrote the raw query, and the MCP server wrote the client's entire
+argument payload. Files were created at the process umask, never rotated, never
+retained, and had no deletion path; one question counted as three queries.
+
+ADR 5 is now implemented as three modules with one job each.
+
+### The schema is the control
+
+`knowcode.telemetry_policy` holds `TELEMETRY_SCHEMA_VERSION = 1`, the event
+types, and a per-type field allowlist with declared value types. A field
+outside the allowlist is dropped and counted in `dropped_field_count`; an event
+type outside it is **rejected entirely** and counted by
+`telemetry.dropped_event_count()`. That direction is deliberate: a new call
+site loses its metric until the schema is extended, rather than writing
+unreviewed data to a user's disk.
+
+Raw query text, retrieved code, prompt bodies, MCP arguments, and entity ids
+are therefore not representable. Entity ids are excluded because they are
+absolute source paths — repository content, not aggregate metadata.
+
+`knowcode.telemetry_redaction` is the second control, applied to every value
+that survives the allowlist: an MCP client picks its own `tool_name`, and a
+user's own question is the most common place a pasted key appears. It scrubs
+vendor key prefixes, bearer tokens, JWTs, PEM markers, URL credentials,
+`password=`-style assignments, and long opaque tokens, then bounds strings to
+256 characters, containers to depth 4 and width 32, and a whole record to 4,096
+characters. Values outside the JSON scalar types become `[UNSUPPORTED_TYPE]`
+rather than being `repr()`-ed, because a caller object's repr is exactly the
+kind of unreviewed text this control exists to keep off disk.
+
+### One logical query, one counted event
+
+`telemetry.query_scope(...)` is a `ContextVar`-backed scope. Re-entering it
+from a deeper layer yields the *same* object, so the agent's up-to-three
+retrieval attempts, the service call inside them, and the orchestrator call
+inside that produce exactly one `query` event, written when the outermost scope
+closes — including when the query raised, which is recorded as
+`outcome: "error"`.
+
+| Layer | Opens the scope with `entry_point` | Contributes |
+| --- | --- | --- |
+| `Agent.smart_answer` | `agent` | a separate `agent_decision` event |
+| `KnowCodeService.retrieve_context_for_query` | `service` | `annotate(...)`: verbosity, staleness, routing |
+| `RetrievalOrchestrator.retrieve_context_for_query` | `orchestrator` | `record_retrieval(...)`: one attempt |
+| `KnowCodeMCPServer.handle_tool_call` | `mcp` | a separate `tool_call` event |
+
+`agent_decision`, `tool_call`, and `reranker_latency` describe an
+already-counted query and are excluded from `total_queries`. They join to it
+through `query_id` — `HMAC-SHA256(key, question)` truncated to 16 hex
+characters, keyed by 32 random bytes in `.knowcode_telemetry_key` (mode `0600`,
+per store, deleted with the telemetry it keys).
+
+### Location, bounds, and deletion
+
+`knowcode.telemetry_files` resolves any store path — a directory, a store file,
+or a path inside the index — to the store root, truncating at `knowcode_index`.
+That closes a live defect: the orchestrator passed the resolved `knowledge.db`
+path, which after Step 14 lives inside `knowcode_index/generations/<id>/`, so
+every retrieval wrote a log file into a published generation — a directory ADR
+4 declares immutable, which retirement deletes and which no deletion path could
+find. A path that resolves to nothing drops the event; the reranker, which
+holds no store handle, now resolves through the active scope instead of writing
+to the process working directory.
+
+Files are created `0600` (and an existing looser file is tightened), rotate at
+5 MiB keeping 3 rotations, and rotations older than 30 days are swept on the
+next write. The writer pool is bounded at `MAX_PENDING_EVENTS = 512`; beyond
+that telemetry drops rather than applying backpressure to a query.
+`knowcode telemetry show` and `knowcode telemetry clear` are the documented
+inspection and deletion surfaces; `clear` removes the log, its rotations, the
+raw file, and the correlation key.
+
+### Raw capture is opt-in, not redaction-by-default
+
+`KNOWCODE_TELEMETRY_RAW=1` writes the question to a separate
+`knowcode_telemetry_raw.jsonl` (mode `0600`, 1 MiB, one rotation, 7-day
+retention) and warns once per process. Redaction still applies: opting into
+your question text is not opting into storing a credential pasted inside it.
+The default file is never mixed with it.
+
+### Compatibility
+
+Records written before this schema have no `telemetry_schema_version` and are
+recognized by their raw `query` field, so `get_telemetry_summary` reports the
+same totals it always did for an existing file. Those records are exactly what
+the schema exists to stop writing; `knowcode telemetry clear` removes them.
+
+### Not claimed
+
+Redaction cannot recognize a credential format it has never seen. The schema —
+omission — is the guarantee; redaction bounds the damage when an allowlisted
+field carries something it should not.
+
 ## Baseline evidence
 
 The baseline is `main` at `d239b22` on 2026-08-12. Before Step 01 additions,
