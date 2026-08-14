@@ -76,19 +76,17 @@ class BackgroundIndexer:
                 else:
                     cmd, args = "index", item
 
+                # Every command is one prepare/commit transaction (Step 15).
+                # Removing first would delete the previous generation before
+                # its replacement was proven, which is how a transient
+                # embedding failure used to erase a file from the index.
                 if cmd == "index":
-                    # Remove old chunks first to prevent duplicates/stale data on re-index
-                    if hasattr(self.indexer, "remove_file"):
-                        self.indexer.remove_file(args)
-                    self.indexer.index_file(args)
+                    self.indexer.replace_file(args)
                 elif cmd == "remove":
-                    if hasattr(self.indexer, "remove_file"):
-                        self.indexer.remove_file(args)
+                    self.indexer.delete_file(args)
                 elif cmd == "move":
                     old_path, new_path = args
-                    if hasattr(self.indexer, "remove_file"):
-                        self.indexer.remove_file(old_path)
-                    self.indexer.index_file(new_path)
+                    self.indexer.move_file(old_path, new_path)
 
                 self._queue.task_done()
             except queue.Empty:

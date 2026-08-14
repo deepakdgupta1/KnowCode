@@ -76,10 +76,9 @@ class IndexingHandler(FileSystemEventHandler):
         if not event.is_directory and self.background_indexer:
             path = Path(event.src_path)
             if path.suffix in Scanner.SUPPORTED_EXTENSIONS:
-                if hasattr(self.background_indexer, "queue_removal"):
-                    self.background_indexer.queue_removal(path)
-                else:
-                    self._handle_change(event.src_path)
+                # queue_removal is part of the worker's interface (Step 15), so
+                # a deletion is never re-routed to an index command.
+                self.background_indexer.queue_removal(path)
 
     def on_moved(self, event: Any) -> None:
         """Handle moved file events."""
@@ -90,13 +89,9 @@ class IndexingHandler(FileSystemEventHandler):
             dest_supported = dest_path.suffix in Scanner.SUPPORTED_EXTENSIONS
 
             if src_supported and dest_supported:
-                if hasattr(self.background_indexer, "queue_move"):
-                    self.background_indexer.queue_move(src_path, dest_path)
-                else:
-                    self._handle_change(event.dest_path)
+                self.background_indexer.queue_move(src_path, dest_path)
             elif src_supported:
-                if hasattr(self.background_indexer, "queue_removal"):
-                    self.background_indexer.queue_removal(src_path)
+                self.background_indexer.queue_removal(src_path)
             elif dest_supported:
                 self._handle_change(event.dest_path)
 

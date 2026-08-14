@@ -711,6 +711,87 @@ already fail closed under Steps 08, 11, and 12 — so the next `knowcode build`
 publishes a generation and `doctor` warns about the flat layout until then. A
 stale flat `knowledge.db` left behind is ignored once a generation exists.
 
+## Incremental file update transactions (Step 15)
+
+Step 14 made a *full* rebuild all-or-nothing. Step 15 does the same for a single
+file, which is what watched edits, `index_file`, and incremental builds actually
+commit. Before it, every one of those paths removed a file's chunks *before* its
+replacement existed:
+
+```text
+remove_file(path)     # the previous generation is gone
+index_file(path)      # ... and this is allowed to fail
+```
+
+Reproduced with only a failing provider: a file indexed as `chunks=2 vectors=2`
+became `chunks=0 vectors=2` after one failed re-index, and dense search kept
+answering with both deleted chunk ids.
+
+### Prepare, then commit
+
+| Phase | What it does | On failure |
+| --- | --- | --- |
+| `Indexer.prepare_file_update` | Parse, chunk, reuse durable embeddings for unchanged content, embed the rest, validate count/dimension/finiteness/id-uniqueness. Reads live state, writes none. | `FileUpdatePreparationError`; the previous generation is untouched. |
+| `Indexer.commit_file_update` | `ChunkRepository.replace_file` in one writer transaction, then vector `upsert` for every committed id and `remove` for every id that did not survive, then `flush`. | Vector failure is rebuilt from the durable chunk rows; only an unrecoverable one raises `FileUpdateCommitError`. |
+
+A prepared update is a complete replacement, never a delta: committing it makes
+exactly its chunks the file's searchable set, whatever was there before. One
+commit lock serializes the pair, so two files' transactions cannot interleave.
+
+`index_file`, `remove_file`/`delete_file`, `move_file`, `index_directory`, and
+`index_incremental` are all thin wrappers over that primitive, and the watch
+worker calls `replace_file`/`delete_file`/`move_file` directly. No `hasattr`
+capability probe remains on any of them.
+
+### Recovery source
+
+After the SQLite transaction commits, the chunk rows — which carry durable
+float32 embeddings since Step 08 — are the committed truth. A vector failure is
+therefore repaired by re-deriving the affected rows from the chunk store, not by
+re-embedding and not by trusting the previous vector state. If that still fails,
+the commit raises and the caller discards its unpublished generation.
+
+### Deletion versus failure
+
+| Situation | Outcome |
+| --- | --- |
+| File is gone, or its extension is no longer indexable | Deletion: chunks and vectors are removed together. |
+| File parses cleanly and yields no chunks (an empty file) | Deletion. |
+| File exists but its parse reported errors and yielded no chunks | **Preparation error.** A file saved mid-edit with a syntax error keeps its previous chunks instead of dropping out of the index. |
+| Partial extraction (some entities, some errors) | Committed as prepared; the errors ride along on `PreparedFileUpdate.parse_errors`. |
+
+A bulk pipeline (`index_directory`, `index_incremental`) does not abort on one
+such file: it keeps that file's previous generation and records the reason in
+`Indexer.failed_updates`, which is logged rather than swallowed.
+
+### Move ordering
+
+The destination is prepared and committed *before* the source is dropped. An
+embedding failure therefore leaves the source searchable, and the worst
+post-commit outcome is a duplicate that a retry clears — never a file that
+exists under neither identity. A move whose source and destination normalize to
+one identity commits once and removes nothing.
+
+### Publication
+
+Incremental builds publish through Step 14's pointer: `build_generation(
+incremental=True)` seeds a staging directory from the last published
+generation, applies the per-file transactions inside it, validates the staged
+set, and replaces `current.json` last. The live generation is never edited in
+place, so its manifest digests stay true and a reader on it sees a stable index.
+Staging remains a full copy rather than a copy-on-write delta — ADR 4 permits
+either, and a hardlinked delta is unsafe for SQLite, which writes pages in
+place. The disk cost is the one documented with retention.
+
+### One read snapshot per query
+
+`HybridIndex.search` binds the chunk repository and vector store once for the
+whole query, so a reload between the sparse and dense reads cannot answer half a
+query from each generation. Ids from either retriever are de-duplicated before
+fusion — a repeated id would otherwise score twice — and a dense id the
+repository cannot resolve is skipped without consuming one of the `limit` result
+slots.
+
 ## Baseline evidence
 
 The baseline is `main` at `d239b22` on 2026-08-12. Before Step 01 additions,
