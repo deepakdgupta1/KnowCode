@@ -456,6 +456,29 @@ def test_a_drain_does_not_spend_its_budget_backing_off(worker_for, tmp_path: Pat
     assert bg.failures()[0].attempts == 3
 
 
+def test_the_worker_survives_a_failure_in_its_own_failure_handling(  # type: ignore[no-untyped-def]
+    worker_for, tmp_path: Path
+) -> None:
+    """Dying here would leave producers queueing work nothing consumes."""
+    indexer = DummyIndexer()
+    broken, later = tmp_path / "broken.py", tmp_path / "later.py"
+    indexer.fail_on(broken, OSError("busy"))
+
+    def explode(delay: float) -> None:
+        raise RuntimeError("the backoff clock is broken")
+
+    bg = worker_for(indexer, sleep=explode)
+    bg.start()
+    bg.queue_file(broken)
+    bg.drain(timeout=TIMEOUT)
+
+    bg.queue_file(later)
+
+    assert bg.drain(timeout=TIMEOUT).pending == ()
+    assert indexer.calls == [normalize_file_identity(later)]
+    assert bg.is_running
+
+
 def test_an_idle_worker_keeps_consuming(worker_for, tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     """The poll timeout is a liveness backstop, not an exit condition.
 
@@ -468,7 +491,7 @@ def test_an_idle_worker_keeps_consuming(worker_for, tmp_path: Path, monkeypatch)
     source = tmp_path / "m.py"
 
     bg.start()
-    time.sleep(0.05)
+    time.sleep(0.1)  # ten poll cycles at the patched timeout
     assert bg.is_running
 
     bg.queue_file(source)
@@ -666,6 +689,23 @@ def test_a_failed_move_leaves_the_source_searchable(watched) -> None:  # type: i
     assert watched.chunk_ids() == before
     assert watched.counts() == (2, 2)
     assert watched.worker.failures()[0].path == normalize_file_identity(moved)
+
+
+def test_a_failed_move_reports_the_source_it_never_dropped(watched) -> None:  # type: ignore[no-untyped-def]
+    """The stale identity is the source, so naming only the destination hides it."""
+    watched.indexer.index_file(watched.source)
+    moved = watched.source.parent / "renamed.py"
+    watched.source.rename(moved)
+    moved.write_text("def alpha():\n    return 99\n", encoding="utf-8")
+    watched.provider.fail = True
+
+    watched.worker.queue_move(watched.source, moved)
+    watched.drain()
+    report = watched.worker.drain(timeout=TIMEOUT)
+
+    (failure,) = watched.worker.failures()
+    assert failure.dropped_paths == (normalize_file_identity(watched.source),)
+    assert normalize_file_identity(watched.source) in report.incomplete_work
 
 
 def test_a_move_chain_leaves_only_the_final_identity_indexed(watched) -> None:  # type: ignore[no-untyped-def]

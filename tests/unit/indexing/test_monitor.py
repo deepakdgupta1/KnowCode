@@ -178,6 +178,55 @@ def test_ignored_paths_are_never_queued_matches_a_real_scan(tmp_path: Path) -> N
     assert set(bg.queued_files) == scanned
 
 
+def test_a_symlinked_source_file_is_watched_because_a_scan_yields_it(
+    tmp_path: Path,
+) -> None:
+    """`scan()` walks without resolving, so a link inside the root is indexed."""
+    root, outside = tmp_path / "repo", tmp_path / "outside"
+    root.mkdir()
+    outside.mkdir()
+    target = outside / "target.py"
+    target.write_text("x = 1\n", encoding="utf-8")
+    link = root / "link.py"
+    link.symlink_to(target)
+
+    scanned = {info.path for info in Scanner(root).scan_all()}
+    bg = MockBackgroundIndexer()
+    handler = IndexingHandler(bg, root)
+    handler.on_modified(FakeEvent(str(link)))
+
+    assert link in scanned
+    assert bg.queued_files == [link]
+
+
+def test_an_aliased_root_still_matches(tmp_path: Path) -> None:
+    """An event may carry an unresolved spelling of the root itself."""
+    real = tmp_path / "real"
+    real.mkdir()
+    alias = tmp_path / "alias"
+    alias.symlink_to(real, target_is_directory=True)
+    bg = MockBackgroundIndexer()
+    handler = IndexingHandler(bg, real)
+
+    handler.on_modified(FakeEvent(str(alias / "app.py")))
+
+    assert bg.queued_files == [alias / "app.py"]
+
+
+def test_an_unexpected_queue_error_does_not_break_the_observer_thread(
+    tmp_path: Path,
+) -> None:
+    """One bad event must not stop the watcher for every other file."""
+
+    class _Exploding(MockBackgroundIndexer):
+        def queue_file(self, path: Path) -> None:
+            raise RuntimeError("the queue is broken")
+
+    handler = IndexingHandler(_Exploding(), tmp_path)  # type: ignore[arg-type]
+
+    handler.on_modified(FakeEvent(str(tmp_path / "a.py")))
+
+
 def test_paths_outside_the_watched_root_are_ignored(tmp_path: Path) -> None:
     root = tmp_path / "repo"
     root.mkdir()

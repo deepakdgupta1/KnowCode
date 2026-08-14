@@ -75,6 +75,10 @@ class WatchFailure:
     attempts: int
     reason: str
     retryable: bool
+    #: Identities this item was going to drop and did not — a failed rename
+    #: leaves its *source* in the index, so naming only the destination would
+    #: under-report what is stale.
+    dropped_paths: tuple[str, ...] = ()
 
     @property
     def exhausted(self) -> bool:
@@ -94,10 +98,16 @@ class DrainReport:
     @property
     def incomplete_work(self) -> tuple[str, ...]:
         """Every path that is not in the index as its events implied."""
-        paths = [work.path for work in self.pending]
+        paths: list[str] = []
+        for work in self.pending:
+            paths.append(work.path)
+            paths.extend(work.dropped_paths)
         if self.in_flight is not None:
             paths.append(self.in_flight.path)
-        paths.extend(failure.path for failure in self.failures)
+            paths.extend(self.in_flight.dropped_paths)
+        for failure in self.failures:
+            paths.append(failure.path)
+            paths.extend(failure.dropped_paths)
         return tuple(dict.fromkeys(paths))
 
 
@@ -259,11 +269,25 @@ class BackgroundIndexer:
                     return
                 continue
             try:
-                self._commit(work)
-            except Exception as exc:  # noqa: BLE001 - classified, never swallowed
-                self._handle_failure(work, exc)
-            finally:
-                self._queue.complete(work)
+                self._process(work)
+            except Exception:  # noqa: BLE001 - the thread must outlive one item
+                # Only reachable if failure *handling* itself failed. Dying
+                # here would be the worst outcome available: producers would
+                # keep queueing work that nothing consumes, and nothing would
+                # say so.
+                logger.exception(
+                    "The watch worker could not classify a failure for %s",
+                    work.describes,
+                )
+
+    def _process(self, work: WatchWork) -> None:
+        """Commit one item and release it, whatever the outcome."""
+        try:
+            self._commit(work)
+        except Exception as exc:  # noqa: BLE001 - classified, never swallowed
+            self._handle_failure(work, exc)
+        finally:
+            self._queue.complete(work)
 
     def _commit(self, work: WatchWork) -> None:
         """Apply one work item as Step 15 generation transactions.
@@ -317,6 +341,7 @@ class BackgroundIndexer:
                     attempts=work.attempt,
                     reason=str(exc),
                     retryable=retryable,
+                    dropped_paths=work.dropped_paths,
                 )
             )
 

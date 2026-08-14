@@ -856,13 +856,29 @@ transaction again, unchanged, plausibly succeed?
 
 Retries are bounded by `max_attempts` (3) with `retry_delays` backoff
 (`0.5s`, `2.0s`), and the backoff is injectable so tests assert timing instead
-of waiting it out. A retry is dropped when a newer event for the same path is
-already pending — that event re-reads the file and makes the replay waste.
+of waiting it out.
+
+A retry is a **replay**, which is the opposite of a fresh event: every pending
+item is newer than it, so `requeue()` never overrides one. It contributes only
+what nothing else owns — the drop obligations it was carrying, which `take()`
+already removed from the pending set.
+
+| Pending | Retry of | Result |
+| --- | --- | --- |
+| `index(b)` | `index(b)` dropping `a` | `index(b)` dropping `a` — the newer event re-reads the file, but `a` still has to go |
+| `index(a)` | `index(b)` dropping `a` | `index(a)`, then `index(b)` dropping nothing — `a` is live again |
+| `index(c)` dropping `b` | `index(b)` dropping `a` | `index(c)` dropping `b` and `a` — the replay is obsolete, its drops are not |
+
+Discarding a superseded retry outright would leave a renamed-away file indexed
+forever; letting one override a newer event would delete a file that exists.
+Both were found by review before merge and are covered by named tests.
 
 Terminal is never silent. Exhausted and terminal failures both land in
 `BackgroundIndexer.failures()` as a bounded history of `WatchFailure` records,
-and Step 15 guarantees each one left the file's previous generation intact: the
-index is stale there, never damaged.
+each naming the path *and* the sources it never dropped — a failed rename
+leaves its source in the index, so reporting only the destination would
+under-report what is stale. Step 15 guarantees each failure left the file's
+previous generation intact: the index is stale there, never damaged.
 
 ### Lifecycle and the drain contract
 
@@ -888,6 +904,13 @@ FastAPI is deliberately not wired to any of this yet; Step 17 owns the lifespan.
 answers in bulk: extension (lowercased, as `scan()` compares it), inside the
 watched root, and not ignored. `IndexingHandler` asks it for every event, so the
 watched index and the built index contain the same files however a file arrived.
+
+Containment is tested against the path as given first and its resolved form
+second. `scan()` walks with `os.walk` and never resolves, so a symlink inside
+the root is yielded even when its target is outside; resolving first would
+reject exactly those files — the same watch/build disagreement in the other
+direction. The resolved probe is the fallback, for an event carrying an alias
+of the root itself (`/var/...` for a `/private/var/...` root).
 
 ## Baseline evidence
 

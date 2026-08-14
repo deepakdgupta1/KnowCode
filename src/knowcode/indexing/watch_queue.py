@@ -143,22 +143,63 @@ class WatchQueue:
             self._submit_locked(work)
 
     def requeue(self, work: WatchWork) -> bool:
-        """Schedule a retry, unless a newer event already supersedes it.
+        """Schedule a retry of an item whose commit failed.
+
+        A retry is a *replay*, which is the opposite of a fresh event: every
+        pending item is newer than it, so unlike :meth:`submit` it never
+        overrides one. It contributes only what nothing else owns — the drop
+        obligations it was carrying, which :meth:`take` already removed from
+        the pending set.
+
+        Three rules follow from that, and each closes a way an index could go
+        wrong:
+
+        * A source with its own pending item is live again, or already handled
+          by newer information. The replay must not delete it.
+        * A pending item that already drops this path says the path is gone.
+          The replay is obsolete; its remaining drops move to that item, so one
+          commit still removes everything.
+        * A pending item *for* this path re-reads the file. The replay's
+          operation is redundant; again, only its drops survive.
 
         Returns:
-            Whether the retry was scheduled. ``False`` means a fresh event for
-            the same path is already pending; that event reads the file again
-            and makes the retry redundant.
+            Whether the retry itself was scheduled. ``False`` means newer work
+            has taken it over — never that anything was discarded.
 
         A closed queue still accepts retries: a drain is bounded by its
         caller's timeout, and abandoning an in-progress transaction at
         shutdown is exactly the loss this step exists to prevent.
         """
         with self._lock:
-            if work.path in self._pending:
+            dropped = {
+                source
+                for source in work.dropped_paths
+                if source not in self._pending
+            }
+            owner = self._pending.get(work.path) or self._find_dropper(work.path)
+            if owner is not None:
+                merged = set(owner.dropped_paths) | dropped
+                merged.discard(owner.path)
+                self._pending[owner.path] = replace(
+                    owner, dropped_paths=tuple(sorted(merged))
+                )
                 return False
-            self._submit_locked(replace(work, attempt=work.attempt + 1))
+
+            self._order.append(work.path)
+            self._pending[work.path] = replace(
+                work,
+                dropped_paths=tuple(sorted(dropped)),
+                attempt=work.attempt + 1,
+            )
+            self._work_available.notify()
             return True
+
+    def _find_dropper(self, path: str) -> Optional[WatchWork]:
+        """The pending item, if any, that already drops ``path``."""
+        for work in self._pending.values():
+            if path in work.dropped_paths:
+                return work
+        return None
 
     def _submit_locked(self, work: WatchWork) -> None:
         """Merge ``work`` into the pending set. Caller holds the lock."""

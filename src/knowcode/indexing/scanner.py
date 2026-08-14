@@ -152,9 +152,19 @@ class Scanner:
         # Lowercased to match scan(), which normalizes before comparing.
         if path.suffix.lower() not in self.SUPPORTED_EXTENSIONS:
             return False
-        try:
-            relative = path.expanduser().resolve(strict=False).relative_to(self.root_dir)
-        except ValueError:
-            # Outside the watched root: not this index's file.
-            return False
-        return not self._should_ignore(str(relative))
+
+        # As given first, because that is the path `scan()` compares: it walks
+        # the root and never resolves, so a symlink inside the root is yielded
+        # even when its target is outside. Resolving first would reject exactly
+        # those files, which is the same disagreement in the other direction.
+        # The resolved form is the fallback, for an event carrying an alias of
+        # the root itself (`/var/...` for a `/private/var/...` root).
+        candidate = path.expanduser()
+        for probe in (candidate, candidate.resolve(strict=False)):
+            try:
+                relative = probe.relative_to(self.root_dir)
+            except ValueError:
+                continue
+            return not self._should_ignore(str(relative))
+        # Outside the watched root: not this index's file.
+        return False

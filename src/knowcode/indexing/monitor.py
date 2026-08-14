@@ -152,7 +152,9 @@ class IndexingHandler(FileSystemEventHandler):
 
         The worker rejects work after ``stop()`` rather than accepting and
         dropping it. That rejection must not escape into watchdog's observer
-        thread, where it would kill the watcher for every other file.
+        thread, where it would kill the watcher for every other file — and
+        neither may anything else, so an unexpected error is logged with its
+        traceback instead of being either swallowed or allowed to propagate.
         """
         try:
             enqueue(*paths)
@@ -161,3 +163,5 @@ class IndexingHandler(FileSystemEventHandler):
                 "Ignoring a file event for %s: the indexer is shutting down",
                 paths[0],
             )
+        except Exception:  # noqa: BLE001 - one bad event must not stop the watcher
+            logger.exception("Could not queue a file event for %s", paths[0])

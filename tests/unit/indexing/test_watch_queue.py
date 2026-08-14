@@ -9,6 +9,7 @@ state implies.
 from __future__ import annotations
 
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -250,6 +251,74 @@ def test_a_newer_event_supersedes_a_retry(queue: WatchQueue, tmp_path: Path) -> 
     assert pending.attempt == 1
 
 
+def test_a_superseded_retry_keeps_its_drop_obligations(
+    queue: WatchQueue, tmp_path: Path
+) -> None:
+    """The newer event owns the path — but nobody else owns the retry's drops.
+
+    `take()` already removed them from the pending set, so discarding the whole
+    retry leaves the renamed-away identity in the index forever.
+    """
+    a, b = tmp_path / "a.py", tmp_path / "b.py"
+    queue.submit(WatchWork.index(b, moved_from=a))
+    work = queue.take(timeout=0.01)
+    assert work is not None
+    queue.submit(WatchWork.index(b))  # the developer saved b again
+
+    assert queue.requeue(work) is False
+    queue.complete(work)
+
+    (pending,) = _drain(queue)
+    assert pending.path == normalize_file_identity(b)
+    assert pending.dropped_paths == (normalize_file_identity(a),)
+
+
+def test_a_retry_does_not_delete_a_path_recreated_since(
+    queue: WatchQueue, tmp_path: Path
+) -> None:
+    """A replay is older than everything pending, so it never overrides one.
+
+    `git mv a b` and then a new `a` (a checkout, a branch switch): the retry of
+    `b` must not turn the accepted create of `a` into a deletion.
+    """
+    a, b = tmp_path / "a.py", tmp_path / "b.py"
+    queue.submit(WatchWork.index(b, moved_from=a))
+    work = queue.take(timeout=0.01)
+    assert work is not None
+    queue.submit(WatchWork.index(a))  # a.py exists again
+
+    assert queue.requeue(work) is True
+    queue.complete(work)
+
+    taken = _drain(queue)
+    assert [item.path for item in taken] == [
+        normalize_file_identity(a),
+        normalize_file_identity(b),
+    ]
+    assert all(item.dropped_paths == () for item in taken)
+
+
+def test_a_retry_is_absorbed_by_a_newer_move_of_the_same_path(
+    queue: WatchQueue, tmp_path: Path
+) -> None:
+    """`a → b` fails, `b → c` happens: `c` must still drop both, in one commit."""
+    a, b, c = tmp_path / "a.py", tmp_path / "b.py", tmp_path / "c.py"
+    queue.submit(WatchWork.index(b, moved_from=a))
+    work = queue.take(timeout=0.01)
+    assert work is not None
+    queue.submit(WatchWork.index(c, moved_from=b))
+
+    assert queue.requeue(work) is False
+    queue.complete(work)
+
+    (pending,) = _drain(queue)
+    assert pending.path == normalize_file_identity(c)
+    assert set(pending.dropped_paths) == {
+        normalize_file_identity(a),
+        normalize_file_identity(b),
+    }
+
+
 def test_a_closed_queue_still_accepts_retries(queue: WatchQueue, tmp_path: Path) -> None:
     """Abandoning an in-progress transaction at shutdown is the loss to avoid."""
     queue.submit(WatchWork.index(tmp_path / "m.py"))
@@ -309,6 +378,36 @@ def test_join_returns_when_a_producer_is_still_ahead_of_the_consumer(
 
     assert queue.pending() == ()
     assert queue.in_flight is None
+
+
+def test_completing_work_wakes_a_waiting_join(queue: WatchQueue, tmp_path: Path) -> None:
+    """A missing notify still passes through `wait_for`'s timeout — seconds late.
+
+    The bounded join below is what tells the two apart: the waiter is given a
+    long timeout it must not need, and asserting it finished quickly is the
+    only way a lost wake-up shows up as a failure rather than as a slow suite.
+    """
+    queue.submit(WatchWork.index(tmp_path / "m.py"))
+    work = queue.take(timeout=0.01)
+    assert work is not None
+    waiting = threading.Barrier(2, timeout=5.0)
+    idle: list[bool] = []
+
+    def wait_for_idle() -> None:
+        waiting.wait()
+        idle.append(queue.join(timeout=30.0))
+
+    waiter = threading.Thread(target=wait_for_idle)
+    waiter.start()
+    waiting.wait()
+    # Deliberately lose the race to the waiter, so it is inside wait_for() and
+    # a wake-up is genuinely required. The assertion is the bounded join.
+    time.sleep(0.05)
+    queue.complete(work)
+    waiter.join(timeout=2.0)
+
+    assert not waiter.is_alive(), "complete() did not wake the waiting join()"
+    assert idle == [True]
 
 
 def test_pending_reports_uncommitted_work_in_order(queue: WatchQueue, tmp_path: Path) -> None:
