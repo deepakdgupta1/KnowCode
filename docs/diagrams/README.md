@@ -324,14 +324,20 @@ Abstract base `EmbeddingProvider` with `embed(texts[])` and `embed_single(text)`
 
 **`FileMonitor` (`indexing/monitor.py`)**
 - Wraps watchdog `Observer`
-- `IndexingHandler.on_modified(event)` + `on_created(event)` → `_handle_change(path)` → extension filter → `bg_indexer.queue_file(path)`
-- `start()` / `stop()`
+- `IndexingHandler.on_modified/on_created/on_deleted/on_moved(event)` → `Scanner.is_indexable(path)` → `bg_indexer.queue_file/queue_removal/queue_move(...)`
+- `start()` / `stop()` — both idempotent; a second `start()` returns `False` rather than scheduling a second observer
+
+**`WatchQueue` (`indexing/watch_queue.py`)**
+- One `WatchWork` item per canonical file identity; the last event for a path wins
+- A move is stored as its two effects — index the destination, drop the sources — so chained renames collapse into one commit
+- Submission order is preserved, and an in-flight commit never absorbs a new event
 
 **`BackgroundIndexer` (`indexing/background_indexer.py`)**
-- Daemon thread + `threading.Queue`
-- `queue_file(path)` — enqueues a file path for re-indexing
-- `_worker()` — blocking dequeue loop, calls `indexer.index_file(path)` for each entry
-- `start()` / `stop()`
+- One daemon thread draining a `WatchQueue`
+- `queue_file` / `queue_removal` / `queue_move` — coalesced into the queue; raise `WatchQueueClosed` after `stop()`
+- `_commit(work)` — Step 15 transactions: `indexer.replace_file(...)` or `delete_file(...)`, then the dropped sources
+- Retryable failures back off and retry up to `max_attempts`; terminal and exhausted ones land in `failures()` with the file's previous generation intact
+- `start()` / `stop(timeout)` — idempotent; `stop` drains within one deadline and returns a `DrainReport` naming any uncommitted work
 
 ### TemporalAnalyzer + CoverageProcessor
 
@@ -639,9 +645,10 @@ If `_build_index()` raises an exception (e.g., missing API key), `index_error` i
 When `knowcode server --watch` is running:
 
 - `FileMonitor` (watchdog `Observer`) watches the project directory
-- On file save: `IndexingHandler.on_modified()` or `on_created()` → `_handle_change(path)` → extension filter → `bg_indexer.queue_file(path)`
-- `BackgroundIndexer._worker()` (daemon thread): dequeues paths, calls `indexer.index_file(path)`
-- `index_file(path)` re-runs steps 14–17 for the single changed file only (incremental, not full re-scan)
+- On file save: `IndexingHandler.on_modified()` or `on_created()` → `Scanner.is_indexable(path)` → `bg_indexer.queue_file(path)`
+- `WatchQueue` coalesces by canonical identity, so an editor's burst of events for one file becomes one work item
+- `BackgroundIndexer._worker()` (daemon thread): takes one item, commits it as a Step 15 transaction (`replace_file` / `delete_file`), retries retryable failures with backoff
+- That transaction re-runs steps 14–17 for the single changed file only (incremental, not full re-scan), and a failure leaves the file's previous generation searchable
 - After re-index: the next API request automatically sees fresh data (no server restart needed)
 
 `POST /api/v1/reload` clears the in-memory `KnowledgeStore` cache; on next access it re-reads `knowcode_knowledge.json` from disk.
@@ -1248,9 +1255,10 @@ KnowCodeService:
 
 ```
 KnowCodeService → BackgroundIndexer:
-  BackgroundIndexer(indexer).start()
-  → daemon thread started
-  + Queue() initialized
+  BackgroundIndexer(indexer).start()  →  True
+  → one daemon thread started
+  + WatchQueue() initialized
+  [a second start() returns False rather than adding a consumer]
 ```
 
 ### Step 5 — Start FileMonitor
@@ -1286,27 +1294,31 @@ FileMonitor → IndexingHandler:
   watchdog OS event  →  IndexingHandler.on_modified(FileModifiedEvent)
 ```
 
-> `on_created` fires the same path: `IndexingHandler.on_created → _handle_change(path)`
+> `on_created` fires the same path: `IndexingHandler.on_created → _queue_index(path)`
+> `on_deleted` and `on_moved` map to `queue_removal` and `queue_move` instead.
 
 ### Step 9 — Dispatch to handler
 
 ```
-IndexingHandler:  _handle_change(event.src_path)
+IndexingHandler:  _queue_index(event.src_path)
 ```
 
 ### Step 10 — Filter
 
 ```
-IndexingHandler:
-  filter: file extension in SUPPORTED_EXTENSIONS  +  not gitignored
-  [path is silently dropped if filter fails]
+IndexingHandler → Scanner:
+  scanner.is_indexable(path)
+  = extension in SUPPORTED_EXTENSIONS (lowercased)  +  inside the watched root
+    +  not ignored
+  [the same rule scan() applies in bulk, so watch and build agree]
 ```
 
 ### Step 11 — Enqueue
 
 ```
 IndexingHandler → BackgroundIndexer:
-  bg_indexer.queue_file(file_path)  →  Queue.put(file_path)
+  bg_indexer.queue_file(file_path)  →  WatchQueue.submit(WatchWork.index(path))
+  → coalesced into the one pending item for that canonical identity
 ```
 
 ---
@@ -1316,13 +1328,16 @@ IndexingHandler → BackgroundIndexer:
 ### Step 12 — Dequeue
 
 ```
-BackgroundIndexer:  Queue.get(file_path)  [blocking dequeue]
+BackgroundIndexer:  WatchQueue.take()  [blocking; the item stays in flight until committed]
 ```
 
 ### Step 13 — Invoke incremental indexer
 
 ```
-BackgroundIndexer → Indexer:  indexer.index_file(file_path)
+BackgroundIndexer → Indexer:  indexer.replace_file(work.path)
+  then indexer.delete_file(src) for each dropped source (a rename's old identity)
+  [on a retryable failure: back off and retry, up to max_attempts;
+   otherwise record it in failures() — the previous generation stays searchable]
 ```
 
 ### Step 14 — Parse file

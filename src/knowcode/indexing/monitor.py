@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Callable, Optional, TYPE_CHECKING, Any
+
 from knowcode.indexing.scanner import Scanner
-from typing import Optional, TYPE_CHECKING, Any
+from knowcode.indexing.watch_queue import WatchQueueClosed
+from knowcode.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 try:
@@ -21,7 +26,11 @@ if TYPE_CHECKING:
 class FileMonitor:
     """Watches for file changes to trigger re-indexing."""
 
-    def __init__(self, root_dir: str | Path, background_indexer: Optional["BackgroundIndexer"] = None) -> None:
+    def __init__(
+        self,
+        root_dir: str | Path,
+        background_indexer: Optional["BackgroundIndexer"] = None,
+    ) -> None:
         """Initialize a file system monitor.
 
         Args:
@@ -32,75 +41,123 @@ class FileMonitor:
         self.background_indexer = background_indexer
         self.observer: Any = None
 
-    def start(self) -> None:
-        """Start watching the directory for changes."""
-        if not Observer:
-            print("watchdog not installed. Watch mode disabled.")
-            return
+    def start(self) -> bool:
+        """Start watching the directory for changes.
 
-        event_handler = IndexingHandler(self.background_indexer)
+        Returns:
+            Whether this call started an observer. A second call is a no-op:
+            scheduling two observers on one tree doubles every event and leaks
+            the first, since :meth:`stop` can only join one.
+        """
+        if not Observer:
+            logger.warning("watchdog is not installed; watch mode is disabled.")
+            return False
+        if self.observer is not None:
+            return False
+
+        event_handler = IndexingHandler(self.background_indexer, self.root_dir)
         self.observer = Observer()
         self.observer.schedule(event_handler, str(self.root_dir), recursive=True)
         self.observer.start()
+        return True
 
     def stop(self) -> None:
-        """Stop watching and join the observer thread."""
-        if self.observer:
-            self.observer.stop()
-            self.observer.join()
+        """Stop watching and join the observer thread. Idempotent."""
+        observer, self.observer = self.observer, None
+        if observer:
+            observer.stop()
+            observer.join()
 
 
 class IndexingHandler(FileSystemEventHandler):
-    """Handles file system events for indexing."""
+    """Turns file system events into watch-queue work items.
 
-    def __init__(self, background_indexer: Optional["BackgroundIndexer"]) -> None:
-        """Initialize the handler with an optional background indexer.
+    Two rules keep the watched index identical to a built one:
+
+    * A path is queued only when :meth:`Scanner.is_indexable` accepts it, so an
+      edit under ``node_modules/`` or ``.git/`` is ignored here exactly as it
+      is during a build.
+    * Every path is queued as-is and canonicalized by the queue (ADR 1), so no
+      alias of one file becomes two work items.
+    """
+
+    def __init__(
+        self,
+        background_indexer: Optional["BackgroundIndexer"],
+        root_dir: str | Path,
+    ) -> None:
+        """Initialize the handler.
 
         Args:
             background_indexer: Worker responsible for indexing changed files.
+            root_dir: Watched root, used to apply the scanner's ignore rules.
         """
         self.background_indexer = background_indexer
+        self.scanner = Scanner(root_dir)
 
     def on_modified(self, event: Any) -> None:
         """Handle modified file events."""
         if not event.is_directory:
-            self._handle_change(event.src_path)
+            self._queue_index(event.src_path)
 
     def on_created(self, event: Any) -> None:
         """Handle created file events."""
         if not event.is_directory:
-            self._handle_change(event.src_path)
+            self._queue_index(event.src_path)
 
     def on_deleted(self, event: Any) -> None:
         """Handle deleted file events."""
-        if not event.is_directory and self.background_indexer:
-            path = Path(event.src_path)
-            if path.suffix in Scanner.SUPPORTED_EXTENSIONS:
-                # queue_removal is part of the worker's interface (Step 15), so
-                # a deletion is never re-routed to an index command.
-                self.background_indexer.queue_removal(path)
+        worker = self.background_indexer
+        if event.is_directory or worker is None:
+            return
+        path = Path(event.src_path)
+        if self.scanner.is_indexable(path):
+            # queue_removal is part of the worker's interface (Step 15), so
+            # a deletion is never re-routed to an index command.
+            self._submit(worker.queue_removal, path)
 
     def on_moved(self, event: Any) -> None:
         """Handle moved file events."""
-        if not event.is_directory and self.background_indexer:
-            src_path = Path(event.src_path)
-            dest_path = Path(event.dest_path)
-            src_supported = src_path.suffix in Scanner.SUPPORTED_EXTENSIONS
-            dest_supported = dest_path.suffix in Scanner.SUPPORTED_EXTENSIONS
+        worker = self.background_indexer
+        if event.is_directory or worker is None:
+            return
+        src_path = Path(event.src_path)
+        dest_path = Path(event.dest_path)
+        src_indexable = self.scanner.is_indexable(src_path)
+        dest_indexable = self.scanner.is_indexable(dest_path)
 
-            if src_supported and dest_supported:
-                self.background_indexer.queue_move(src_path, dest_path)
-            elif src_supported:
-                self.background_indexer.queue_removal(src_path)
-            elif dest_supported:
-                self._handle_change(event.dest_path)
+        if src_indexable and dest_indexable:
+            # One work item, so the destination is proven before the source is
+            # dropped and a chained rename collapses into a single commit.
+            self._submit(worker.queue_move, src_path, dest_path)
+        elif src_indexable:
+            # Renamed out of the index — into an ignored directory, or to an
+            # extension nothing parses.
+            self._submit(worker.queue_removal, src_path)
+        elif dest_indexable:
+            self._queue_index(event.dest_path)
 
-    def _handle_change(self, path_str: str) -> None:
-        """Queue a file for indexing if it is a supported source type."""
-        if self.background_indexer:
-            path = Path(path_str)
-            # Filter using Scanner's supported extensions
-            if path.suffix in Scanner.SUPPORTED_EXTENSIONS:
-                self.background_indexer.queue_file(path)
+    def _queue_index(self, path_str: str) -> None:
+        """Queue a file for indexing if a build would have included it."""
+        worker = self.background_indexer
+        if worker is None:
+            return
+        path = Path(path_str)
+        if self.scanner.is_indexable(path):
+            self._submit(worker.queue_file, path)
 
+    @staticmethod
+    def _submit(enqueue: Callable[..., None], *paths: Path) -> None:
+        """Enqueue one event, tolerating a worker that is shutting down.
 
+        The worker rejects work after ``stop()`` rather than accepting and
+        dropping it. That rejection must not escape into watchdog's observer
+        thread, where it would kill the watcher for every other file.
+        """
+        try:
+            enqueue(*paths)
+        except WatchQueueClosed:
+            logger.info(
+                "Ignoring a file event for %s: the indexer is shutting down",
+                paths[0],
+            )

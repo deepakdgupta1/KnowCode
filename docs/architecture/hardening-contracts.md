@@ -792,6 +792,103 @@ fusion — a repeated id would otherwise score twice — and a dense id the
 repository cannot resolve is skipped without consuming one of the `limit` result
 slots.
 
+## Watch queue semantics (Step 16)
+
+Step 15 made one file's update a transaction. Step 16 makes the *stream* of
+filesystem events that drives those transactions lossless: events converge on
+the index the final filesystem state implies, and anything that does not make it
+in is visible rather than silent.
+
+Reproduced against the pre-Step-16 worker through its production API only:
+
+| Scenario | Before | After |
+| --- | --- | --- |
+| Five modify events for one file | 5 commits | 1 commit |
+| `m.py` and `sub/../m.py` | 2 work items | 1 |
+| `start()` called twice | 2 threads over 1 queue, 2 commits running at once, 1 joined | 1 worker; the second call is a no-op returning `False` |
+| `stop()` with 3 items queued | 1 committed, 2 dropped, returned `None` | 3 committed, `DrainReport(completed=True)` |
+| Provider outage during a re-index | update dropped; nothing retried, nothing reported | retried with backoff; committed, or reported in `failures()` |
+| Event under `node_modules/` | indexed, though no build would include it | ignored, by the scanner's own rules |
+
+### Coalescing rules
+
+`WatchQueue` holds at most one item per canonical file identity (ADR 1). Events
+do not accumulate — they collapse into the single replacement the file's final
+on-disk state implies, and committing that one item produces the same index as
+replaying every event.
+
+| Pending | Incoming | Result |
+| --- | --- | --- |
+| `index(p)` | `index(p)` | `index(p)` — one commit |
+| `index(p)` | `delete(p)` | `delete(p)` |
+| `delete(p)` | `index(p)` | `index(p)` |
+| `index(b)` dropping `a` | `index(b)` | `index(b)` dropping `a` — a modify after a rename must not leave the old identity indexed |
+| `index(b)` dropping `a` | `move(b → c)` | `index(c)` dropping `a` and `b` — the whole chain, one commit |
+| `index(b)` dropping `a` | `index(a)` | `index(b)` dropping nothing, then `index(a)` — `a` exists again, so no earlier move may drop it |
+
+Two rules keep coalescing from changing what gets committed:
+
+* **Submission order is preserved.** Coalescing updates an item in place rather
+  than moving it to the tail, so a file saved in a loop cannot starve the files
+  queued behind it.
+* **In-flight work never absorbs an event.** A commit that is already running
+  read the file before the new event happened, so a new event schedules a fresh
+  item instead of being folded into a stale read.
+
+A move is stored as its two effects — index the destination, drop the sources —
+and committed in that order. That is `Indexer.move_file`'s ordering generalized
+to the several sources a coalesced chain accumulates: a failure leaves every
+source searchable, never a file that exists under no identity.
+
+### Retry classification
+
+`FileUpdateError.retryable` answers one question: would running the same
+transaction again, unchanged, plausibly succeed?
+
+| Failure | Retryable | Why |
+| --- | --- | --- |
+| Embedding provider outage | yes | The chunks are fine; the environment moved. |
+| `FileUpdateCommitError` | yes | The chunk rows committed; re-running re-derives the vectors. |
+| File saved mid-edit with a syntax error | no | A retry re-reads the same broken bytes. The fix is the developer's next save, which arrives as a new event with a fresh attempt budget. |
+| Wrong-width or short embedding batch | no | A configuration mismatch, not a transient one. |
+| `OSError` | yes | A file still being written, or a store briefly locked. |
+| Anything unrecognized | no | Fails closed: reported, never retried blindly. |
+
+Retries are bounded by `max_attempts` (3) with `retry_delays` backoff
+(`0.5s`, `2.0s`), and the backoff is injectable so tests assert timing instead
+of waiting it out. A retry is dropped when a newer event for the same path is
+already pending — that event re-reads the file and makes the replay waste.
+
+Terminal is never silent. Exhausted and terminal failures both land in
+`BackgroundIndexer.failures()` as a bounded history of `WatchFailure` records,
+and Step 15 guarantees each one left the file's previous generation intact: the
+index is stale there, never damaged.
+
+### Lifecycle and the drain contract
+
+* `start()` returns whether it started the worker; a second call is a no-op.
+  A stopped worker cannot be restarted — its queue rejects everything — so that
+  raises rather than running a worker that can never commit.
+* `stop(timeout)` closes the queue, drains what it can within one deadline for
+  the whole call, and returns a `DrainReport`. `completed` is true only when
+  every accepted item committed; `pending`, `in_flight`, and `failures` name
+  everything else, and `incomplete_work` flattens them into the paths that are
+  not in the index as their events implied.
+* Retries continue while draining but skip their backoff, so shutdown never
+  spends its budget sleeping.
+* Work submitted after `stop()` raises `WatchQueueClosed`. `IndexingHandler`
+  catches it and logs: an event arriving during shutdown must not kill the
+  observer thread for every other file.
+
+FastAPI is deliberately not wired to any of this yet; Step 17 owns the lifespan.
+
+### One indexability rule
+
+`Scanner.is_indexable(path)` answers, for one file, the question `scan()`
+answers in bulk: extension (lowercased, as `scan()` compares it), inside the
+watched root, and not ignored. `IndexingHandler` asks it for every event, so the
+watched index and the built index contain the same files however a file arrived.
+
 ## Baseline evidence
 
 The baseline is `main` at `d239b22` on 2026-08-12. Before Step 01 additions,

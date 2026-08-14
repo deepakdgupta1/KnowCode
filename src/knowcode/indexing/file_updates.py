@@ -40,7 +40,24 @@ from knowcode.data_models import CodeChunk
 
 
 class FileUpdateError(RuntimeError):
-    """Base class for file-update transaction failures."""
+    """Base class for file-update transaction failures.
+
+    ``retryable`` classifies the failure for the callers that can act on one —
+    today the watch worker (Step 16). It answers a single question: would
+    running the very same transaction again, unchanged, plausibly succeed?
+
+    * A provider outage or a store that could not be reconciled: yes. The
+      inputs are fine and the environment moved.
+    * A file saved mid-edit with a syntax error, an unreadable file, a
+      wrong-width embedding batch: no. Retrying re-reads the same broken
+      state, and the fix — the developer saving again — arrives as a new
+      filesystem event with its own fresh attempt budget.
+
+    Terminal is not silent: an unretried failure is still reported through
+    :attr:`BackgroundIndexer.failures`.
+    """
+
+    retryable = False
 
 
 class FileUpdatePreparationError(FileUpdateError):
@@ -50,9 +67,12 @@ class FileUpdatePreparationError(FileUpdateError):
     problem instead of forcing a fix-and-retry loop.
     """
 
-    def __init__(self, file_path: str, reasons: Sequence[str]) -> None:
+    def __init__(
+        self, file_path: str, reasons: Sequence[str], *, retryable: bool = False
+    ) -> None:
         self.file_path = file_path
         self.reasons = tuple(reasons)
+        self.retryable = retryable
         super().__init__(
             f"Cannot prepare an index update for {file_path}: {'; '.join(reasons)}"
         )
@@ -67,6 +87,10 @@ class FileUpdateCommitError(FileUpdateError):
     generation cannot be trusted and must be discarded or rebuilt before
     readers use it.
     """
+
+    #: The chunk rows committed; only the vector side is behind. Re-running the
+    #: transaction re-derives it, so this is worth another attempt.
+    retryable = True
 
     def __init__(self, file_path: str, reason: str) -> None:
         self.file_path = file_path

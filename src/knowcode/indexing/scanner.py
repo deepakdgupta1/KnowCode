@@ -134,3 +134,27 @@ class Scanner:
     def scan_all(self) -> list[FileInfo]:
         """Scan and return all files as a list."""
         return list(self.scan())
+
+    def is_indexable(self, file_path: str | Path) -> bool:
+        """Whether a scan of this root would yield ``file_path``.
+
+        The watch path asks this question one file at a time (Step 16), and it
+        must get the same answer :meth:`scan` gives in bulk. Before, the
+        monitor filtered on extension alone, so an edit under ``node_modules/``
+        or ``.git/`` was indexed even though no build would ever have included
+        it — the watched index diverged from the built one purely by how a file
+        arrived.
+
+        The path does not have to exist: a delete event names a file that is
+        already gone.
+        """
+        path = Path(file_path)
+        # Lowercased to match scan(), which normalizes before comparing.
+        if path.suffix.lower() not in self.SUPPORTED_EXTENSIONS:
+            return False
+        try:
+            relative = path.expanduser().resolve(strict=False).relative_to(self.root_dir)
+        except ValueError:
+            # Outside the watched root: not this index's file.
+            return False
+        return not self._should_ignore(str(relative))

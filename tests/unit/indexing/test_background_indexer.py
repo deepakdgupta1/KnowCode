@@ -1,65 +1,484 @@
 """Unit tests for background indexing."""
 
-import time
-from pathlib import Path
+from __future__ import annotations
 
+import threading
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Callable, Optional
+
+import pytest
+
+from knowcode.indexing import background_indexer
 from knowcode.indexing.background_indexer import BackgroundIndexer
+from knowcode.indexing.indexer import Indexer
+from knowcode.indexing.watch_queue import WatchQueueClosed
+from knowcode.storage.sqlite_chunk_repository import SqliteChunkRepository
+from knowcode.storage.vector_store import VectorStore
+from knowcode.utils.entity_identity import normalize_file_identity
+
+TWO_FUNCTIONS = "def alpha():\n    return 1\n\n\ndef beta():\n    return 2\n"
+
+#: Every blocking wait in this module is bounded, so a regression fails the
+#: test instead of hanging the suite.
+TIMEOUT = 5.0
 
 
 class DummyIndexer:
-    """Records the generation transactions the worker commits."""
+    """Records the generation transactions the worker commits.
+
+    ``gate`` lets a test hold a commit open — the deterministic way to observe
+    the worker mid-transaction without sleeping.
+    """
 
     def __init__(self) -> None:
-        self.calls: list[Path] = []
-        self.deleted: list[Path] = []
-        self.moved: list[tuple[Path, Path]] = []
+        self.calls: list[str] = []
+        self.deleted: list[str] = []
+        self.entered = threading.Event()
+        self.gate = threading.Event()
+        self.gate.set()
+        self.failures: dict[str, Exception] = {}
+        self.fail_times: dict[str, int] = {}
+        self._lock = threading.Lock()
 
-    def replace_file(self, path: Path) -> object:
-        self.calls.append(path)
+    def fail_on(self, path: Path, error: Exception, times: int = 10**6) -> None:
+        identity = normalize_file_identity(path)
+        self.failures[identity] = error
+        self.fail_times[identity] = times
+
+    def _maybe_fail(self, identity: str) -> None:
+        with self._lock:
+            remaining = self.fail_times.get(identity, 0)
+            if remaining <= 0:
+                return
+            self.fail_times[identity] = remaining - 1
+        raise self.failures[identity]
+
+    def replace_file(self, path: str | Path, **kwargs: object) -> object:
+        self.entered.set()
+        assert self.gate.wait(timeout=TIMEOUT), "commit gate was never released"
+        identity = normalize_file_identity(path)
+        self._maybe_fail(identity)
+        with self._lock:
+            self.calls.append(identity)
         return object()
 
-    def delete_file(self, path: Path) -> object:
-        self.deleted.append(path)
+    def delete_file(self, path: str | Path) -> object:
+        identity = normalize_file_identity(path)
+        self._maybe_fail(identity)
+        with self._lock:
+            self.deleted.append(identity)
         return object()
 
-    def move_file(self, old_path: Path, new_path: Path) -> object:
-        self.moved.append((old_path, new_path))
-        return object()
+    def move_file(self, old_path: str | Path, new_path: str | Path) -> object:
+        raise AssertionError("the worker commits moves as replace + drop")
+
+    def hold(self) -> None:
+        """Make the next commit block until :meth:`release`."""
+        self.entered.clear()
+        self.gate.clear()
+
+    def release(self) -> None:
+        self.gate.set()
 
 
-def test_background_indexer_processes_queue(tmp_path: Path) -> None:
+@pytest.fixture
+def worker_for():  # type: ignore[no-untyped-def]
+    """Build workers that are always stopped, even when a test fails."""
+    built: list[BackgroundIndexer] = []
+
+    def build(indexer: object, **kwargs: object) -> BackgroundIndexer:
+        worker = BackgroundIndexer(indexer, **kwargs)  # type: ignore[arg-type]
+        built.append(worker)
+        return worker
+
+    yield build
+
+    for worker in built:
+        if isinstance(worker.indexer, DummyIndexer):
+            worker.indexer.release()
+        worker.stop(timeout=TIMEOUT)
+
+
+def test_background_indexer_processes_queue(worker_for, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
     """Queued files should be processed by the worker thread."""
     indexer = DummyIndexer()
-    bg = BackgroundIndexer(indexer)  # type: ignore
+    bg = worker_for(indexer)
     bg.start()
 
     target = tmp_path / "file.py"
     target.write_text("print('hi')", encoding="utf-8")
     bg.queue_file(target)
 
-    for _ in range(20):
-        if indexer.calls:
-            break
-        time.sleep(0.05)
+    assert bg.drain(timeout=TIMEOUT).completed
+    assert indexer.calls == [normalize_file_identity(target)]
 
-    bg.stop()
 
-    assert indexer.calls == [target]
+# ----------------------------------------------------------------------
+# Coalescing through the worker (Step 16)
+# ----------------------------------------------------------------------
+
+
+def test_a_burst_of_modify_events_commits_once(worker_for, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    """The reviewed defect: five modify events committed five transactions."""
+    indexer = DummyIndexer()
+    bg = worker_for(indexer)
+    source = tmp_path / "m.py"
+    for _ in range(5):
+        bg.queue_file(source)
+
+    bg.start()
+    assert bg.drain(timeout=TIMEOUT).completed
+
+    assert indexer.calls == [normalize_file_identity(source)]
+
+
+def test_an_edit_during_a_commit_gets_its_own_transaction(worker_for, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    """The in-flight commit read the old bytes; the new save needs a fresh read."""
+    indexer = DummyIndexer()
+    bg = worker_for(indexer)
+    source = tmp_path / "m.py"
+
+    indexer.hold()
+    bg.start()
+    bg.queue_file(source)
+    assert indexer.entered.wait(timeout=TIMEOUT)
+
+    bg.queue_file(source)
+    indexer.release()
+    assert bg.drain(timeout=TIMEOUT).completed
+
+    assert indexer.calls == [normalize_file_identity(source)] * 2
+
+
+def test_a_create_modify_delete_burst_commits_the_delete(worker_for, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    indexer = DummyIndexer()
+    bg = worker_for(indexer)
+    source = tmp_path / "m.py"
+
+    bg.queue_file(source)
+    bg.queue_file(source)
+    bg.queue_removal(source)
+    bg.start()
+    assert bg.drain(timeout=TIMEOUT).completed
+
+    assert indexer.calls == []
+    assert indexer.deleted == [normalize_file_identity(source)]
+
+
+def test_a_move_chain_commits_one_transaction(worker_for, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    """`a -> b -> c` indexes only `c`, and drops both earlier identities."""
+    indexer = DummyIndexer()
+    bg = worker_for(indexer)
+    a, b, c = tmp_path / "a.py", tmp_path / "b.py", tmp_path / "c.py"
+
+    bg.queue_move(a, b)
+    bg.queue_move(b, c)
+    bg.start()
+    assert bg.drain(timeout=TIMEOUT).completed
+
+    assert indexer.calls == [normalize_file_identity(c)]
+    assert set(indexer.deleted) == {
+        normalize_file_identity(a),
+        normalize_file_identity(b),
+    }
+
+
+# ----------------------------------------------------------------------
+# Lifecycle: idempotent start/stop and a bounded, honest drain
+# ----------------------------------------------------------------------
+
+
+def test_starting_twice_does_not_create_a_second_worker(worker_for) -> None:  # type: ignore[no-untyped-def]
+    """Two consumers on one queue commit two files at once and only one joins."""
+    bg = worker_for(DummyIndexer())
+
+    assert bg.start() is True
+    first = bg._thread
+    assert bg.start() is False
+    assert bg._thread is first
+
+    report = bg.stop(timeout=TIMEOUT)
+
+    assert report.completed
+    assert first is not None and not first.is_alive()
+    assert bg.is_running is False
+
+
+def test_stop_drains_queued_work_before_returning(worker_for, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    """The reviewed defect: stop() committed 1 of 3 queued files and returned None."""
+    indexer = DummyIndexer()
+    bg = worker_for(indexer)
+    sources = [tmp_path / f"m{n}.py" for n in range(3)]
+
+    indexer.hold()
+    bg.start()
+    bg.queue_file(sources[0])
+    assert indexer.entered.wait(timeout=TIMEOUT)
+    for source in sources[1:]:
+        bg.queue_file(source)
+    indexer.release()
+
+    report = bg.stop(timeout=TIMEOUT)
+
+    assert report.completed
+    assert report.pending == ()
+    assert report.incomplete_work == ()
+    assert set(indexer.calls) == {normalize_file_identity(s) for s in sources}
+
+
+def test_stop_reports_the_work_it_could_not_drain(worker_for, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    """A bounded drain must never claim durability it does not have."""
+    indexer = DummyIndexer()
+    bg = worker_for(indexer)
+    stuck, queued = tmp_path / "stuck.py", tmp_path / "queued.py"
+
+    indexer.hold()
+    bg.start()
+    bg.queue_file(stuck)
+    assert indexer.entered.wait(timeout=TIMEOUT)
+    bg.queue_file(queued)
+
+    report = bg.stop(timeout=0.2)
+
+    assert report.completed is False
+    assert report.in_flight is not None
+    assert report.in_flight.path == normalize_file_identity(stuck)
+    assert [work.path for work in report.pending] == [normalize_file_identity(queued)]
+    assert [work.path for work in bg.pending()] == [normalize_file_identity(queued)]
+    assert set(report.incomplete_work) == {
+        normalize_file_identity(stuck),
+        normalize_file_identity(queued),
+    }
+
+
+def test_work_queued_after_stop_is_rejected_not_dropped(worker_for, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    bg = worker_for(DummyIndexer())
+    bg.start()
+    bg.stop(timeout=TIMEOUT)
+
+    with pytest.raises(WatchQueueClosed):
+        bg.queue_file(tmp_path / "m.py")
+    with pytest.raises(WatchQueueClosed):
+        bg.queue_removal(tmp_path / "m.py")
+    with pytest.raises(WatchQueueClosed):
+        bg.queue_move(tmp_path / "m.py", tmp_path / "n.py")
+
+
+def test_stop_is_idempotent(worker_for) -> None:  # type: ignore[no-untyped-def]
+    bg = worker_for(DummyIndexer())
+    bg.start()
+
+    assert bg.stop(timeout=TIMEOUT).completed
+    assert bg.stop(timeout=TIMEOUT).completed
+    assert bg.is_running is False
+
+
+def test_stopping_a_worker_that_never_started_is_clean(worker_for) -> None:  # type: ignore[no-untyped-def]
+    report = worker_for(DummyIndexer()).stop(timeout=TIMEOUT)
+
+    assert report.completed
+    assert report.pending == ()
+
+
+def test_a_stopped_worker_cannot_be_restarted(worker_for) -> None:  # type: ignore[no-untyped-def]
+    """Restarting would run a worker whose queue rejects every event."""
+    bg = worker_for(DummyIndexer())
+    bg.start()
+    bg.stop(timeout=TIMEOUT)
+
+    with pytest.raises(RuntimeError, match="create a new one"):
+        bg.start()
+
+
+# ----------------------------------------------------------------------
+# Retry classification (Step 16)
+# ----------------------------------------------------------------------
+
+
+class _RecordingSleep:
+    """A backoff that records instead of waiting.
+
+    ``on_sleep`` is where a test changes the world *during* a retry backoff —
+    a provider coming back up — with no wall-clock race to lose.
+    """
+
+    def __init__(self) -> None:
+        self.delays: list[float] = []
+        self.on_sleep: Optional[Callable[[], None]] = None
+
+    def __call__(self, delay: float) -> None:
+        self.delays.append(delay)
+        if self.on_sleep is not None:
+            self.on_sleep()
+
+
+def test_a_retryable_failure_is_retried_with_backoff(worker_for, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    indexer = DummyIndexer()
+    source = tmp_path / "m.py"
+    indexer.fail_on(source, OSError("file is still being written"), times=1)
+    slept = _RecordingSleep()
+    bg = worker_for(indexer, retry_delays=(0.5, 2.0), sleep=slept)
+
+    bg.start()
+    bg.queue_file(source)
+    report = bg.drain(timeout=TIMEOUT)
+
+    assert report.completed
+    assert indexer.calls == [normalize_file_identity(source)]
+    assert slept.delays == [0.5]
+    assert bg.failures() == ()
+
+
+def test_retries_are_bounded_and_the_exhausted_work_is_reported(worker_for, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    indexer = DummyIndexer()
+    source = tmp_path / "m.py"
+    indexer.fail_on(source, OSError("device is offline"))
+    slept = _RecordingSleep()
+    bg = worker_for(indexer, max_attempts=3, retry_delays=(0.1, 0.2), sleep=slept)
+
+    bg.start()
+    bg.queue_file(source)
+    report = bg.drain(timeout=TIMEOUT)
+
+    assert slept.delays == [0.1, 0.2]
+    assert report.completed is False
+    (failure,) = bg.failures()
+    assert failure.path == normalize_file_identity(source)
+    assert failure.operation == "index"
+    assert failure.attempts == 3
+    assert failure.exhausted is True
+    assert "device is offline" in failure.reason
+
+
+def test_an_unrecognized_failure_is_terminal_and_reported(worker_for, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    """Fail closed: an unclassified error is surfaced, never retried blindly."""
+    indexer = DummyIndexer()
+    source = tmp_path / "m.py"
+    indexer.fail_on(source, ValueError("unrecognized"))
+    slept = _RecordingSleep()
+    bg = worker_for(indexer, sleep=slept)
+
+    bg.start()
+    bg.queue_file(source)
+    bg.drain(timeout=TIMEOUT)
+
+    assert slept.delays == []
+    (failure,) = bg.failures()
+    assert failure.attempts == 1
+    assert failure.exhausted is False
+
+
+def test_a_newer_event_replaces_a_pending_retry(worker_for, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    """Replaying a failed read is waste once a newer save is queued."""
+    indexer = DummyIndexer()
+    source = tmp_path / "m.py"
+    indexer.fail_on(source, OSError("busy"), times=1)
+    slept = _RecordingSleep()
+    bg = worker_for(indexer, sleep=slept)
+
+    indexer.hold()
+    bg.start()
+    bg.queue_file(source)
+    assert indexer.entered.wait(timeout=TIMEOUT)
+    bg.queue_file(source)
+    indexer.release()
+
+    assert bg.drain(timeout=TIMEOUT).completed
+    assert indexer.calls == [normalize_file_identity(source)]
+    assert slept.delays == []
+    assert bg.failures() == ()
+
+
+def test_max_attempts_of_one_disables_retries(worker_for, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    indexer = DummyIndexer()
+    source = tmp_path / "m.py"
+    indexer.fail_on(source, OSError("busy"), times=1)
+    bg = worker_for(indexer, max_attempts=1)
+
+    bg.start()
+    bg.queue_file(source)
+    bg.drain(timeout=TIMEOUT)
+
+    assert indexer.calls == []
+    assert bg.failures()[0].attempts == 1
+
+
+def test_max_attempts_must_be_positive() -> None:
+    with pytest.raises(ValueError, match="max_attempts"):
+        BackgroundIndexer(DummyIndexer(), max_attempts=0)  # type: ignore[arg-type]
+
+
+def test_no_configured_backoff_retries_immediately(worker_for, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    indexer = DummyIndexer()
+    source = tmp_path / "m.py"
+    indexer.fail_on(source, OSError("busy"), times=1)
+    slept = _RecordingSleep()
+    bg = worker_for(indexer, retry_delays=(), sleep=slept)
+
+    bg.start()
+    bg.queue_file(source)
+
+    assert bg.drain(timeout=TIMEOUT).completed
+    assert slept.delays == []
+    assert indexer.calls == [normalize_file_identity(source)]
+
+
+def test_a_drain_does_not_spend_its_budget_backing_off(worker_for, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    """Shutdown is bounded even when the work in flight is failing and retrying."""
+    indexer = DummyIndexer()
+    source = tmp_path / "m.py"
+    indexer.fail_on(source, OSError("device is offline"))
+    slept = _RecordingSleep()
+    bg = worker_for(indexer, max_attempts=3, retry_delays=(30.0,), sleep=slept)
+
+    def release_once_shutdown_starts() -> None:
+        """Let the commit fail only after stop() has closed the queue."""
+        deadline = time.monotonic() + TIMEOUT
+        while not bg._queue.closed and time.monotonic() < deadline:
+            time.sleep(0.005)
+        indexer.release()
+
+    indexer.hold()
+    bg.start()
+    bg.queue_file(source)
+    assert indexer.entered.wait(timeout=TIMEOUT)
+    releaser = threading.Thread(target=release_once_shutdown_starts)
+    releaser.start()
+    try:
+        report = bg.stop(timeout=TIMEOUT)
+    finally:
+        releaser.join(timeout=TIMEOUT)
+
+    assert slept.delays == []
+    assert report.completed is False
+    assert bg.failures()[0].attempts == 3
+
+
+def test_an_idle_worker_keeps_consuming(worker_for, tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """The poll timeout is a liveness backstop, not an exit condition.
+
+    The sleep only lets an idle poll cycle elapse; the assertion is on the
+    commit that follows it.
+    """
+    monkeypatch.setattr(background_indexer, "_TAKE_TIMEOUT", 0.01)
+    indexer = DummyIndexer()
+    bg = worker_for(indexer)
+    source = tmp_path / "m.py"
+
+    bg.start()
+    time.sleep(0.05)
+    assert bg.is_running
+
+    bg.queue_file(source)
+    assert bg.drain(timeout=TIMEOUT).completed
+    assert indexer.calls == [normalize_file_identity(source)]
 
 
 # ----------------------------------------------------------------------
 # The watch path commits generation transactions (Step 15)
 # ----------------------------------------------------------------------
-
-from dataclasses import dataclass  # noqa: E402
-
-import pytest  # noqa: E402
-
-from knowcode.indexing.indexer import Indexer  # noqa: E402
-from knowcode.storage.sqlite_chunk_repository import SqliteChunkRepository  # noqa: E402
-from knowcode.storage.vector_store import VectorStore  # noqa: E402
-
-TWO_FUNCTIONS = "def alpha():\n    return 1\n\n\ndef beta():\n    return 2\n"
 
 
 @dataclass
@@ -90,6 +509,7 @@ class _Watched:
     repo: SqliteChunkRepository
     vectors: VectorStore
     source: Path
+    slept: _RecordingSleep
 
     def counts(self) -> tuple[int, int]:
         return self.repo.count(), self.vectors.count()
@@ -102,7 +522,7 @@ class _Watched:
 
     def drain(self) -> None:
         """Block until every queued command has been processed."""
-        self.worker._queue.join()
+        assert self.worker.drain(timeout=TIMEOUT).pending == ()
 
 
 @pytest.fixture
@@ -116,12 +536,13 @@ def watched(tmp_path: Path):  # type: ignore[no-untyped-def]
     repo = SqliteChunkRepository(tmp_path / "chunks.db", dimension=3)
     vectors = VectorStore(dimension=3)
     indexer = Indexer(provider, chunk_repo=repo, vector_store=vectors)
-    worker = BackgroundIndexer(indexer)
+    slept = _RecordingSleep()
+    worker = BackgroundIndexer(indexer, retry_delays=(0.01, 0.02), sleep=slept)
     worker.start()
     try:
-        yield _Watched(worker, indexer, provider, repo, vectors, source)
+        yield _Watched(worker, indexer, provider, repo, vectors, source, slept)
     finally:
-        worker.stop()
+        worker.stop(timeout=TIMEOUT)
         repo.close()
 
 
@@ -143,6 +564,55 @@ def test_a_failed_watched_re_index_preserves_the_previous_generation(watched) ->
     assert watched.chunk_ids() == before
     assert watched.counts() == (2, 2)
     assert watched.dense_ids() == watched.chunk_ids()
+
+
+def test_a_provider_outage_is_retried_and_the_file_lands(watched) -> None:  # type: ignore[no-untyped-def]
+    """A transient outage must not need a second save to be indexed (Step 16)."""
+    watched.indexer.index_file(watched.source)
+    watched.source.write_text("def alpha():\n    return 99\n", encoding="utf-8")
+    watched.provider.fail = True
+
+    # The provider recovers while the worker is backing off.
+    watched.slept.on_sleep = lambda: setattr(watched.provider, "fail", False)
+    watched.worker.queue_file(watched.source)
+    watched.drain()
+
+    assert watched.slept.delays == [0.01]
+    assert watched.counts() == (1, 1)
+    assert watched.dense_ids() == watched.chunk_ids()
+    assert watched.worker.failures() == ()
+
+
+def test_retry_exhaustion_keeps_the_last_good_generation(watched) -> None:  # type: ignore[no-untyped-def]
+    watched.indexer.index_file(watched.source)
+    before = watched.chunk_ids()
+    watched.source.write_text("def alpha():\n    return 99\n", encoding="utf-8")
+    watched.provider.fail = True
+
+    watched.worker.queue_file(watched.source)
+    watched.drain()
+
+    assert watched.chunk_ids() == before
+    assert watched.counts() == (2, 2)
+    (failure,) = watched.worker.failures()
+    assert failure.attempts == 3
+    assert "embedding provider is down" in failure.reason
+
+
+def test_a_file_saved_mid_edit_is_not_retried_and_keeps_its_generation(watched) -> None:  # type: ignore[no-untyped-def]
+    """Terminal: retrying re-reads the same broken bytes. The next save is the fix."""
+    watched.indexer.index_file(watched.source)
+    before = watched.chunk_ids()
+    watched.source.write_text("def alpha(:\n", encoding="utf-8")
+
+    watched.worker.queue_file(watched.source)
+    watched.drain()
+
+    assert watched.chunk_ids() == before
+    assert watched.slept.delays == []
+    (failure,) = watched.worker.failures()
+    assert failure.attempts == 1
+    assert failure.exhausted is False
 
 
 def test_a_watched_re_index_replaces_the_whole_file(watched) -> None:  # type: ignore[no-untyped-def]
@@ -177,3 +647,52 @@ def test_a_watched_move_keeps_the_stores_in_step(watched) -> None:  # type: igno
     assert watched.counts() == (2, 2)
     assert watched.dense_ids() == watched.chunk_ids()
     assert all("renamed.py" in chunk_id for chunk_id in watched.chunk_ids())
+
+
+def test_a_failed_move_leaves_the_source_searchable(watched) -> None:  # type: ignore[no-untyped-def]
+    """Never a file that exists under neither identity."""
+    watched.indexer.index_file(watched.source)
+    before = watched.chunk_ids()
+    moved = watched.source.parent / "renamed.py"
+    watched.source.rename(moved)
+    # Renamed *and* edited, so the destination needs the provider: identical
+    # content would reuse its durable embeddings and never call it.
+    moved.write_text("def alpha():\n    return 99\n", encoding="utf-8")
+    watched.provider.fail = True
+
+    watched.worker.queue_move(watched.source, moved)
+    watched.drain()
+
+    assert watched.chunk_ids() == before
+    assert watched.counts() == (2, 2)
+    assert watched.worker.failures()[0].path == normalize_file_identity(moved)
+
+
+def test_a_move_chain_leaves_only_the_final_identity_indexed(watched) -> None:  # type: ignore[no-untyped-def]
+    watched.indexer.index_file(watched.source)
+    first = watched.source.parent / "first.py"
+    second = watched.source.parent / "second.py"
+    watched.source.rename(first)
+
+    watched.worker.queue_move(watched.source, first)
+    first.rename(second)
+    watched.worker.queue_move(first, second)
+    watched.drain()
+
+    assert watched.counts() == (2, 2)
+    assert all("second.py" in chunk_id for chunk_id in watched.chunk_ids())
+    assert watched.dense_ids() == watched.chunk_ids()
+
+
+def test_stop_commits_the_backlog_a_watcher_left_behind(watched) -> None:  # type: ignore[no-untyped-def]
+    """Shutdown durability, asserted on the stores rather than on a log line."""
+    other: Optional[Path] = watched.source.parent / "other.py"
+    assert other is not None
+    other.write_text("def gamma():\n    return 3\n", encoding="utf-8")
+
+    watched.worker.queue_file(watched.source)
+    watched.worker.queue_file(other)
+    report = watched.worker.stop(timeout=TIMEOUT)
+
+    assert report.completed
+    assert watched.counts() == (3, 3)

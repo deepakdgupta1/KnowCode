@@ -294,8 +294,10 @@ class Indexer:
                 [chunk.content for chunk in pending]
             )
         except Exception as exc:  # noqa: BLE001 - reported as a preparation failure
+            # The chunks are fine; the provider is not. A caller that can wait
+            # and try again — the watch worker — should (Step 16).
             raise FileUpdatePreparationError(
-                file_identity, [f"embedding failed: {exc}"]
+                file_identity, [f"embedding failed: {exc}"], retryable=True
             ) from exc
 
         if len(embeddings) != len(pending):
