@@ -22,6 +22,7 @@ from knowcode.errors import (
 )
 from knowcode.generation_bundle import BundleSources, GenerationBundle
 from knowcode.indexing import generations
+from knowcode.indexing.generation_writer import build_semantic_manifest
 from knowcode.indexing.generations import ResolvedGeneration
 from knowcode.indexing.graph_builder import GraphBuilder
 from knowcode.service_watch import ServiceWatchWriter
@@ -113,6 +114,12 @@ class KnowCodeService:
         self._bundle: Optional[GenerationBundle] = None
         self._retired_bundles: list[GenerationBundle] = []
         self._bundle_lock = threading.RLock()
+        # One watch writer per service (Step 18b). Two would stage two
+        # competing successors to the same generation, and the second to
+        # publish would have to re-derive its whole batch; and the service has
+        # to hold the one there is, because a dropped writer would take an
+        # unpublished staging directory with it.
+        self._watch_writer: Optional[ServiceWatchWriter] = None
         # Held for a whole reload so two of them cannot both build a candidate
         # and publish in an order neither chose. Lock order is always
         # ``_reload_lock`` then ``_bundle_lock``; nothing acquires the reverse.
@@ -175,15 +182,22 @@ class KnowCodeService:
         return tuple(dict.fromkeys(ids))
 
     def watch_writer(self) -> ServiceWatchWriter:
-        """Return a writer that commits into whatever generation is current.
+        """Return the writer that publishes watched updates as generations.
 
         The watch worker used to be handed one :class:`~knowcode.indexing.
         indexer.Indexer` at startup and hold it forever, so after a reload it
         kept committing into the retired generation — and, once retirement
-        started closing resources, into a closed repository. This handle
-        resolves the current bundle under a lease per commit instead.
+        started closing resources, into a closed repository. This handle stages
+        a successor generation per batch and publishes it (Step 18b).
+
+        One per service, built once: the service owns the staged batch because
+        it owns the artifact root, so :meth:`flush` can publish work still
+        staged at shutdown and :meth:`close` can report what it discards.
         """
-        return ServiceWatchWriter(self)
+        with self._bundle_lock:
+            if self._watch_writer is None:
+                self._watch_writer = ServiceWatchWriter(self)
+            return self._watch_writer
 
     def _leased_bundle(self) -> Optional[GenerationBundle]:
         """The bundle this service has pinned on this execution context."""
@@ -352,6 +366,11 @@ class KnowCodeService:
     # ------------------------------------------------------------------
     # Index generations (Step 14, ADR 4)
     # ------------------------------------------------------------------
+
+    @property
+    def index_root(self) -> Path:
+        """Artifact root holding ``generations/`` and the generation pointer."""
+        return self._index_path()
 
     def current_generation(self) -> Optional[ResolvedGeneration]:
         """The published generation this caller is reading from.
@@ -803,7 +822,7 @@ class KnowCodeService:
                 if kind == generations.KIND_FULL:
                     chunk_ids = generations.read_chunk_ids(staging.path / "chunks.db")
                     self._assert_chunk_vector_parity(chunk_ids, vector_count)
-                manifest = generations.build_manifest(
+                manifest = build_semantic_manifest(
                     staging.path,
                     generation_id=staging.generation_id,
                     kind=kind,
@@ -811,15 +830,8 @@ class KnowCodeService:
                     relationship_count=len(builder.relationships),
                     chunk_ids=chunk_ids,
                     vector_count=vector_count,
-                    embedding=self._embedding_metadata(provider),
-                    vector={
-                        "backend": self.app_config.vector_backend,
-                        "dimension": dimension,
-                    },
-                    schema_versions={
-                        "chunks": SqliteChunkRepository.SCHEMA_VERSION,
-                        "index_manifest": Indexer.SCHEMA_VERSION,
-                    },
+                    provider=provider,
+                    backend=self.app_config.vector_backend,
                 )
                 published = generations.publish_generation(
                     index_root,
@@ -840,7 +852,7 @@ class KnowCodeService:
 
             staging.published = True
 
-        self._adopt_generation(published)
+        self.adopt_generation(published)
         return GenerationBuildResult(
             published=True,
             generation_id=published.generation_id,
@@ -873,20 +885,14 @@ class KnowCodeService:
         """Copy a previous generation's semantic artifacts into staging.
 
         Incremental builds start from the last published generation instead of
-        mutating it. Step 15 replaces this full copy with a validated
-        copy-on-write delta; until then correctness outranks the copy cost,
-        which is documented alongside retention.
+        mutating it, and so do watch batches (Step 18b), which is why the copy
+        itself lives in :mod:`knowcode.indexing.generations`. It stays a full
+        copy: hardlinking would let a SQLite write reach the published file it
+        was linked to.
         """
-        for name in ("chunks.db", "index_manifest.json", "vectors.json"):
-            source = previous.path / name
-            if source.exists():
-                shutil.copy2(source, staging_dir / name)
-        for name in generations.NATIVE_VECTOR_ARTIFACTS:
-            source = previous.path / name
-            if source.is_dir():
-                shutil.copytree(source, staging_dir / name)
-            elif source.exists():
-                shutil.copy2(source, staging_dir / name)
+        generations.copy_generation_artifacts(
+            previous.path, staging_dir, generations.SEMANTIC_ARTIFACTS
+        )
 
     @staticmethod
     def _discard_semantic_artifacts(staging_dir: Path) -> None:
@@ -913,20 +919,16 @@ class KnowCodeService:
                 ],
             )
 
-    @staticmethod
-    def _embedding_metadata(provider: Any) -> dict[str, Any]:
-        """Serialize the embedding configuration recorded in a generation."""
-        from dataclasses import asdict
-
-        return dict(asdict(provider.config))
-
-    def _adopt_generation(self, published: ResolvedGeneration) -> None:
-        """Move this service onto a generation it just published.
+    def adopt_generation(self, published: ResolvedGeneration) -> None:
+        """Move this service onto a generation that was just published.
 
         One atomic swap of one complete bundle, so a build can never leave the
         graph on the new generation while chunks and vectors are still on the
         old one. The replaced bundle retires behind whatever readers still hold
         it.
+
+        Public because a watch batch publishes outside :meth:`build_generation`
+        (Step 18b) and must move readers the same way a build does.
         """
         self._swap(self._open_bundle(generation=published))
 
@@ -937,25 +939,34 @@ class KnowCodeService:
     def flush(self) -> None:
         """Make this service's in-memory index state durable.
 
-        Two things are durable in different ways, so both are handled:
+        Three things are durable in different ways, so all three are handled:
 
+        * **Staged watch batches are published** (Step 18b). A watch commit is
+          a generation, so its durable home is a published generation
+          directory, not a rewrite of the current one. Publishing here is what
+          makes ``flush()`` a real durability boundary in watch mode again: the
+          server's shutdown order drains the worker first, and anything the
+          drain could not publish is published — or reported — here.
         * The vector store's write buffer is drained into its table. LanceDB
           buffers; FAISS/NumPy does not, and its flush is a documented no-op.
         * The vector *artifact* and the index manifest are written back to the
-          artifact directory. Step 15 commits keep chunks durable in SQLite as
-          they go, but with the FAISS backend the vectors live only in memory
-          until someone calls :meth:`Indexer.save`. A watch session that ended
-          without this left one vector in memory and none on disk, so a restart
-          found durable chunks and no vectors.
+          artifact directory, for the flat pre-generation layout where the
+          index is genuinely mutable. Step 15 commits keep chunks durable in
+          SQLite as they go, but with the FAISS backend the vectors live only
+          in memory until someone calls :meth:`Indexer.save`.
 
-        A *published* generation is deliberately left untouched. ADR 4 makes it
-        immutable and records artifact checksums at publication, so rewriting
+        A *published* generation is still deliberately left untouched: ADR 4
+        makes it immutable and records artifact checksums over it, so rewriting
         ``vectors.*`` or ``index_manifest.json`` inside it would invalidate the
-        manifest that describes it. Watch commits against a published
-        generation are therefore not made durable here; routing them through a
-        staged generation is Step 18b's, and this method says so rather than
-        pretending the write happened.
+        manifest that describes it. Nothing is buffered there any more, because
+        watch commits no longer land there at all.
+
+        Raises:
+            Exception: The staged batch could not be published. It surfaces
+                rather than being reported as a clean flush.
         """
+        self._publish_watch_batch()
+
         bundle = self._bundle
         if bundle is None or not bundle.has_indexer:
             # Nothing was opened, so nothing is buffered. Opening an indexer
@@ -982,6 +993,20 @@ class KnowCodeService:
             return
         indexer.save(artifact_dir)
 
+    def _publish_watch_batch(self) -> None:
+        """Publish whatever the watch writer still holds staged.
+
+        Raises:
+            Exception: The batch could not be published. It stays named by
+                ``pending_paths()`` so the caller reports it rather than
+                treating the flush as clean.
+        """
+        with self._bundle_lock:
+            writer = self._watch_writer
+        if writer is None:
+            return
+        writer.publish_pending()
+
     @staticmethod
     def _has_index_state(indexer: "Indexer", artifact_dir: Path) -> bool:
         """Whether flushing this indexer would persist anything real.
@@ -1003,7 +1028,19 @@ class KnowCodeService:
         never raises inside an operation that was already running; with no
         readers in flight — the normal shutdown case, since the server has
         stopped accepting requests — every store closes here.
+
+        A watch batch still staged at this point is discarded rather than
+        published: ``close()`` releases resources, and publishing here would
+        make a shutdown that had already reported its incomplete work go on to
+        change what readers see. :meth:`flush` is the stage that publishes, and
+        it runs first (Step 17's ``SHUTDOWN_ORDER``); anything left is logged
+        by name so the loss is stated rather than implied.
         """
+        with self._bundle_lock:
+            writer = self._watch_writer
+        if writer is not None:
+            writer.close()
+
         with self._bundle_lock:
             if self._closed:
                 return

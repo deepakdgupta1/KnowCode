@@ -572,7 +572,12 @@ def test_a_read_during_a_rebuild_sees_one_complete_generation(
 def test_the_watch_writer_commits_into_the_current_generation(
     tmp_path: Path, backend: str
 ) -> None:
-    """A worker bound before a reload must not keep writing into the old one."""
+    """A worker bound before a reload must not keep writing into the old one.
+
+    Since Step 18b a commit stages a *successor* rather than mutating the
+    generation it reads, so the question this asks is which generation it
+    succeeded: the one the service moved onto, or the one it left.
+    """
     src = _write(tmp_path, "alpha")
     service = _service(tmp_path, backend)
     service.analyze(directory=src, output=tmp_path)
@@ -590,10 +595,16 @@ def test_the_watch_writer_commits_into_the_current_generation(
 
     _write(tmp_path, "gamma")
     writer.replace_file(src / "gamma.py")
+    writer.publish_pending()
 
-    committed = generations.read_chunk_ids(current.chunks_db)
+    published = service.current_generation()
+    assert published is not None
+    committed = generations.read_chunk_ids(published.chunks_db)
     assert any("gamma" in chunk_id for chunk_id in committed), (
-        "the watch commit landed in the retired generation"
+        "the watch commit never reached a published generation"
+    )
+    assert any("beta" in chunk_id for chunk_id in committed), (
+        "the watch commit succeeded the retired generation, not the current one"
     )
     service.close()
 
@@ -655,6 +666,7 @@ def test_the_watch_writer_deletes_through_the_current_generation(
 
     _remove(tmp_path, "beta")
     writer.delete_file(src / "beta.py")
+    writer.publish_pending()
 
     with service.generation_lease() as bundle:
         after = bundle.indexer.chunk_repo.get_all_file_paths()

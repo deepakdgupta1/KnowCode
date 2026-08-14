@@ -736,3 +736,135 @@ def test_stop_commits_the_backlog_a_watcher_left_behind(watched) -> None:  # typ
 
     assert report.completed
     assert watched.counts() == (3, 3)
+
+
+# ----------------------------------------------------------------------
+# Publication cadence (Step 18b)
+# ----------------------------------------------------------------------
+
+
+class PublishingIndexer(DummyIndexer):
+    """A writer that stages commits and publishes them, like the real one.
+
+    :class:`~knowcode.service_watch.ServiceWatchWriter` commits into a staging
+    generation no reader can see, so the worker — the only component that knows
+    when the queue has gone idle — is what turns a burst of edits into one
+    published generation.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.staged: list[str] = []
+        self.publications: list[tuple[str, ...]] = []
+        self.publish_error: Optional[Exception] = None
+
+    def replace_file(self, path: str | Path, **kwargs: object) -> object:
+        result = super().replace_file(path, **kwargs)
+        with self._lock:
+            self.staged.append(normalize_file_identity(path))
+        return result
+
+    def delete_file(self, path: str | Path) -> object:
+        result = super().delete_file(path)
+        with self._lock:
+            self.staged.append(normalize_file_identity(path))
+        return result
+
+    def publish_pending(self) -> Optional[str]:
+        with self._lock:
+            if not self.staged:
+                return None
+            if self.publish_error is not None:
+                raise self.publish_error
+            self.publications.append(tuple(self.staged))
+            self.staged.clear()
+            return f"generation-{len(self.publications)}"
+
+    def pending_paths(self) -> tuple[str, ...]:
+        with self._lock:
+            return tuple(self.staged)
+
+
+def test_the_worker_publishes_when_the_queue_goes_idle(worker_for, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    """A watched edit is only visible once its generation is published."""
+    indexer = PublishingIndexer()
+    bg = worker_for(indexer)
+    bg.start()
+
+    target = tmp_path / "file.py"
+    target.write_text("print('hi')", encoding="utf-8")
+    bg.queue_file(target)
+
+    assert bg.drain(timeout=TIMEOUT).completed
+    assert indexer.publications == [(normalize_file_identity(target),)]
+
+
+def test_a_burst_publishes_once_when_it_drains(worker_for, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    """The cadence is per drain, not per commit: one burst, one publication."""
+    indexer = PublishingIndexer()
+    bg = worker_for(indexer)
+    bg.start()
+
+    indexer.hold()
+    paths = []
+    for index in range(3):
+        target = tmp_path / f"file{index}.py"
+        target.write_text("print('hi')", encoding="utf-8")
+        paths.append(normalize_file_identity(target))
+        bg.queue_file(target)
+    assert indexer.entered.wait(timeout=TIMEOUT)
+    indexer.release()
+
+    assert bg.drain(timeout=TIMEOUT).completed
+    assert indexer.publications == [tuple(paths)]
+
+
+def test_stop_publishes_the_backlog_it_drained(worker_for, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    """Shutdown must not leave a committed edit staged and unpublished."""
+    indexer = PublishingIndexer()
+    bg = worker_for(indexer)
+    bg.start()
+
+    target = tmp_path / "file.py"
+    target.write_text("print('hi')", encoding="utf-8")
+    bg.queue_file(target)
+    report = bg.stop(timeout=TIMEOUT)
+
+    assert report.completed
+    assert report.unpublished == ()
+    assert indexer.publications == [(normalize_file_identity(target),)]
+
+
+def test_work_that_could_not_be_published_is_reported(worker_for, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    """A commit still in staging is stale, so it must never look durable."""
+    indexer = PublishingIndexer()
+    indexer.publish_error = RuntimeError("the pointer moved")
+    bg = worker_for(indexer)
+    bg.start()
+
+    target = tmp_path / "file.py"
+    target.write_text("print('hi')", encoding="utf-8")
+    bg.queue_file(target)
+    report = bg.stop(timeout=TIMEOUT)
+
+    identity = normalize_file_identity(target)
+    assert indexer.publications == []
+    assert report.unpublished == (identity,)
+    assert identity in report.incomplete_work
+    assert not report.completed
+
+
+def test_a_writer_that_does_not_publish_is_driven_unchanged(worker_for, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    """A plain ``Indexer`` writes in place and has nothing to publish."""
+    indexer = DummyIndexer()
+    bg = worker_for(indexer)
+    bg.start()
+
+    target = tmp_path / "file.py"
+    target.write_text("print('hi')", encoding="utf-8")
+    bg.queue_file(target)
+    report = bg.stop(timeout=TIMEOUT)
+
+    assert report.completed
+    assert report.unpublished == ()
+    assert indexer.calls == [normalize_file_identity(target)]

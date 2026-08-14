@@ -104,6 +104,10 @@ INDEX_MANIFEST = "index_manifest.json"
 #: generation; which one depends on the configured backend and engine.
 NATIVE_VECTOR_ARTIFACTS = ("vectors.lancedb", "vectors.index", "vectors.npy")
 
+#: The chunk/vector half of a generation: everything a successor inherits when
+#: it is derived from an existing generation rather than built from scratch.
+SEMANTIC_ARTIFACTS = (CHUNKS_DB, INDEX_MANIFEST, VECTOR_METADATA) + NATIVE_VECTOR_ARTIFACTS
+
 _REBUILD_HINT = "Rebuild with `knowcode build`."
 
 _STAGING_NAME = re.compile(
@@ -141,6 +145,26 @@ class GenerationValidationError(GenerationError):
         self.path = path
         self.failures = tuple(failures)
         super().__init__(f"Invalid index generation at {path}: {'; '.join(failures)}")
+
+
+class GenerationConflictError(GenerationError):
+    """Raised when the pointer moved while a generation was being staged.
+
+    A staged generation derived from another one — an incremental build, a
+    watch batch (Step 18b) — is only a correct successor to the generation it
+    was seeded from. Publishing it after someone else has published would
+    silently revert their work, so publication compares the pointer under the
+    publication lock and refuses instead. The caller re-derives its changes on
+    the new current generation and publishes that.
+    """
+
+    def __init__(self, expected: str | None, found: str | None) -> None:
+        self.expected = expected
+        self.found = found
+        super().__init__(
+            f"The current index generation changed during staging: expected "
+            f"{expected!r}, found {found!r}."
+        )
 
 
 # ----------------------------------------------------------------------
@@ -361,6 +385,36 @@ def stage_generation(root: str | Path, generation_id: str | None = None) -> Path
 def discard_staging(staging: str | Path) -> None:
     """Remove a staging generation, ignoring an already-removed directory."""
     shutil.rmtree(Path(staging), ignore_errors=True)
+
+
+def copy_generation_artifacts(
+    source: str | Path, target: str | Path, names: Sequence[str]
+) -> list[str]:
+    """Copy named artifacts from one generation directory into another.
+
+    A generation derived from another one — an incremental build, a batch of
+    watch commits (Step 18b) — starts from a *copy* rather than mutating the
+    published original, which ADR 4 makes immutable. The copy is deliberately
+    a full one: hardlinking would let a SQLite write in the successor reach the
+    published file it was linked to, which is the very defect staging exists to
+    prevent.
+
+    Returns:
+        The names that were actually present and copied.
+    """
+    source_dir = Path(source)
+    target_dir = Path(target)
+    copied: list[str] = []
+    for name in names:
+        origin = source_dir / name
+        if origin.is_dir():
+            shutil.copytree(origin, target_dir / name)
+        elif origin.exists():
+            shutil.copy2(origin, target_dir / name)
+        else:
+            continue
+        copied.append(name)
+    return copied
 
 
 @dataclass
@@ -717,6 +771,7 @@ def publish_generation(
     *,
     retain: int = DEFAULT_RETAINED_GENERATIONS,
     protect: Sequence[str] = (),
+    expect_current: str | None = None,
 ) -> ResolvedGeneration:
     """Validate a staged generation and publish it as the current one.
 
@@ -732,11 +787,18 @@ def publish_generation(
             only after reader leases end" at the directory level; the service
             supplies them from
             :meth:`~knowcode.service.KnowCodeService.live_generation_ids`.
+        expect_current: The generation this staged one was derived from. When
+            given, publication refuses if the pointer no longer names it, so a
+            successor built from a superseded generation cannot revert whoever
+            published in between. ``None`` means the staged generation is
+            self-contained — a full build — and needs no such check.
 
     Raises:
         GenerationValidationError: The staged generation is not complete and
             self-consistent. Nothing is published and the staging directory is
             left for the caller's context manager to discard.
+        GenerationConflictError: ``expect_current`` no longer names the current
+            generation. Nothing is published.
     """
     root_path = Path(root)
     staging_path = Path(staging)
@@ -752,6 +814,14 @@ def publish_generation(
     target = generations_dir(root_path) / manifest.generation_id
 
     with _publication_lock(root_path):
+        if expect_current is not None:
+            # Inside the lock, so the window between the check and the rename
+            # cannot hold another publication (ADR 4 gives one writer process
+            # per artifact root, which is what makes a process-level lock
+            # sufficient here).
+            pointed = read_pointer(root_path)
+            if pointed != expect_current:
+                raise GenerationConflictError(expect_current, pointed)
         if target.exists():
             raise GenerationValidationError(
                 staging_path,

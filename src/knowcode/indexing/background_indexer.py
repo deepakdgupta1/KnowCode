@@ -37,7 +37,7 @@ import time
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Optional, Protocol, Sequence
+from typing import Any, Callable, Optional, Protocol, Sequence, runtime_checkable
 
 from knowcode.indexing.file_updates import FileUpdateError
 from knowcode.indexing.watch_queue import WatchOp, WatchQueue, WatchWork
@@ -78,6 +78,28 @@ class WatchIndexer(Protocol):
         """Remove one file's chunks and vectors as one transaction."""
 
 
+@runtime_checkable
+class WatchPublisher(Protocol):
+    """A writer whose commits become visible only when it publishes (Step 18b).
+
+    Separate from :class:`WatchIndexer` because publication is optional: a
+    plain :class:`~knowcode.indexing.indexer.Indexer` writes into a mutable
+    index directory and has nothing to publish, while
+    :class:`~knowcode.service_watch.ServiceWatchWriter` stages a successor
+    generation that no reader can see until it is published.
+
+    The worker drives it because the *queue* is what knows a burst has ended.
+    Committing per event but publishing per drain is what keeps one save from
+    costing a full staging copy per keystroke.
+    """
+
+    def publish_pending(self) -> Optional[str]:
+        """Publish staged commits, returning the new generation id or ``None``."""
+
+    def pending_paths(self) -> tuple[str, ...]:
+        """File identities that are committed but not yet published."""
+
+
 @dataclass(frozen=True)
 class WatchFailure:
     """Work the queue accepted but could not commit.
@@ -111,6 +133,10 @@ class DrainReport:
     pending: tuple[WatchWork, ...] = ()
     in_flight: Optional[WatchWork] = None
     failures: tuple[WatchFailure, ...] = ()
+    #: Committed into a staging generation but never published, so no reader
+    #: will ever see it and a restart will not find it (Step 18b). Committed is
+    #: not durable, and this is where the difference is stated.
+    unpublished: tuple[str, ...] = ()
 
     @property
     def incomplete_work(self) -> tuple[str, ...]:
@@ -125,6 +151,7 @@ class DrainReport:
         for failure in self.failures:
             paths.append(failure.path)
             paths.extend(failure.dropped_paths)
+        paths.extend(self.unpublished)
         return tuple(dict.fromkeys(paths))
 
 
@@ -157,6 +184,12 @@ class BackgroundIndexer:
         if max_attempts < 1:
             raise ValueError("max_attempts must be at least 1")
         self.indexer = indexer
+        # A writer that stages its commits also has to be told when to publish;
+        # one that writes in place does not. Resolved once, so the per-commit
+        # path is a null check rather than a protocol test.
+        self.publisher: Optional[WatchPublisher] = (
+            indexer if isinstance(indexer, WatchPublisher) else None
+        )
         self.max_attempts = max_attempts
         self.retry_delays = tuple(retry_delays)
         self._sleep = sleep
@@ -219,6 +252,11 @@ class BackgroundIndexer:
                 if self._thread is thread and stopped:
                     self._thread = None
 
+        # The worker publishes each drain itself, so this normally finds
+        # nothing. It runs anyway for the cases where the worker never got
+        # there: a thread that was never started, one that timed out mid-batch,
+        # or a batch whose earlier publication failed.
+        self._publish_pending()
         return self._report(completed=drained and stopped and not self.failures())
 
     def drain(self, timeout: float = 5.0) -> DrainReport:
@@ -234,12 +272,20 @@ class BackgroundIndexer:
         return thread is not None and thread.is_alive()
 
     def _report(self, *, completed: bool) -> DrainReport:
+        unpublished = self.unpublished()
         return DrainReport(
-            completed=completed,
+            completed=completed and not unpublished,
             pending=self._queue.pending(),
             in_flight=self._queue.in_flight,
             failures=self.failures(),
+            unpublished=unpublished,
         )
+
+    def unpublished(self) -> tuple[str, ...]:
+        """File identities committed into a staging generation but not published."""
+        if self.publisher is None:
+            return ()
+        return tuple(self.publisher.pending_paths())
 
     # -- submission ------------------------------------------------------
 
@@ -301,13 +347,47 @@ class BackgroundIndexer:
                 )
 
     def _process(self, work: WatchWork) -> None:
-        """Commit one item and release it, whatever the outcome."""
+        """Commit one item, publish if the burst has ended, and release it."""
         try:
             self._commit(work)
         except Exception as exc:  # noqa: BLE001 - classified, never swallowed
             self._handle_failure(work, exc)
         finally:
-            self._queue.complete(work)
+            try:
+                self._publish_if_drained()
+            finally:
+                # Released last, so a caller whose ``join`` returns can rely on
+                # the batch having been published rather than racing it.
+                self._queue.complete(work)
+
+    def _publish_if_drained(self) -> None:
+        """Publish the staged batch once nothing is left to commit.
+
+        Checked before the item is released, and after a retry has had its
+        chance to requeue: an item waiting for another attempt means the burst
+        has not ended, so its file is not published half-updated.
+        """
+        if self.publisher is None or self._queue.pending():
+            return
+        self._publish_pending()
+
+    def _publish_pending(self) -> None:
+        """Publish staged commits, reporting rather than propagating failures.
+
+        A publication that fails must not kill the worker thread or turn a
+        commit failure into an unhandled one. The batch stays named by
+        ``publisher.pending_paths()``, which is what the drain report carries,
+        so the loss is reported rather than swallowed.
+        """
+        if self.publisher is None:
+            return
+        try:
+            self.publisher.publish_pending()
+        except Exception:  # noqa: BLE001 - reported through the drain report
+            logger.exception(
+                "Could not publish the staged watched updates; they remain "
+                "uncommitted to any generation"
+            )
 
     def _commit(self, work: WatchWork) -> None:
         """Apply one work item as Step 15 generation transactions.

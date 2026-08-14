@@ -274,6 +274,68 @@ def test_the_watch_worker_commits_into_the_generation_after_a_reload(
     service.close()
 
 
+def test_a_watch_session_leaves_a_generation_doctor_accepts(
+    tmp_path: Path, backend: str
+) -> None:
+    """Step 18b's headline: a watch session ends on a coherent generation.
+
+    Before it, the worker committed into the *published* generation's own
+    ``chunks.db`` and vector artifacts, so one watched edit made the manifest
+    stop describing what was on disk and ``knowcode doctor`` failed on it.
+    """
+    src = _repository(tmp_path)
+    service = _service(tmp_path, backend)
+    service.analyze(directory=src, output=tmp_path)
+    base = resolve_current_generation(tmp_path / "knowcode_index")
+    assert base is not None
+
+    worker = BackgroundIndexer(service.watch_writer())
+    assert worker.start() is True
+    try:
+        (src / "pkg" / "added.py").write_text(
+            "def added():\n    return 1\n", encoding="utf-8"
+        )
+        (src / "pkg" / "billing.py").write_text(
+            "def charge(amount: int) -> int:\n"
+            '    """Charge an amount, twice."""\n'
+            "    return amount * 2\n",
+            encoding="utf-8",
+        )
+        (src / "app.js").unlink()
+        worker.queue_file(src / "pkg" / "added.py")
+        worker.queue_file(src / "pkg" / "billing.py")
+        worker.queue_removal(src / "app.js")
+        report = worker.stop(timeout=60)
+    finally:
+        if worker.is_running:
+            worker.stop(timeout=60)
+
+    assert report.completed, report.incomplete_work
+    current = service.current_generation()
+    assert current is not None
+    assert current.generation_id != base.generation_id, (
+        "the watch session never published a generation"
+    )
+    service.close()
+
+    report_ = run_doctor(store_path=tmp_path)
+    for name in ("Index generation", "Knowledge store", "Semantic index", "Freshness"):
+        check = next(item for item in report_.checks if item.name == name)
+        assert check.status != "fail", check.message
+
+    restarted = _service(tmp_path, backend)
+    try:
+        with restarted.generation_lease() as bundle:
+            files = bundle.indexer.chunk_repo.get_all_file_paths()
+            chunks = bundle.indexer.chunk_repo.count()
+            vectors = bundle.indexer.vector_store.count()
+    finally:
+        restarted.close()
+    assert any("added.py" in path for path in files)
+    assert not any("app.js" in path for path in files)
+    assert chunks == vectors
+
+
 # ----------------------------------------------------------------------
 # Through the real server
 # ----------------------------------------------------------------------

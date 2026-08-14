@@ -990,9 +990,9 @@ Two cases are deliberately skipped, and reported rather than performed:
 
 * **A published generation.** ADR 4 makes it immutable and records artifact
   checksums at publication, so rewriting `vectors.*` or `index_manifest.json`
-  inside it would invalidate the manifest describing it. Watch commits against
-  a published generation are not made durable here; routing them through a
-  staged generation is Step 18b (see below).
+  inside it would invalidate the manifest describing it. Since Step 18b nothing
+  is buffered there either: watch commits stage a successor generation, and
+  `flush()` publishes it (see below).
 * **An index that never existed.** An empty store with no artifact beside it has
   nothing to persist. An empty store *with* one is still written — that records
   that everything was removed.
@@ -1100,13 +1100,101 @@ the next commit.
 
 ### Deferred: where watch commits publish
 
-The worker still commits into the *current* generation's artifacts in place.
-That predates this step (Steps 14–16 wiring) and is recorded in the plan as
-Step 18b: a watched edit invalidates the manifest digests describing an
-immutable generation, and with the FAISS backend it is not durable at all,
-because `flush()` correctly refuses to rewrite a published generation. Fixing it
-means publishing watch commits through staged generations on some cadence, which
-is a distinct design from the reader handoff this step owns.
+Step 18 fixed *which* generation a commit reached, not *what a commit is allowed
+to write*: the worker still committed into the current generation's artifacts in
+place. That is Step 18b, below.
+
+## Watch commits as generations (Step 18b)
+
+Step 18b closes the last place an index mutation was not a generation. A watch
+commit resolved the current bundle and wrote into the published generation's own
+`chunks.db` and vector artifacts, which ADR 4 makes immutable and whose manifest
+records digests over exactly those files.
+
+Reproduced against the pre-Step-18b service, with no fault injection: after one
+watched edit, `validate_generation(..., verify_digests=True)` on the current
+generation reported a chunk-id digest mismatch and a chunk-count mismatch, and
+`knowcode doctor` failed on it. With FAISS/NumPy the edit was not durable at all
+— `flush()` correctly refuses to rewrite a published generation — so a restart
+found two chunks beside one vector. On LanceDB the table *did* change underneath
+its own envelope, so the restart failed closed with
+`VectorArtifactVersionError`.
+
+### Stage, then publish
+
+`StagedGenerationWriter` copies a published generation into
+`.staging-<id>.pid<pid>/`, applies Step 15 file transactions there, and
+publishes the result through the same validate-then-move-the-pointer path a
+build uses. `knowledge.db` is carried across unchanged, because a file
+transaction rewrites chunks and vectors and never the graph. The published
+original is read once and never written.
+
+The copy is a full one. Hardlinking would let a SQLite write in the successor
+reach the published file it was linked to, which is the defect staging exists to
+prevent — the same reason Step 15 accepted a full copy for incremental builds.
+
+Seeding fails closed. A base directory that is gone copies *nothing*, and every
+store opened on the staging directory afterwards would helpfully create an empty
+one; publishing that would replace a populated generation with an empty one and
+call it a successor.
+
+### Cadence: per drain, capped per batch
+
+Publication is not per commit — that would cost a full staging copy per keypress
+— and not per session, which would make a watch session's work visible only at
+shutdown. The worker publishes when its **queue goes idle**, before it releases
+the last item, so a caller whose `join()` returns can rely on the batch having
+been published rather than racing it. One burst of saves is therefore one
+staging copy and one publication, and a single save is visible as soon as it is
+indexed.
+
+`DEFAULT_WATCH_BATCH_COMMITS` (64) publishes mid-burst as well. That bounds two
+things at once during a branch switch or a bulk format: how stale a reader can
+get while the burst runs, and how much committed work a crash would leave in a
+staging directory nobody publishes.
+
+**The staleness readers accept** is therefore one drain: between a commit and its
+publication, readers keep answering from the previous generation — completely,
+not partially — and move to the new one in a single atomic swap (Step 18).
+
+### Rebased, never reverted
+
+A staged batch is a successor to the generation it was seeded from, so
+`publish_generation(..., expect_current=...)` compares the pointer under the
+publication lock and raises `GenerationConflictError` rather than reverting a
+build that landed in between. The writer then re-derives the batch — re-applying
+its recorded file operations to a new staging generation seeded from the new
+current one — and publishes that. Re-derivation rather than replay of the staged
+*artifacts*: the batch means "these files' current content belongs in the
+index", which applied to the new base preserves both changes.
+
+One re-derivation, not unbounded retries. A second conflict means sustained
+contention, and re-deriving costs a re-parse and re-embed of the batch. The
+batch is retained instead, so the next publication — the worker's next drain —
+tries again.
+
+### Committed is not durable
+
+Work that is committed into a staging generation and not published is named by
+`ServiceWatchWriter.pending_paths()`, which `DrainReport.unpublished` carries
+into `incomplete_work` and from there into the server's `ShutdownReport`. A
+drain that could not publish is not `completed`.
+
+`flush()` is a durability boundary again in watch mode: it publishes whatever is
+still staged, which is what makes Step 17's shutdown order — drain the worker,
+*then* flush, then close the stores — end with the watch session's work in a
+published generation. `close()` deliberately does not publish; it discards the
+staging directory and logs the lost identities by name.
+
+A published generation is still never rewritten, and now nothing is buffered
+inside one: watch commits no longer land there at all.
+
+### Where commits still land in place
+
+An artifact root with no published generation — the pre-Step-14 flat layout, and
+an index nobody has built yet — is genuinely mutable. There is nothing immutable
+to protect and `flush()` already makes it durable, so commits go straight into
+it and `publish_pending()` reports that there was nothing to publish.
 
 ## Baseline evidence
 
