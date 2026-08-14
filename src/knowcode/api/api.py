@@ -123,17 +123,22 @@ def get_stats(
 )
 @limiter.limit(STANDARD_LIMIT)
 def query_context(
-    http_request: Request,
-    request: QueryRequest,
+    request: Request,
+    payload: QueryRequest,
     service: KnowCodeService = Depends(get_service),
 ) -> QueryResponse:
-    """Execute task-aware retrieval and return relevant code chunks with scores."""
-    # Required by slowapi's decorator; keep explicit to preserve endpoint contract.
-    _ = http_request
-    limit = min(max(1, request.limit or 5), 20)
-    max_tokens_budget = min(request.max_tokens or 4000, 8000)
-    expand_deps = request.expand_deps if request.expand_deps is not None else True
-    task_override = TaskType(request.task_type.value) if request.task_type else None
+    """Execute task-aware retrieval and return relevant code chunks with scores.
+
+    The Starlette ``request`` is first and named ``request`` because SlowAPI's
+    ``@limiter.limit`` decorator keys on the parameter with that exact name and
+    asserts it is a ``starlette.requests.Request``. The JSON body is a separate
+    ``payload`` parameter resolved by type, so the request contract is unchanged.
+    """
+    _ = request  # consumed by the limiter decorator, not the handler body
+    limit = min(max(1, payload.limit or 5), 20)
+    max_tokens_budget = min(payload.max_tokens or 4000, 8000)
+    expand_deps = payload.expand_deps if payload.expand_deps is not None else True
+    task_override = TaskType(payload.task_type.value) if payload.task_type else None
 
     # One generation for the whole request (Step 18). Retrieval names the
     # chunk ids and the repository resolves them; a rebuild landing between
@@ -142,7 +147,7 @@ def query_context(
     with service.generation_lease():
         try:
             retrieval = service.retrieve_context_for_query(
-                query=request.query,
+                query=payload.query,
                 task_type=task_override,
                 limit_entities=limit,
                 expand_deps=expand_deps,
@@ -188,7 +193,7 @@ def query_context(
         # Fallback for lexical-only retrieval paths where no chunk IDs are available.
         if not results:
             fallback_chunks = engine.search(
-                query=request.query,
+                query=payload.query,
                 limit=limit,
                 expand_deps=expand_deps,
             )
@@ -226,7 +231,7 @@ def query_context(
         total=len(capped_results),
         task_type=str(
             retrieval.get(
-                "task_type", request.task_type.value if request.task_type else "general"
+                "task_type", payload.task_type.value if payload.task_type else "general"
             )
         ),
     )

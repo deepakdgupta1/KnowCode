@@ -87,6 +87,17 @@ Attached to the FastAPI app as middleware. Two tiers:
 - **Standard:** 60 requests/minute — all endpoints except trace and impact
 - **Expensive:** 10 requests/minute — `trace_calls`, `impact`
 
+Buckets are keyed on the connecting peer (`request.client.host`). The normal
+local server disables Uvicorn proxy-header processing (`proxy_headers=False`),
+so a direct client cannot spoof `X-Forwarded-For`/`Forwarded` to rotate its
+bucket — those are ordinary untrusted headers in direct mode (ADR 6). KnowCode
+does not support proxied deployment, so there is no trusted-proxy option.
+
+In direct local mode every client is `127.0.0.1` and therefore shares one
+bucket, so these limits already cap a runaway local agent. No process-global
+bucket or API token is added; the residual boundary is a local caller that can
+sustain the per-tier rate, which the limits bound.
+
 ---
 
 ## Layer 1 — Service Layer

@@ -14,6 +14,16 @@ from knowcode.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+# --- Proxy trust (ADR 6) ---
+# The normal local server explicitly disables Uvicorn's proxy-header processing,
+# so a direct client cannot rotate its own client host — and therefore the
+# rate-limit bucket keyed on it — by spoofing ``X-Forwarded-For``/``Forwarded``.
+# KnowCode does not currently support proxied deployment, so no trusted-proxy
+# option is exposed. A future proxy mode must add an explicit narrow IP/CIDR
+# allowlist and reject wildcard trust; the default here trusts nobody.
+PROXY_HEADERS_ENABLED = False
+TRUSTED_PROXY_IPS: list[str] = []
+
 
 def create_app(
     store_path: str = ".",
@@ -88,6 +98,31 @@ def create_app(
     return app
 
 
+def build_server(app: FastAPI, host: str = "127.0.0.1", port: int = 8000) -> uvicorn.Server:
+    """Build the uvicorn server for ``app`` with the hardened proxy configuration.
+
+    This is the single place the direct-server proxy-trust decision (ADR 6) is
+    made, so ``start_server`` and the rate-limit integration suite exercise the
+    exact same server stack. Proxy headers are disabled and no proxy is trusted.
+
+    Args:
+        app: The configured FastAPI application to serve.
+        host: Bind address for the server.
+        port: Port to listen on.
+
+    Returns:
+        A ``uvicorn.Server`` that ignores forwarded headers in direct mode.
+    """
+    config = uvicorn.Config(
+        app,
+        host=host,
+        port=port,
+        proxy_headers=PROXY_HEADERS_ENABLED,
+        forwarded_allow_ips=list(TRUSTED_PROXY_IPS),
+    )
+    return uvicorn.Server(config)
+
+
 def start_server(host: str = "127.0.0.1", port: int = 8000, store_path: str = ".", watch: bool = False) -> None:
     """Start the uvicorn server with the configured app.
 
@@ -98,4 +133,5 @@ def start_server(host: str = "127.0.0.1", port: int = 8000, store_path: str = ".
         watch: Whether to enable background file monitoring.
     """
     app = create_app(store_path=store_path, watch=watch)
-    uvicorn.run(app, host=host, port=port)
+    server = build_server(app, host=host, port=port)
+    server.run()

@@ -193,7 +193,7 @@ def test_query_and_entity_endpoints() -> None:
     req = _mock_request()
     service = DummyService()
 
-    resp = api.query_context(http_request=req, request=api.QueryRequest(query="hi", limit=1), service=service)  # type: ignore
+    resp = api.query_context(request=req, payload=api.QueryRequest(query="hi", limit=1), service=service)  # type: ignore
     assert resp.chunks[0].id == "c1"
     # Step 18: retrieval and the chunk resolution after it are one generation.
     assert service.leases == 1
@@ -212,7 +212,7 @@ def test_query_context_returns_412_for_missing_index() -> None:
     service.retrieve_context_for_query = _raise  # type: ignore[method-assign]
 
     with pytest.raises(api.HTTPException) as exc:
-        api.query_context(http_request=req, request=api.QueryRequest(query="hi", limit=1), service=service)  # type: ignore
+        api.query_context(request=req, payload=api.QueryRequest(query="hi", limit=1), service=service)  # type: ignore
 
     assert exc.value.status_code == 412
 

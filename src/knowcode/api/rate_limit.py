@@ -4,7 +4,12 @@ Implements tiered rate limits to protect the API from runaway agent loops:
 - Standard endpoints (health, stats, search, context, query): 60 requests/minute
 - Expensive endpoints (trace_calls, impact): 10 requests/minute
 
-Uses slowapi with client IP-based keying.
+Uses slowapi keyed on the connecting peer via ``get_remote_address``, i.e.
+``request.client.host``. That key is only trustworthy because the direct server
+disables Uvicorn proxy-header processing (see ``knowcode.api.main`` / ADR 6), so
+a client cannot rewrite its own client host from ``X-Forwarded-For``/``Forwarded``
+and rotate its bucket. Changing the key function without disabling that proxy
+trust would not close the bypass.
 """
 
 from slowapi import Limiter, _rate_limit_exceeded_handler

@@ -1363,6 +1363,80 @@ Redaction cannot recognize a credential format it has never seen. The schema —
 omission — is the guarantee; redaction bounds the damage when an allowlisted
 field carries something it should not.
 
+## Server proxy trust and rate limiting (Step 21)
+
+Step 21 implements ADR 6. Two defects sat behind the rate limiter, and neither
+was visible to the existing suite because every API test disabled the limiter.
+
+Reproduced against the pre-Step-21 server:
+
+* **Proxy-header bypass.** `uvicorn.run(app)` kept Uvicorn's defaults —
+  `proxy_headers=True`, `forwarded_allow_ips` resolving to `127.0.0.1` — so its
+  `ProxyHeadersMiddleware` rewrote `scope["client"]` from a direct client's own
+  `X-Forwarded-For`. SlowAPI keys on `request.client.host`, so a local caller
+  rotated that header to get a fresh bucket per request and never hit `429`.
+* **`/api/v1/context/query` was unreachable.** Its `request` parameter was the
+  pydantic body model. SlowAPI's `@limiter.limit` finds the parameter *named*
+  `request` and asserts it is a `starlette.requests.Request`, so every call
+  raised and returned `500` once the limiter was enabled.
+
+### The direct server trusts no proxy
+
+`build_server()` is the one place the server is constructed, for both
+`start_server` and the rate-limit suite, and it sets `proxy_headers=False` with
+`forwarded_allow_ips=[]`. With proxy processing off, `X-Forwarded-For` and
+`Forwarded` are ordinary untrusted headers: they never reach `request.client`,
+so the bucket key is always the real connecting peer.
+
+`forwarded_allow_ips` is an empty list rather than `None` deliberately — `None`
+makes Uvicorn fall back to trusting `127.0.0.1`, which is the exact boundary
+this closes. Even if a future change re-enabled proxy processing, the default
+would trust nobody.
+
+### Proxied deployment is unsupported
+
+KnowCode exposes no trusted-proxy option in this series, so there is nothing to
+misconfigure. A future proxy mode is a separate design that must take an
+explicit narrow IP/CIDR allowlist and reject wildcard trust; this step does not
+guess at one.
+
+### The endpoint contract is unchanged
+
+`query_context` now takes `request: Request` first (the name and type SlowAPI
+requires) and the body as `payload: QueryRequest`. FastAPI resolves the body by
+type, so the JSON request/response contract is byte-for-byte identical; only the
+Python parameter name moved off the reserved `request`.
+
+### Residual local DoS boundary
+
+In direct local mode every client is `127.0.0.1` and therefore shares one
+bucket, so the per-tier limits already cap a runaway local agent that opens many
+source identities — every one of its requests lands in the same bucket. No
+process-global bucket or API token is added. The residual boundary is a local
+caller that sustains the per-tier rate (60/min standard, 10/min expensive),
+which the limits bound rather than eliminate.
+
+### Enforcement is tested through a real socket
+
+`tests/integration/test_rate_limit_server.py` does not inherit the unit suites'
+global limiter disable. It starts the real server stack over a loopback socket
+and, from one raw peer:
+
+| Assertion | Endpoint | Proof |
+| --- | --- | --- |
+| Documented limit rejects | `/health` | request 61 is `429`; exactly 60 admitted. |
+| Spoofed `X-Forwarded-For` shares one bucket | `/impact` | a fresh IP per request still `429`s at 11. |
+| Spoofed `Forwarded` shares one bucket | `/impact` | same. |
+| Tiers are independent | `/impact` + `/health` | exhausting the expensive tier leaves the standard one serving. |
+| Concurrency stays bounded | `/impact` | a 25-way burst admits at most the limit. |
+| `/context/query` is reachable | `/context/query` | returns `200`/`412`, never the SlowAPI `500`. |
+
+A negative control starts an intentionally trusting server
+(`proxy_headers=True`, localhost trusted) and shows the same spoofing *does*
+rotate buckets there — so the secure assertions are detecting a real property,
+not passing vacuously. `limiter.reset()` isolates each test's shared bucket
+state.
+
 ## Baseline evidence
 
 The baseline is `main` at `d239b22` on 2026-08-12. Before Step 01 additions,
@@ -1566,5 +1640,7 @@ print(seen)
 PY
 ```
 
-Step 21 will replace the middleware-level proxy reproduction with an enabled
-limiter test through the real server socket.
+Step 21 replaced this middleware-level proxy reproduction with an enabled
+limiter test through the real server socket
+(`tests/integration/test_rate_limit_server.py`); see *Server proxy trust and
+rate limiting (Step 21)* above.
