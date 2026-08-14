@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from contextlib import contextmanager
 from typing import Any
 
 import pytest
@@ -83,6 +84,14 @@ class DummyService:
         self.reload_called = False
         self.store = DummyStore()
         self._engine = DummySearchEngine()
+        self.leases = 0
+
+    @contextmanager
+    def generation_lease(self):  # type: ignore
+        # Step 18: endpoints pin one generation for a whole request. The fake
+        # has one generation, so the lease only has to be countable.
+        self.leases += 1
+        yield self
 
     def get_stats(self):  # type: ignore
         return {"total_entities": 1}
@@ -186,6 +195,8 @@ def test_query_and_entity_endpoints() -> None:
 
     resp = api.query_context(http_request=req, request=api.QueryRequest(query="hi", limit=1), service=service)  # type: ignore
     assert resp.chunks[0].id == "c1"
+    # Step 18: retrieval and the chunk resolution after it are one generation.
+    assert service.leases == 1
 
     entity = api.get_entity(request=req, entity_id="e1", service=service)  # type: ignore
     assert entity["id"] == "e1"

@@ -716,6 +716,7 @@ def publish_generation(
     manifest: GenerationManifest,
     *,
     retain: int = DEFAULT_RETAINED_GENERATIONS,
+    protect: Sequence[str] = (),
 ) -> ResolvedGeneration:
     """Validate a staged generation and publish it as the current one.
 
@@ -724,6 +725,13 @@ def publish_generation(
     the staging directory into ``generations/``, then atomically replace
     ``current.json`` last. A failure at any step before the pointer write
     leaves the previous generation current.
+
+    Args:
+        protect: Generation ids a reader still holds open. Retention never
+            removes these, which is ADR 4's "superseded generations are retired
+            only after reader leases end" at the directory level; the service
+            supplies them from
+            :meth:`~knowcode.service.KnowCodeService.live_generation_ids`.
 
     Raises:
         GenerationValidationError: The staged generation is not complete and
@@ -764,7 +772,12 @@ def publish_generation(
             raise
 
     resolved = ResolvedGeneration(root=root_path, path=target, manifest=manifest)
-    retire_generations(root_path, keep=retain, current=manifest.generation_id)
+    retire_generations(
+        root_path,
+        keep=retain,
+        current=manifest.generation_id,
+        protect=protect,
+    )
     return resolved
 
 
@@ -894,13 +907,21 @@ def resolve_current_generation(
 
 
 def retire_generations(
-    root: str | Path, *, keep: int, current: str | None = None
+    root: str | Path,
+    *,
+    keep: int,
+    current: str | None = None,
+    protect: Sequence[str] = (),
 ) -> list[Path]:
     """Remove superseded generations, retaining the newest ``keep``.
 
     The current generation is never removed regardless of ``keep``, so a
     misconfigured retention can degrade recovery depth but never the live
-    index.
+    index. Neither is any generation in ``protect``: a request that is still
+    reading a superseded generation holds open file handles inside its
+    directory, and removing it underneath that reader is the directory-level
+    form of the very race reader leases exist to prevent (Step 18). A protected
+    generation is simply removed by a later publication, once nobody holds it.
     """
     root_path = Path(root)
     retained = list_generations(root_path)
@@ -909,6 +930,7 @@ def retire_generations(
 
     keep = max(1, int(keep))
     survivors = set(retained[-keep:])
+    survivors.update(protect)
     if current is not None:
         survivors.add(current)
 

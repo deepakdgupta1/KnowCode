@@ -24,7 +24,9 @@ This module gives the server one owner:
   clean stop.
 
 Concurrent *reload* — handing in-flight readers from one generation to the next
-— is deliberately not here; that is Step 18.
+— belongs to :class:`~knowcode.generation_bundle.GenerationBundle` (Step 18).
+This module owns process lifecycle; it drives the service's public ownership
+interface and does not reach past it.
 """
 
 from __future__ import annotations
@@ -59,13 +61,19 @@ DEFAULT_SHUTDOWN_TIMEOUT = 10.0
 class OwnedService(Protocol):
     """The narrow service surface the server owner drives.
 
-    Deliberately three methods: the owner starts a worker against the indexer,
+    Deliberately three methods: the owner starts a worker against a writer,
     makes durable state durable, and closes what the service opened. Everything
     else about the service is the request path's business, not shutdown's.
     """
 
-    def get_indexer(self) -> Any:
-        """Return the indexer whose transactions the watch worker commits."""
+    def watch_writer(self) -> Any:
+        """Return the writer whose transactions the watch worker commits.
+
+        A handle rather than an indexer since Step 18: it resolves the current
+        generation per commit, so a reload during a watch session moves the
+        worker onto the new generation instead of leaving it writing into a
+        retired — and now closed — one.
+        """
 
     def flush(self) -> None:
         """Persist in-memory index state that has a durable home."""
@@ -202,7 +210,7 @@ class ServerResources:
 
         from knowcode.indexing.background_indexer import BackgroundIndexer
 
-        worker = BackgroundIndexer(self.service.get_indexer())
+        worker = BackgroundIndexer(self.service.watch_writer())
         worker.start()
         self.worker = worker
         try:

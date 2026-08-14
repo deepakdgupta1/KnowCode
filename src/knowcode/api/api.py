@@ -135,67 +135,72 @@ def query_context(
     expand_deps = request.expand_deps if request.expand_deps is not None else True
     task_override = TaskType(request.task_type.value) if request.task_type else None
 
-    try:
-        retrieval = service.retrieve_context_for_query(
-            query=request.query,
-            task_type=task_override,
-            limit_entities=limit,
-            expand_deps=expand_deps,
-        )
-    except KnowCodePrerequisiteError as e:
-        raise HTTPException(
-            status_code=412,
-            detail={"message": str(e), "code": e.code, "hint": e.hint},
-        )
+    # One generation for the whole request (Step 18). Retrieval names the
+    # chunk ids and the repository resolves them; a rebuild landing between
+    # those two steps would otherwise resolve one generation's ids against
+    # the next generation's chunks and silently drop the misses.
+    with service.generation_lease():
+        try:
+            retrieval = service.retrieve_context_for_query(
+                query=request.query,
+                task_type=task_override,
+                limit_entities=limit,
+                expand_deps=expand_deps,
+            )
+        except KnowCodePrerequisiteError as e:
+            raise HTTPException(
+                status_code=412,
+                detail={"message": str(e), "code": e.code, "hint": e.hint},
+            )
 
-    engine = service.get_search_engine()
-    results: list[ChunkResult] = []
-    seen_ids: set[str] = set()
+        engine = service.get_search_engine()
+        results: list[ChunkResult] = []
+        seen_ids: set[str] = set()
 
-    evidence_items = retrieval.get("evidence", [])
-    if isinstance(evidence_items, list):
-        for item in evidence_items:
-            if not isinstance(item, dict):
-                continue
+        evidence_items = retrieval.get("evidence", [])
+        if isinstance(evidence_items, list):
+            for item in evidence_items:
+                if not isinstance(item, dict):
+                    continue
 
-            chunk_id = item.get("chunk_id")
-            if not isinstance(chunk_id, str) or chunk_id in seen_ids:
-                continue
+                chunk_id = item.get("chunk_id")
+                if not isinstance(chunk_id, str) or chunk_id in seen_ids:
+                    continue
 
-            stored_chunk = engine.chunk_repo.get(chunk_id)
-            if not stored_chunk:
-                continue
+                stored_chunk = engine.chunk_repo.get(chunk_id)
+                if not stored_chunk:
+                    continue
 
-            score_raw = item.get("score", 0.0)
-            score = float(score_raw) if isinstance(score_raw, (int, float)) else 0.0
-            results.append(
-                ChunkResult(
-                    id=stored_chunk.id,
-                    content=stored_chunk.content,
-                    entity_id=stored_chunk.entity_id,
-                    score=score,
+                score_raw = item.get("score", 0.0)
+                score = float(score_raw) if isinstance(score_raw, (int, float)) else 0.0
+                results.append(
+                    ChunkResult(
+                        id=stored_chunk.id,
+                        content=stored_chunk.content,
+                        entity_id=stored_chunk.entity_id,
+                        score=score,
+                    )
                 )
-            )
-            seen_ids.add(chunk_id)
-            if len(results) >= limit:
-                break
+                seen_ids.add(chunk_id)
+                if len(results) >= limit:
+                    break
 
-    # Fallback for lexical-only retrieval paths where no chunk IDs are available.
-    if not results:
-        fallback_chunks = engine.search(
-            query=request.query,
-            limit=limit,
-            expand_deps=expand_deps,
-        )
-        results = [
-            ChunkResult(
-                id=c.id,
-                content=c.content,
-                entity_id=c.entity_id,
-                score=0.0,
+        # Fallback for lexical-only retrieval paths where no chunk IDs are available.
+        if not results:
+            fallback_chunks = engine.search(
+                query=request.query,
+                limit=limit,
+                expand_deps=expand_deps,
             )
-            for c in fallback_chunks
-        ]
+            results = [
+                ChunkResult(
+                    id=c.id,
+                    content=c.content,
+                    entity_id=c.entity_id,
+                    score=0.0,
+                )
+                for c in fallback_chunks
+            ]
 
     # --- Response capping: truncate chunk content to stay within token budget ---
     total_chars = 0

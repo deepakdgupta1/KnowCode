@@ -6,16 +6,25 @@ import os
 import re
 import shutil
 import logging
+import threading
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Iterator, Optional, cast
 
 from knowcode.analysis.context_synthesizer import ContextSynthesizer
 from knowcode.config import AppConfig
-from knowcode.errors import MissingKnowledgeStoreError, MissingSemanticIndexError
+from knowcode.errors import (
+    MissingKnowledgeStoreError,
+    MissingSemanticIndexError,
+    RepositoryClosedError,
+)
+from knowcode.generation_bundle import BundleSources, GenerationBundle
 from knowcode.indexing import generations
 from knowcode.indexing.generations import ResolvedGeneration
 from knowcode.indexing.graph_builder import GraphBuilder
+from knowcode.service_watch import ServiceWatchWriter
 from knowcode.retrieval.orchestrator import RetrievalOrchestrator
 from knowcode.storage.knowledge_store import KnowledgeStore
 from knowcode.storage.sqlite_knowledge_store import SqliteKnowledgeStore
@@ -37,6 +46,22 @@ logger = logging.getLogger(__name__)
 STAGE_KNOWLEDGE_STORE = "knowledge_store"
 STAGE_SEMANTIC_INDEX = "semantic_index"
 STAGE_PUBLICATION = "publication"
+
+#: Bundles pinned by the ``generation_lease()`` calls active on this execution
+#: context, innermost last. A :class:`~contextvars.ContextVar` rather than a
+#: thread-local so one lease covers nested calls in both a sync request thread
+#: and an async context — and so a thread started inside a lease does not
+#: inherit a pin it would never release. Entries are keyed by service instance
+#: because two services can legitimately be leased at once in one request.
+_LEASE_STACK: ContextVar[tuple[tuple["KnowCodeService", GenerationBundle], ...]] = (
+    ContextVar("knowcode_lease_stack", default=())
+)
+
+#: Bound on re-resolving the current bundle when it retires between resolution
+#: and acquisition. Each retry follows a completed swap, so more than a couple
+#: means a bug rather than contention; the cap turns that into a clear error
+#: instead of a spinning request thread.
+_LEASE_ACQUIRE_ATTEMPTS = 64
 
 
 @dataclass(frozen=True)
@@ -81,24 +106,244 @@ class KnowCodeService:
             config_path, strict=strict_config
         )
         self.app_config.apply_runtime_policy(source_root=self._store_root())
-        self._store: Any = None
-        self._search_engine: Optional["SearchEngine"] = None
-        self._indexer: Optional["Indexer"] = None
-        self._generation: Optional[ResolvedGeneration] = None
-        self._generation_resolved = False
+        # One generation at a time (Step 18). The bundle replaces the three
+        # unlocked lazy fields this service used to keep — store, indexer,
+        # search engine — which two threads could each build and a reload could
+        # replace one at a time underneath an in-flight request.
+        self._bundle: Optional[GenerationBundle] = None
+        self._retired_bundles: list[GenerationBundle] = []
+        self._bundle_lock = threading.RLock()
+        # Held for a whole reload so two of them cannot both build a candidate
+        # and publish in an order neither chose. Lock order is always
+        # ``_reload_lock`` then ``_bundle_lock``; nothing acquires the reverse.
+        self._reload_lock = threading.Lock()
         self._closed = False
         self._retrieval_orchestrator = RetrievalOrchestrator(self)
 
+    # ------------------------------------------------------------------
+    # Generation bundles and reader leases (Step 18, ADR 4)
+    # ------------------------------------------------------------------
+
+    @contextmanager
+    def generation_lease(self) -> Iterator[GenerationBundle]:
+        """Pin one complete generation for the duration of an operation.
+
+        Everything this service hands out while the lease is held — the
+        knowledge store, the indexer, the search engine — comes from the same
+        published generation, even if a rebuild or ``reload()`` publishes a
+        newer one meanwhile. The pinned generation's SQLite and vector
+        resources stay open until the lease ends, so a retirement can never
+        close a connection out from under a request.
+
+        Nesting reuses the lease already held by this service on this execution
+        context rather than taking a second one, so a service method that
+        leases internally never shadows the caller that leased around it.
+
+        Raises:
+            RepositoryClosedError: The service has been closed.
+        """
+        existing = self._leased_bundle()
+        if existing is not None:
+            yield existing
+            return
+
+        bundle = self._acquire_bundle()
+        token = _LEASE_STACK.set(_LEASE_STACK.get() + ((self, bundle),))
+        try:
+            yield bundle
+        finally:
+            _LEASE_STACK.reset(token)
+            bundle.release()
+
+    def live_generation_ids(self) -> tuple[str, ...]:
+        """Generation ids this service still holds open, newest first.
+
+        The current bundle plus every retired bundle whose last reader has not
+        released yet. Publication passes these to retention so a generation
+        directory is never removed while a request is still reading it (ADR 4:
+        "superseded generations are retired only after reader leases end").
+        """
+        self._reap_retired()
+        with self._bundle_lock:
+            bundles = [self._bundle] if self._bundle is not None else []
+            bundles.extend(self._retired_bundles)
+        ids = [
+            bundle.generation_id
+            for bundle in bundles
+            if bundle.generation_id is not None
+        ]
+        return tuple(dict.fromkeys(ids))
+
+    def watch_writer(self) -> ServiceWatchWriter:
+        """Return a writer that commits into whatever generation is current.
+
+        The watch worker used to be handed one :class:`~knowcode.indexing.
+        indexer.Indexer` at startup and hold it forever, so after a reload it
+        kept committing into the retired generation — and, once retirement
+        started closing resources, into a closed repository. This handle
+        resolves the current bundle under a lease per commit instead.
+        """
+        return ServiceWatchWriter(self)
+
+    def _leased_bundle(self) -> Optional[GenerationBundle]:
+        """The bundle this service has pinned on this execution context."""
+        for service, bundle in reversed(_LEASE_STACK.get()):
+            if service is self:
+                return bundle
+        return None
+
+    def _acquire_bundle(self) -> GenerationBundle:
+        """Resolve the current bundle and take a lease on it."""
+        for _ in range(_LEASE_ACQUIRE_ATTEMPTS):
+            bundle = self._live_bundle()
+            if bundle.acquire():
+                return bundle
+            # The bundle retired between resolution and acquisition, which
+            # means a swap completed in between: resolve the new one.
+        raise RuntimeError(
+            "Could not acquire a stable index generation after "
+            f"{_LEASE_ACQUIRE_ATTEMPTS} attempts"
+        )
+
+    def _live_bundle(
+        self, index_path: Optional[str | Path] = None
+    ) -> GenerationBundle:
+        """The bundle new operations start from, built once on first use.
+
+        Single-flight: the lock covers the check *and* the construction, so
+        concurrent first use cannot build two bundles. Opening the components
+        inside a bundle is separately single-flighted by the bundle itself, so
+        this lock is held only for the cheap object construction.
+        """
+        with self._bundle_lock:
+            self._assert_open()
+            if self._bundle is None:
+                self._bundle = self._open_bundle(index_path=index_path)
+            return self._bundle
+
+    def _current_bundle(
+        self, index_path: Optional[str | Path] = None
+    ) -> GenerationBundle:
+        """The bundle this caller must read from: its lease, or the live one."""
+        leased = self._leased_bundle()
+        if leased is not None:
+            return leased
+        return self._live_bundle(index_path)
+
+    def _open_bundle(
+        self,
+        *,
+        generation: Optional[ResolvedGeneration] = None,
+        index_path: Optional[str | Path] = None,
+    ) -> GenerationBundle:
+        """Build an unopened bundle for one generation.
+
+        Nothing is opened here: a reload candidate that is rejected, or a
+        service that only answers ``/health``, must not pay for a SQLite
+        connection.
+        """
+        resolved = (
+            generation
+            if generation is not None
+            else generations.resolve_current_generation(self._index_path())
+        )
+        return GenerationBundle(
+            generation=resolved,
+            sources=BundleSources(
+                open_store=lambda: self._open_store(resolved),
+                open_indexer=lambda: self._open_indexer(resolved, index_path),
+                open_search_engine=self._open_search_engine,
+            ),
+        )
+
+    def _open_store(self, generation: Optional[ResolvedGeneration]) -> Any:
+        """Open one generation's knowledge store."""
+        store_file = self._store_file_for(generation)
+        if not store_file.exists():
+            raise MissingKnowledgeStoreError(store_file)
+        if store_file.suffix == ".db":
+            return SqliteKnowledgeStore(store_file)
+        return KnowledgeStore.load(store_file)
+
+    def _open_indexer(
+        self,
+        generation: Optional[ResolvedGeneration],
+        index_path: Optional[str | Path] = None,
+    ) -> "Indexer":
+        """Open one generation's chunk repository and vector store."""
+        provider = create_embedding_provider(app_config=self.app_config)
+        artifact_dir = self._artifact_dir_for(generation, index_path)
+        chunk_repo = SqliteChunkRepository(artifact_dir / "chunks.db")
+        vector_store = create_vector_store(
+            self.app_config.vector_backend,
+            dimension=provider.config.dimension,
+            index_dir=artifact_dir,
+        )
+        indexer = Indexer(provider, chunk_repo=chunk_repo, vector_store=vector_store)
+        if artifact_dir.exists():
+            indexer.load(artifact_dir)
+        return indexer
+
+    def _open_search_engine(self, store: Any, indexer: "Indexer") -> "SearchEngine":
+        """Build the search engine over one generation's store and indexer."""
+        hybrid_index = HybridIndex(
+            indexer.chunk_repo,
+            indexer.vector_store,
+            alpha=self.app_config.hybrid_alpha,
+        )
+        return SearchEngine(
+            indexer.chunk_repo,
+            indexer.embedding_provider,
+            hybrid_index,
+            store,
+            config=self.app_config,
+        )
+
+    def _swap(self, candidate: GenerationBundle) -> None:
+        """Install ``candidate`` as current and retire what it replaces.
+
+        The swap itself is one assignment under a narrow lock. Retirement — and
+        therefore closing — happens outside it, because closing a store waits
+        for that store's own in-flight readers to drain (Step 09) and holding
+        the bundle lock across that would stall every unrelated request.
+
+        Raises:
+            RepositoryClosedError: The service was closed while the candidate
+                was being built. The candidate is closed rather than installed.
+        """
+        with self._bundle_lock:
+            if self._closed:
+                candidate.retire()
+                raise RepositoryClosedError(
+                    "This KnowCodeService was closed while a new index "
+                    "generation was being loaded."
+                )
+            previous, self._bundle = self._bundle, candidate
+            if previous is not None:
+                self._retired_bundles.append(previous)
+
+        if previous is not None:
+            previous.retire()
+        self._reap_retired()
+
+    def _reap_retired(self) -> None:
+        """Forget retired bundles whose last reader has released."""
+        with self._bundle_lock:
+            self._retired_bundles = [
+                bundle for bundle in self._retired_bundles if not bundle.is_closed
+            ]
+
+    def _assert_open(self) -> None:
+        """Raise if this service has been closed."""
+        if self._closed:
+            raise RepositoryClosedError(
+                "This KnowCodeService is closed; construct a new one."
+            )
+
     @property
     def store(self) -> Any:
-        """Get or load the knowledge store."""
-        if self._store is None:
-            store_file = self._assert_store_exists()
-            if store_file.suffix == ".db":
-                self._store = SqliteKnowledgeStore(store_file)
-            else:
-                self._store = KnowledgeStore.load(store_file)
-        return self._store
+        """The knowledge store of the generation this caller is reading."""
+        return self._current_bundle().store
 
     def _store_root(self) -> Path:
         """Resolve the root directory where store/index artifacts live."""
@@ -109,21 +354,21 @@ class KnowCodeService:
     # ------------------------------------------------------------------
 
     def current_generation(self) -> Optional[ResolvedGeneration]:
-        """Resolve the published generation this service reads from.
+        """The published generation this caller is reading from.
 
-        Resolved once and cached so the knowledge store, chunk repository,
-        vector store, and search engine handed out by this instance all come
-        from one generation. ``reload()`` is the only way to move onto a newer
-        one; handing *concurrent readers* between generations is Step 18.
+        Resolved once per bundle so the knowledge store, chunk repository,
+        vector store, and search engine handed out together all come from one
+        generation. Inside a :meth:`generation_lease` this is the leased
+        generation and cannot change; outside one it is whatever bundle is
+        current at the moment of the call.
         """
-        if not self._generation_resolved:
-            self._generation = generations.resolve_current_generation(
-                self._index_path()
-            )
-            self._generation_resolved = True
-        return self._generation
+        return self._current_bundle().generation
 
-    def _artifact_dir(self, index_path: Optional[str | Path] = None) -> Path:
+    def _artifact_dir_for(
+        self,
+        generation: Optional[ResolvedGeneration],
+        index_path: Optional[str | Path] = None,
+    ) -> Path:
         """Directory holding the chunk/vector artifacts a reader should open.
 
         A published generation with a semantic index owns its own directory.
@@ -134,24 +379,22 @@ class KnowCodeService:
         """
         if index_path is not None:
             root = Path(index_path)
-            generation = generations.resolve_current_generation(root)
-            if generation is not None and generation.has_semantic_index:
-                return generation.path
+            resolved = generations.resolve_current_generation(root)
+            if resolved is not None and resolved.has_semantic_index:
+                return resolved.path
             return root
 
-        generation = self.current_generation()
         if generation is not None and generation.has_semantic_index:
             return generation.path
         return self._index_path()
 
-    def _store_file(self) -> Path:
-        """Resolve the knowledge store file path.
+    def _store_file_for(self, generation: Optional[ResolvedGeneration]) -> Path:
+        """Resolve the knowledge store file path for one generation.
 
         A published generation owns the authoritative ``knowledge.db``. Without
         one, the legacy flat layout is used so pre-Step-14 installs stay
         readable.
         """
-        generation = self.current_generation()
         if generation is not None:
             return generation.knowledge_db
 
@@ -161,6 +404,10 @@ class KnowCodeService:
                 return db_path
             return self.store_path / KnowledgeStore.DEFAULT_FILENAME
         return self.store_path
+
+    def _store_file(self) -> Path:
+        """Knowledge store path for the generation this caller is reading."""
+        return self._store_file_for(self.current_generation())
 
     def _index_path(self) -> Path:
         """Resolve the semantic index root (the generation artifact root)."""
@@ -249,63 +496,31 @@ class KnowCodeService:
         return resolved_index_path
 
     def get_indexer(self, index_path: Optional[str | Path] = None) -> "Indexer":
-        """Get or create the indexer.
+        """The indexer of the generation this caller is reading.
 
         Args:
-            index_path: Optional index root to resolve a generation from.
+            index_path: Optional artifact root override. As before, it applies
+                only when this service opens its first bundle; once a
+                generation is bound, its own artifacts are authoritative.
 
         Returns:
-            Initialized Indexer instance.
+            The bundle's Indexer, opened at most once.
         """
-        if self._indexer is None:
-
-            provider = create_embedding_provider(app_config=self.app_config)
-            artifact_dir = self._artifact_dir(index_path)
-            db_path = artifact_dir / "chunks.db"
-            chunk_repo = SqliteChunkRepository(db_path)
-
-            dimension = provider.config.dimension
-            vector_store = create_vector_store(
-                self.app_config.vector_backend,
-                dimension=dimension,
-                index_dir=artifact_dir,
-            )
-
-            self._indexer = Indexer(provider, chunk_repo=chunk_repo, vector_store=vector_store)
-
-            if artifact_dir.exists():
-                self._indexer.load(artifact_dir)
-
-        return self._indexer
+        return cast("Indexer", self._current_bundle(index_path).indexer)
 
     def get_search_engine(
         self, index_path: Optional[str | Path] = None
     ) -> "SearchEngine":
-        """Get or create the search engine.
+        """The search engine of the generation this caller is reading.
 
         Args:
-            index_path: Optional path to load an existing index from.
+            index_path: Optional artifact root override, as for
+                :meth:`get_indexer`.
 
         Returns:
-            SearchEngine wired to the current knowledge store.
+            SearchEngine wired to this generation's store, chunks, and vectors.
         """
-        if self._search_engine is None:
-
-            indexer = self.get_indexer(index_path)
-            hybrid_index = HybridIndex(
-                indexer.chunk_repo, 
-                indexer.vector_store,
-                alpha=self.app_config.hybrid_alpha
-            )
-
-            self._search_engine = SearchEngine(
-                indexer.chunk_repo,
-                indexer.embedding_provider,
-                hybrid_index,
-                self.store,
-                config=self.app_config,
-            )
-        return self._search_engine
+        return cast("SearchEngine", self._current_bundle(index_path).search_engine)
 
     def get_exact_query_engine(self, index_path: Optional[str | Path] = None) -> "SearchEngineProtocol":
         """Build and return an ExactQueryEngine.
@@ -348,41 +563,45 @@ class KnowCodeService:
         Returns:
             Dictionary with context_text, sufficiency_score, evidence, and metadata.
         """
-        freshness = self.get_freshness_metadata()
-        is_stale = freshness.get("is_stale", False)
+        # One lease for the whole bundle: freshness, retrieval, and the
+        # chunks the caller resolves afterwards must all describe one
+        # generation, or a rebuild mid-query answers half from each.
+        with self.generation_lease():
+            freshness = self.get_freshness_metadata()
+            is_stale = freshness.get("is_stale", False)
 
-        res = self._retrieval_orchestrator.retrieve_context_for_query(
-            query=query,
-            max_tokens=max_tokens,
-            task_type=task_type,
-            limit_entities=limit_entities,
-            per_entity_max_tokens=per_entity_max_tokens,
-            expand_deps=expand_deps,
-            verbosity=verbosity,
-            include_metadata=include_metadata,
-            is_stale=is_stale,
-        )
-        res["freshness"] = freshness
+            res = self._retrieval_orchestrator.retrieve_context_for_query(
+                query=query,
+                max_tokens=max_tokens,
+                task_type=task_type,
+                limit_entities=limit_entities,
+                per_entity_max_tokens=per_entity_max_tokens,
+                expand_deps=expand_deps,
+                verbosity=verbosity,
+                include_metadata=include_metadata,
+                is_stale=is_stale,
+            )
+            res["freshness"] = freshness
 
-        # Log query to telemetry
-        from knowcode.telemetry import log_event
+            # Log query to telemetry
+            from knowcode.telemetry import log_event
 
-        threshold = self.app_config.sufficiency_threshold
+            threshold = self.app_config.sufficiency_threshold
 
-        score = res.get("sufficiency_score", 0.0)
-        local_or_escalated = "local" if score >= threshold else "escalated"
-        log_event(
-            self.store_path,
-            {
-                "query": query,
-                "verbosity": verbosity,
-                "sufficiency_score": score,
-                "is_stale": res["freshness"]["is_stale"],
-                "local_or_escalated": local_or_escalated,
-            },
-        )
+            score = res.get("sufficiency_score", 0.0)
+            local_or_escalated = "local" if score >= threshold else "escalated"
+            log_event(
+                self.store_path,
+                {
+                    "query": query,
+                    "verbosity": verbosity,
+                    "sufficiency_score": score,
+                    "is_stale": res["freshness"]["is_stale"],
+                    "local_or_escalated": local_or_escalated,
+                },
+            )
 
-        return res
+            return res
 
     def get_freshness_metadata(self) -> dict[str, Any]:
         """Compute freshness metadata for the knowledge store and index."""
@@ -603,7 +822,12 @@ class KnowCodeService:
                     },
                 )
                 published = generations.publish_generation(
-                    index_root, staging.path, manifest
+                    index_root,
+                    staging.path,
+                    manifest,
+                    # A generation a request is still reading must survive
+                    # retention until that reader releases its lease (Step 18).
+                    protect=self.live_generation_ids(),
                 )
             except Exception as exc:  # noqa: BLE001 - classified, not swallowed
                 logger.exception("Failed to publish index generation")
@@ -697,12 +921,14 @@ class KnowCodeService:
         return dict(asdict(provider.config))
 
     def _adopt_generation(self, published: ResolvedGeneration) -> None:
-        """Point this service at a generation it just published."""
-        self._generation = published
-        self._generation_resolved = True
-        self._store = None
-        self._indexer = None
-        self._search_engine = None
+        """Move this service onto a generation it just published.
+
+        One atomic swap of one complete bundle, so a build can never leave the
+        graph on the new generation while chunks and vectors are still on the
+        old one. The replaced bundle retires behind whatever readers still hold
+        it.
+        """
+        self._swap(self._open_bundle(generation=published))
 
     # ------------------------------------------------------------------
     # Resource ownership (Step 17)
@@ -727,17 +953,20 @@ class KnowCodeService:
         ``vectors.*`` or ``index_manifest.json`` inside it would invalidate the
         manifest that describes it. Watch commits against a published
         generation are therefore not made durable here; routing them through a
-        staged generation is Step 18's, and this method says so rather than
+        staged generation is Step 18b's, and this method says so rather than
         pretending the write happened.
         """
-        indexer = self._indexer
-        if indexer is None:
+        bundle = self._bundle
+        if bundle is None or not bundle.has_indexer:
+            # Nothing was opened, so nothing is buffered. Opening an indexer
+            # here just to flush it would create artifacts during shutdown.
             return
+        indexer = bundle.indexer
 
         indexer.vector_store.flush()
 
-        artifact_dir = self._artifact_dir()
-        generation = self.current_generation()
+        generation = bundle.generation
+        artifact_dir = self._artifact_dir_for(generation)
         if generation is not None and artifact_dir == generation.path:
             logger.info(
                 "Skipping the index artifact flush: generation %s is published "
@@ -766,32 +995,31 @@ class KnowCodeService:
         return (artifact_dir / "vectors.json").exists()
 
     def close(self) -> None:
-        """Close every store this service opened. Idempotent.
+        """Retire every generation this service opened. Idempotent.
 
-        Released in reverse order of dependency — derived readers first, then
-        the chunk repository, then the knowledge store — so nothing is closed
-        while something built on top of it is still reachable. Both SQLite
-        stores drain their in-flight readers before closing (Step 09), so this
-        blocks until active reads finish rather than closing beneath them.
+        New leases are refused immediately, and each bundle closes its own
+        components in reverse order of dependency (Step 18). A bundle that a
+        request still holds closes when that request releases it, so shutdown
+        never raises inside an operation that was already running; with no
+        readers in flight — the normal shutdown case, since the server has
+        stopped accepting requests — every store closes here.
         """
-        if self._closed:
-            return
-        self._closed = True
+        with self._bundle_lock:
+            if self._closed:
+                return
+            self._closed = True
+            bundle, self._bundle = self._bundle, None
+            if bundle is not None:
+                self._retired_bundles.append(bundle)
+            retiring = list(self._retired_bundles)
 
-        self._search_engine = None
-        indexer, self._indexer = self._indexer, None
-        store, self._store = self._store, None
-
-        if indexer is not None:
-            indexer.chunk_repo.close()
-        # The JSON knowledge store holds no connection and has no close().
-        close = getattr(store, "close", None)
-        if callable(close):
-            close()
+        for retired in retiring:
+            retired.retire()
+        self._reap_retired()
 
     @property
     def is_closed(self) -> bool:
-        """Whether :meth:`close` has released this service's stores."""
+        """Whether :meth:`close` has stopped this service handing out leases."""
         return self._closed
 
     def _extract_query_keywords(self, query: str) -> list[str]:
@@ -944,7 +1172,8 @@ class KnowCodeService:
         Returns:
             Lightweight entity metadata for display or API responses.
         """
-        entities = self.store.search(pattern)
+        with self.generation_lease() as bundle:
+            entities = bundle.store.search(pattern)
         return [
             {
                 "id": e.id,
@@ -978,54 +1207,55 @@ class KnowCodeService:
         Raises:
             ValueError: If no matching entity is found or context synthesis fails.
         """
-        # Try exact match first
-        entity = self.store.get_entity(target)
-        if not entity:
-            # Try search
-            matches = self.store.search(target)
-            if matches:
-                entity = matches[0]
+        with self.generation_lease():
+            # Try exact match first
+            entity = self.store.get_entity(target)
+            if not entity:
+                # Try search
+                matches = self.store.search(target)
+                if matches:
+                    entity = matches[0]
 
-        if not entity:
-            raise ValueError(f"Entity not found: {target}")
+            if not entity:
+                raise ValueError(f"Entity not found: {target}")
 
-        live_loader = None
-        if is_stale:
-            from knowcode.analysis.live_source_loader import LiveSourceLoader
-            live_loader = LiveSourceLoader(self._store_root())
+            live_loader = None
+            if is_stale:
+                from knowcode.analysis.live_source_loader import LiveSourceLoader
+                live_loader = LiveSourceLoader(self._store_root())
 
-        synthesizer = ContextSynthesizer(self.store, max_tokens=max_tokens, live_loader=live_loader)
+            synthesizer = ContextSynthesizer(self.store, max_tokens=max_tokens, live_loader=live_loader)
 
-        # Use task-specific synthesis if task_type provided
-        if task_type is not None:
-            bundle = synthesizer.synthesize_with_task(
-                entity.id, task_type, summarize=summarize
-            )
-        else:
-            bundle = synthesizer.synthesize(entity.id, summarize=summarize)
+            # Use task-specific synthesis if task_type provided
+            if task_type is not None:
+                bundle = synthesizer.synthesize_with_task(
+                    entity.id, task_type, summarize=summarize
+                )
+            else:
+                bundle = synthesizer.synthesize(entity.id, summarize=summarize)
 
-        if not bundle:
-            raise ValueError(f"Failed to synthesize context for {entity.id}")
+            if not bundle:
+                raise ValueError(f"Failed to synthesize context for {entity.id}")
 
-        result = {
-            "entity_id": bundle.target_entity.id,
-            "context_text": bundle.context_text,
-            "total_tokens": bundle.total_tokens,
-            "truncated": bundle.truncated,
-            "included_entities": bundle.included_entities,
-        }
+            result = {
+                "entity_id": bundle.target_entity.id,
+                "context_text": bundle.context_text,
+                "total_tokens": bundle.total_tokens,
+                "truncated": bundle.truncated,
+                "included_entities": bundle.included_entities,
+            }
 
-        # Add task-specific fields if using task synthesis
-        if hasattr(bundle, "task_type") and hasattr(bundle, "sufficiency_score"):
-            result["task_type"] = (
-                bundle.task_type.value if bundle.task_type else "general"
-            )
-            result["sufficiency_score"] = bundle.sufficiency_score
-        else:
-            result["task_type"] = "general"
-            result["sufficiency_score"] = 0.0
+            # Add task-specific fields if using task synthesis
+            if hasattr(bundle, "task_type") and hasattr(bundle, "sufficiency_score"):
+                result["task_type"] = (
+                    bundle.task_type.value if bundle.task_type else "general"
+                )
+                result["sufficiency_score"] = bundle.sufficiency_score
+            else:
+                result["task_type"] = "general"
+                result["sufficiency_score"] = 0.0
 
-        return result
+            return result
 
     def get_stats(self) -> dict[str, Any]:
         """Get statistics from the current store.
@@ -1033,53 +1263,58 @@ class KnowCodeService:
         Returns:
             Aggregated counts of entities, relationships, and index state.
         """
-        by_kind: dict[str, int] = {}
-        rel_types: dict[str, int] = {}
-        total_entities = 0
-        total_relationships = 0
+        with self.generation_lease():
+            by_kind: dict[str, int] = {}
+            rel_types: dict[str, int] = {}
+            total_entities = 0
+            total_relationships = 0
 
-        # SqliteKnowledgeStore defines an ``entities`` property, so the
-        # ``hasattr`` branch below is True for it and would hydrate every row
-        # into Python just to count them. Dispatch on the capability first so
-        # the SQLite path uses server-side GROUP BY and never materializes.
-        if isinstance(self.store, SqliteKnowledgeStore):
-            counts = self.store.count_by_kind()
-            by_kind = counts["entities"]
-            rel_types = counts["relationships"]
-            total_entities = sum(by_kind.values())
-            total_relationships = sum(rel_types.values())
-        elif hasattr(self.store, "entities"):
-            total_entities = len(self.store.entities)
-            for entity in self.store.entities.values():
-                kind = entity.kind.value
-                by_kind[kind] = by_kind.get(kind, 0) + 1
+            # SqliteKnowledgeStore defines an ``entities`` property, so the
+            # ``hasattr`` branch below is True for it and would hydrate every row
+            # into Python just to count them. Dispatch on the capability first so
+            # the SQLite path uses server-side GROUP BY and never materializes.
+            if isinstance(self.store, SqliteKnowledgeStore):
+                counts = self.store.count_by_kind()
+                by_kind = counts["entities"]
+                rel_types = counts["relationships"]
+                total_entities = sum(by_kind.values())
+                total_relationships = sum(rel_types.values())
+            elif hasattr(self.store, "entities"):
+                total_entities = len(self.store.entities)
+                for entity in self.store.entities.values():
+                    kind = entity.kind.value
+                    by_kind[kind] = by_kind.get(kind, 0) + 1
 
-            total_relationships = len(self.store.relationships)
-            for rel in self.store.relationships:
-                kind = rel.kind.value
-                rel_types[kind] = rel_types.get(kind, 0) + 1
+                total_relationships = len(self.store.relationships)
+                for rel in self.store.relationships:
+                    kind = rel.kind.value
+                    rel_types[kind] = rel_types.get(kind, 0) + 1
 
-        stats = {
-            "total_entities": total_entities,
-            "entities_by_kind": by_kind,
-            "total_relationships": total_relationships,
-            "relationships_by_type": rel_types,
-        }
+            stats = {
+                "total_entities": total_entities,
+                "entities_by_kind": by_kind,
+                "total_relationships": total_relationships,
+                "relationships_by_type": rel_types,
+            }
 
-        # Add index stats if indexer is loaded
-        if self._indexer:
-            stats["total_chunks"] = self._indexer.chunk_repo.count()
-            # ``count()`` is the protocol's live-vector count, so both backends
-            # report it; the old ``index.ntotal`` probe silently omitted the
-            # field for LanceDB and counted FAISS tombstones before Step 11.
-            stats["vector_index_size"] = self._indexer.vector_store.count()
+            # Index stats only when this generation's indexer is already open;
+            # reporting statistics must not open a chunk repository as a side
+            # effect, least of all inside an immutable published generation.
+            bundle = self._current_bundle()
+            if bundle.has_indexer:
+                indexer = bundle.indexer
+                stats["total_chunks"] = indexer.chunk_repo.count()
+                # ``count()`` is the protocol's live-vector count, so both backends
+                # report it; the old ``index.ntotal`` probe silently omitted the
+                # field for LanceDB and counted FAISS tombstones before Step 11.
+                stats["vector_index_size"] = indexer.vector_store.count()
 
-        generation = self.current_generation()
-        if generation is not None:
-            stats["generation_id"] = generation.generation_id
-            stats["generation_kind"] = generation.kind
+            generation = bundle.generation
+            if generation is not None:
+                stats["generation_id"] = generation.generation_id
+                stats["generation_kind"] = generation.kind
 
-        return stats
+            return stats
 
     def get_callers(self, entity_id: str) -> list[dict[str, Any]]:
         """Get callers of an entity.
@@ -1090,34 +1325,83 @@ class KnowCodeService:
         Returns:
             Caller metadata dictionaries.
         """
-        callers = self.store.get_callers(entity_id)
+        with self.generation_lease() as bundle:
+            callers = bundle.store.get_callers(entity_id)
         return [
             {"id": c.id, "name": c.qualified_name, "file": c.location.file_path}
             for c in callers
         ]
 
-    def reload(self) -> None:
-        """Re-resolve the current generation and drop every derived component.
+    def reload(self) -> bool:
+        """Move onto the newest published generation, if there is one.
 
-        The store, chunk repository, vector store, and search engine are all
-        released together so a reload can never leave one of them on an older
-        generation than the others. Retired resources are dropped rather than
-        closed: an in-flight reader may still hold them, and the reference
-        counting that makes closing safe is Step 18.
+        The replacement bundle is built and warmed *off to the side* first, so
+        a generation that cannot be loaded is rejected while the current one is
+        still serving. Only a bundle that opened successfully is swapped in,
+        and it is swapped in whole: the store, chunk repository, vector store,
+        and search engine can never end up on different generations.
+
+        Before Step 18 this reset three lazy fields and re-read the store. A
+        reload whose new generation could not be loaded therefore left the
+        service with *no* store at all — a service answering queries became
+        permanently unusable after one failed refresh — and the components it
+        dropped were never closed, leaking two SQLite connections per reload.
+
+        Returns:
+            Whether this call moved the service onto a different generation.
+            ``False`` means nothing changed: either the pointer still names the
+            generation already in use, or the replacement could not be loaded
+            and the current one was kept.
+
+        Raises:
+            RepositoryClosedError: The service has been closed.
         """
-        self._store = None
-        self._indexer = None
-        self._search_engine = None
-        self._generation = None
-        self._generation_resolved = False
-        try:
-            # Force reload by accessing the property
-            _ = self.store
-        except FileNotFoundError as e:
-            # If the file is gone, keep _store as None
-            logger.warning("Knowledge store file not found during reload: %s", e)
-        except MissingKnowledgeStoreError as e:
-            logger.warning("Knowledge store missing during reload: %s", e)
+        with self._reload_lock:
+            self._assert_open()
+            previous = self._bundle
+            resolved = generations.resolve_current_generation(self._index_path())
+
+            if previous is not None and self._is_same_generation(
+                previous.generation, resolved
+            ):
+                return False
+
+            candidate = self._open_bundle(generation=resolved)
+            try:
+                candidate.warm(
+                    store=True,
+                    indexer=previous is not None and previous.has_indexer,
+                    search_engine=previous is not None
+                    and previous.has_search_engine,
+                )
+            except Exception as exc:  # noqa: BLE001 - classified, not swallowed
+                candidate.close()
+                logger.warning(
+                    "Keeping index generation %s: the replacement could not be "
+                    "loaded: %s",
+                    previous.generation_id if previous is not None else "<none>",
+                    exc,
+                )
+                return False
+
+            self._swap(candidate)
+            return True
+
+    @staticmethod
+    def _is_same_generation(
+        current: Optional[ResolvedGeneration],
+        candidate: Optional[ResolvedGeneration],
+    ) -> bool:
+        """Whether a reload would land on the generation already in use.
+
+        A missing generation on either side is treated as *different*: the
+        pre-Step-14 flat layout has no generation identity, so a reload there
+        must genuinely reopen its artifacts rather than assume they are the
+        ones already held.
+        """
+        if current is None or candidate is None:
+            return False
+        return current.generation_id == candidate.generation_id
 
     def get_entity_details(self, entity_id: str) -> Optional[dict[str, Any]]:
         """Get detailed information about an entity as a dictionary.
@@ -1125,26 +1409,27 @@ class KnowCodeService:
         This returns the raw structured data including source code,
         docstrings, and metadata, which is useful for tool-calling agents.
         """
-        entity = self.store.get_entity(entity_id)
-        if not entity:
-            return None
+        with self.generation_lease():
+            entity = self.store.get_entity(entity_id)
+            if not entity:
+                return None
 
-        # Convert to dictionary (using internal helper or creating one)
-        # We can reuse the knowledge store's _entity_to_dict if exposed,
-        # or just construct it manually here to be safe and explicit.
-        from dataclasses import asdict
+            # Convert to dictionary (using internal helper or creating one)
+            # We can reuse the knowledge store's _entity_to_dict if exposed,
+            # or just construct it manually here to be safe and explicit.
+            from dataclasses import asdict
 
-        return {
-            "id": entity.id,
-            "kind": entity.kind.value,
-            "name": entity.name,
-            "qualified_name": entity.qualified_name,
-            "location": asdict(entity.location),
-            "docstring": entity.docstring,
-            "signature": entity.signature,
-            "source_code": entity.source_code,
-            "metadata": entity.metadata,
-        }
+            return {
+                "id": entity.id,
+                "kind": entity.kind.value,
+                "name": entity.name,
+                "qualified_name": entity.qualified_name,
+                "location": asdict(entity.location),
+                "docstring": entity.docstring,
+                "signature": entity.signature,
+                "source_code": entity.source_code,
+                "metadata": entity.metadata,
+            }
 
     def get_callees(self, entity_id: str) -> list[dict[str, Any]]:
         """Get callees of an entity.
@@ -1155,5 +1440,6 @@ class KnowCodeService:
         Returns:
             Callee metadata dictionaries.
         """
-        callees = self.store.get_callees(entity_id)
+        with self.generation_lease() as bundle:
+            callees = bundle.store.get_callees(entity_id)
         return [{"id": c.id, "name": c.qualified_name} for c in callees]

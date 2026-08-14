@@ -116,7 +116,10 @@ class FakeService:
         self.flushed = 0
         self.closed = 0
 
-    def get_indexer(self) -> FakeIndexer:
+    def watch_writer(self) -> FakeIndexer:
+        # Step 18: the owner asks for a *writer*, not a bound indexer, so a
+        # reload can move the worker onto the generation it publishes. The
+        # fake hands out one object because it has only one generation.
         return self.indexer
 
     def flush(self) -> None:
@@ -398,7 +401,7 @@ def test_startup_is_idempotent(resources_for) -> None:  # type: ignore[no-untype
     resources.startup()
 
     assert resources.worker is worker
-    assert service.indexer is service.get_indexer()
+    assert service.indexer is service.watch_writer()
 
 
 def test_shutdown_after_a_failed_startup_closes_what_exists(resources_for, call_log) -> None:  # type: ignore[no-untyped-def]

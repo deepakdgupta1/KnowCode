@@ -210,6 +210,7 @@ flowchart TD
     S16["16 Watch queue semantics"]
     S17["17 API lifecycle"]
     S18["18 Service hot-swap"]
+    S18B["18b Watch publication"]
     S19["19 Prompt hierarchy"]
     S20["20 Telemetry privacy"]
     S21["21 Proxy and rate limiting"]
@@ -242,21 +243,23 @@ flowchart TD
     S16 --> S17
     S14 --> S18
     S17 --> S18
+    S18 --> S18B
 
     S01 --> S19
     S01 --> S20
     S01 --> S21
 
     S07 --> S22
-    S18 --> S22
+    S18B --> S22
     S19 --> S22
     S20 --> S22
     S21 --> S22
 ```
 
 After Step 01, Steps 02, 03, 04, 06, 08, 10, 19, 20, and 21 are logically
-independent. Steps that touch shared identity, protocol, storage, or service
-files must still be rebased after their prerequisites merge.
+independent. Step 18b was inserted during Step 18 (see the decision log).
+Steps that touch shared identity, protocol, storage, or service files must
+still be rebased after their prerequisites merge.
 
 ## Issue-to-Step Traceability
 
@@ -280,6 +283,7 @@ files must still be rebased after their prerequisites merge.
 | Watch queue ordering/retry/data loss | 16 | 17, 18, 22 |
 | API shutdown/buffer loss | 17 | 18, 22 |
 | Service lazy-load/reload races | 18 | 22 |
+| Watch commits mutating a published generation | 18b | 22 |
 | C8 prompt hierarchy | 19 | 22 |
 | C9 raw-query telemetry | 20 | 22 |
 | C10 forwarded-header rate-limit bypass | 21 | 22 |
@@ -1103,7 +1107,7 @@ cannot be completed.
 **Rollback:** Revert lifespan wiring as one unit while retaining idempotent
 resource APIs and safe watch mutation semantics.
 
-### [ ] Step 18 — Atomically hot-swap service generations and retire readers
+### [x] Step 18 — Atomically hot-swap service generations and retire readers
 
 **Execution tier:** strongest available model; concurrent reader handoff.
 
@@ -1149,6 +1153,62 @@ resources; retired resources close deterministically.
 
 **Rollback:** Atomically point back to the last compatible generation bundle.
 Do not revert only one store or search component.
+
+### [ ] Step 18b — Publish watch commits as generations
+
+**Execution tier:** strongest available model; publication cadence design.
+
+**Branch:** `codex/hardening-s18b-watch-publication`
+
+**Dependencies:** Steps 16, 17, and 18.
+
+**Context brief:** Inserted during Step 18 under the plan mutation protocol.
+Since Step 14 the watch worker's chunk repository and vector store are opened
+*inside the current published generation*, so a watched edit mutates artifacts
+ADR 4 declares immutable: `validate_generation(..., verify_digests=True)` then
+reports chunk-id digest, chunk-count, and vector-checksum mismatches, and
+`knowcode doctor` fails. With the FAISS/NumPy backend the edit is not durable
+either, because `KnowCodeService.flush()` correctly refuses to rewrite
+`vectors.*`/`index_manifest.json` inside a published generation. Step 15 logged
+this for Step 16, Step 16 logged it for Step 17, and Step 17 logged it for Step
+18; Step 18 owns the reader handoff that makes the fix *possible* — leases,
+atomic bundle swap, deterministic retirement — but routing commits through
+staged generations is a distinct design (publication cadence and staging cost)
+rather than reader handoff, and would have doubled that step's PR.
+
+**Primary files:** `src/knowcode/indexing/background_indexer.py`,
+`src/knowcode/service_watch.py`, `src/knowcode/service.py`,
+`src/knowcode/indexing/generations.py`, and watch/generation tests.
+
+**Tasks:**
+
+1. Add failing tests proving a watched edit currently invalidates the current
+   generation's manifest digests, and that a FAISS-backed watch commit is lost
+   across a restart.
+2. Decide and document the publication cadence: per commit, per idle drain, or
+   time- or size-bounded batching. Weigh it against the full-copy staging cost
+   Step 15 accepted, and state the bounded staleness readers accept.
+3. Commit watched updates into a staging generation no reader can see, then
+   publish and swap through the Step 18 bundle so readers move atomically.
+4. Make `stop()`/`shutdown` publish or explicitly report unpublished watched
+   work; never claim durability for commits still in staging.
+5. Restore `flush()` to a durable operation for watch mode, or state precisely
+   why it stays a no-op inside a published generation.
+
+**Focused verification:**
+
+```bash
+uv run pytest -q tests/unit/indexing/test_background_indexer.py \
+  tests/unit/service tests/integration/test_generation_hotswap.py
+```
+
+**Exit criteria:** A watched edit leaves the published generation valid under
+`verify_digests=True`, is durable across a restart on both backends, and is
+visible to readers through one atomic swap. `knowcode doctor` passes after a
+watch session.
+
+**Rollback:** Revert to committing into the resolved artifact directory. The
+Step 18 reader handoff and Step 15 update primitive stay in place.
 
 ### [ ] Step 19 — Enforce provider prompt hierarchy and untrusted-context isolation
 
@@ -1435,7 +1495,8 @@ commit SHA, or durable local handoff note until a PR exists.
 | 15 | `[x]` | `codex/hardening-s15-incremental-generations` | 2026-08-14 | 2026-08-14 | Red phase reproduced the reviewed defect through the production watch path with exact assertions: a file indexed as `chunks=2 vectors=2` became `chunk_ids == set()` while `vectors == 2` after one failed re-index (dense search still answering with both deleted ids); a watched re-index of a shrunken file left `(1, 2)`; a watched deletion left `(0, 2)`; a watched move left `(2, 4)`. Four hybrid-retrieval cases were red for their own reasons: one unresolvable dense id shortened a `limit=2` answer to one result, a duplicate sparse hit scored `0.0163` instead of `0.0082`, a duplicate dense hit scored `0.0243` instead of `0.0163`, and a store swap between the sparse and dense reads returned the *next* generation's chunk. The new `file_updates` module could not be imported at all. Green phase has 27 incremental-update, 13 file-update, 5 background-indexer, 6 hybrid, and 17 incremental-generation tests passing; 1088 global tests pass; changed-module coverage is 95% (`file_updates.py` 100%, `hybrid_index.py` 100%, `background_indexer.py` 96%, `indexer.py` 92% — its residual misses are pre-existing git-fallback and legacy-manifest branches). Threaded suites were repeated 5x with no flake. Ruff, mypy (82 files), strict MkDocs, and diff checks passed. | Branched from `main` at `c59ad56` with Step 14 merged. No artifact format changes, so no rebuild is required for this step. Every index mutation now goes through `prepare_file_update` → `commit_file_update`: preparation parses, chunks, reuses durable embeddings, and validates without touching live state; commit runs `replace_file` plus exact vector upsert/remove under one lock and repairs a post-SQLite vector failure from the durable chunk rows. A file that exists but fails to parse now keeps its previous chunks instead of being deleted, and bulk pipelines report such files in `Indexer.failed_updates` rather than aborting. Staging stays a full copy rather than a copy-on-write delta (ADR 4 permits either; a hardlinked delta is unsafe for SQLite). Step 15 owns the primitive and its publication path; wiring the watch worker's queue to publish generations is Step 16, which still has to fix the in-place mutation logged below. |
 | 16 | `[x]` | `codex/hardening-s16-watch-queue` | 2026-08-14 | 2026-08-14 | Red phase reproduced seven defects against production code through its own API, with no fault injection beyond a provider reporting itself down: a burst of five modify events committed five transactions; `m.py` and `sub/../m.py` committed two; `start()` twice ran two threads over one queue and two commits overlapped (proved with a barrier); `stop()` with three items queued committed one, dropped two, and returned `None`; a provider outage dropped its update with no retry and nothing exposed; and an edit under `node_modules/` or `.git/` was indexed. Green phase: 82 focused tests (35 background-indexer, 24 watch-queue, 24 monitor — including three that reproduce the critical `requeue` defects an independent review found before merge) and 1194 global tests pass, five consecutive full-package runs with no flake; changed-module coverage is `background_indexer.py` 100%, `watch_queue.py` 100%, `monitor.py` 94% (only the watchdog-absent import fallback uncovered). Two mutation checks confirm the new tests discriminate: removing `_idle.notify_all()` and resolving-before-`relative_to` each fail a named test. Ruff, mypy, strict MkDocs, and `git diff --check` pass. | `WatchQueue` (new) holds one item per canonical identity; a move is stored as its two effects, so chains collapse to one commit. Retry policy reads `FileUpdateError.retryable`, set at Step 15's raise sites. `stop()` returns a `DrainReport`; `queue_*` raise `WatchQueueClosed` after it. `Scanner.is_indexable()` is the one indexability rule for both watch and build. Step 17 still owns FastAPI teardown: `api/main.py` starts the worker and monitor and never stops them. Directory-level move/delete events remain ignored (see the decision log). |
 | 17 | `[x]` | `codex/hardening-s17-api-lifespan` | 2026-08-14 | 2026-08-14 | Red phase reproduced the reviewed defect against production code through a real ASGI lifespan, with no fault injection: after a complete startup *and* shutdown of `create_app(watch=True)`, the worker thread was still running, the observer still alive, the chunk repository still open, and `api._service` still installed; two edits queued at shutdown committed **zero** chunks (`pending` still named `n.py`) and nothing produced a report at all. A second reproduction showed the FAISS backend committing a watched update to `count()==1` in memory with no `vectors.json`/`vectors.index` on disk, so a restart recovered 0 vectors beside durable chunks. 13 of the 14 wired-app/service cases failed, the 3 telemetry cases errored, and `tests/unit/api/test_lifespan.py` (22 cases) could not collect (`No module named 'knowcode.api.lifecycle'`). Green phase: 53 focused tests (22 lifecycle-owner, 14 wired-app/service, 3 telemetry-lifecycle, plus the pre-existing api/telemetry suites) and 1196 global tests pass; five consecutive focused runs with no flake; changed-module coverage is `lifecycle.py` 100%, `main.py` 95% (only `start_server`'s `uvicorn.run`), and every changed line of `service.py` and `telemetry.py` covered. Ruff, mypy (84 files), strict MkDocs, and `git diff --check` pass. | Branched from `codex/hardening-s16-watch-queue`; a concurrent session landed the Step 16 follow-up `ef6e29b` underneath this work mid-session, on disjoint files, and all gates were re-run on the combined state. No artifact format changes, so no rebuild is required. Watch resources now start in the ASGI lifespan rather than `create_app`, so a built-but-unrun app owns no threads. `ServerResources` owns monitor/worker/service and releases them in `SHUTDOWN_ORDER` under one deadline; `KnowCodeService` gains `flush()`/`close()` as its ownership interface, and both SQLite stores expose `is_closed`. Step 17 owns process lifecycle only: retiring resources under in-flight readers and generation hot-swap remain Step 18, which must also decide where watch commits publish — `flush()` deliberately refuses to write inside a published generation, and the in-place chunk mutation logged below is Step 18's to fix. |
-| 18 | `[ ]` | — | — | — | — | — |
+| 18 | `[x]` | `codex/hardening-s18-service-hotswap` | 2026-08-14 | 2026-08-14 | Red phase reproduced the reviewed defects against production code with no fault injection: four threads racing first use opened **four** `SqliteKnowledgeStore` instances (`assert 4 == 1`), a `reload()` left the store it replaced open (`retired_store.is_closed` → `False`), and a service that had just answered `['alpha']` became permanently unusable after one failed `reload()` — it returned `None` and the next `search()` raised `MissingKnowledgeStoreError`. 34 of the 40 new service cases failed and `tests/unit/service/test_generation_bundle.py` could not collect at all (`No module named 'knowcode.generation_bundle'`). Green phase: 132 service, 12 integration hot-swap, 46 api, 44 generation, and 34 vector-contract tests pass; 1293 global tests pass; five consecutive focused runs with no flake. Changed-module coverage is `generation_bundle.py` 100%, `service_watch.py` 100%, `generations.py` 100%, `lifecycle.py` 100%, `background_indexer.py` 100%, `service.py` 91% (its residual misses are pre-existing untested branches, e.g. the JSON-store `get_stats` path). Four mutation checks confirm the tests discriminate: closing a leased bundle, dropping the lease pin, removing single-flight construction, and ignoring `protect` in retention each fail a named test. Ruff, mypy (86 files), strict MkDocs, and `git diff --check` pass. | Branched from `main` at `6794d84` with Step 17 merged. No artifact format changes, so no rebuild is required. `GenerationBundle` is now the reader set for one generation; `KnowCodeService.generation_lease()` pins it for a whole operation (a `ContextVar` keyed by service, so nested calls and the retrieval orchestrator resolve to the same bundle); retirement closes behind the last reader; `publish_generation(..., protect=...)` keeps a leased generation *directory* alive. `VectorStoreProtocol` gains the `close()` member Step 10 declared as intent. The server's ownership interface changed from `get_indexer()` to `watch_writer()`. Two items are logged below rather than fixed here: watch commits still mutate the published generation in place (now **Step 18b**, inserted under the mutation protocol), and `POST /api/v1/context/query` is unreachable on `main` for a SlowAPI reason (Step 21). |
+| 18b | `[ ]` | — | — | — | — | Inserted during Step 18: route watch commits through staged generations. |
 | 19 | `[ ]` | — | — | — | — | — |
 | 20 | `[ ]` | — | — | — | — | — |
 | 21 | `[ ]` | — | — | — | — | — |
@@ -1543,6 +1604,16 @@ commit SHA, or durable local handoff note until a PR exists.
 | 2026-08-14 | 17 | Decision | `flush()` refuses to write inside a **published** generation and logs why. ADR 4 makes a generation immutable and records artifact checksums at publication, so rewriting `vectors.*` or `index_manifest.json` there would invalidate the manifest describing it. | Keeps Step 17 from making the generation-consistency problem below worse. It also means watch commits against a published generation are still not durable; Step 18 must route them through a staged generation. |
 | 2026-08-14 | 17 | Discovery | The watch worker mutates the **published** generation in place. `service.get_indexer()` opens `chunks.db` inside the current generation directory, so one watched commit against a published generation left `validate_generation(..., verify_digests=True)` reporting three failures: chunk id digest mismatch, chunk count mismatch (2 vs the recorded 1), and a `vectors.lancedb` checksum mismatch. `knowcode doctor` would fail on it. | Pre-existing from the Step 14–16 wiring, not introduced here, and out of Step 17's process-lifecycle scope. Logged for **Step 18**, which owns generation handoff: watch commits need to publish through a staged generation exactly as incremental builds do, or the generation manifest stops describing what is on disk. |
 | 2026-08-14 | 17 | Discovery | `LanceDBVectorStore.save()` on an *empty* store writes a `vectors.json` envelope plus an empty `vectors.lancedb` directory, and loading that artifact then fails closed with `VectorArtifactVersionError: ... has no 'vectors' table`. Step 17's flush was the first caller ever to save an unpopulated index, and it broke the second server started in one process. | Worked around in the caller, not the backend: `flush()` skips the artifact write when the store is empty *and* no artifact exists beside it (an empty store with a prior artifact is still written, since that records a full deletion). The backend defect itself belongs to Step 12's artifact contract; logged for the Step 22 release gate. |
+| 2026-08-14 | 18 | Decision | One `GenerationBundle` per generation replaces the service's three unlocked lazy fields (store, indexer, search engine). Components open lazily but single-flight; a lease is a reference count, and retirement closes only after the last reader releases. `KnowCodeService.generation_lease()` records the pinned bundle in a `ContextVar` keyed by service instance, so `store`, `get_indexer()`, and `get_search_engine()` resolve to it inside nested calls without threading a bundle through every signature. | Satisfies ADR 4's reader contract and Step 18 tasks 2-4. The ContextVar is what let the retrieval orchestrator, the API endpoints, and the service's own multi-call methods become lease-correct without rewriting their call graphs; a thread started inside a lease deliberately does not inherit the pin, since it would never release it. |
+| 2026-08-14 | 18 | Decision | `reload()` builds and warms its replacement bundle off to the side, warming exactly what the outgoing bundle had already opened (store first, so a generation with no readable store is rejected before an indexer would create `chunks.db` beside it). Only a bundle that opened successfully is swapped in, and it returns `bool`: `False` means the pointer already named the current generation, or the replacement was rejected and the previous one kept. | Task 5. The pre-Step-18 `reload()` reset three fields and re-read the store, so a failed refresh left the service with *no* store: a service that had just answered `['alpha']` raised `MissingKnowledgeStoreError` on its next query, permanently. Comparing generation ids also makes a no-op reload genuinely free rather than a reopen. |
+| 2026-08-14 | 18 | Decision | `close()` retires bundles rather than force-closing them, and a bundle a request still holds closes when that request releases. `KnowCodeService.close()` therefore never blocks on, or raises inside, an in-flight operation; with no readers — the normal shutdown case, since Step 17 stops accepting requests first — every store closes synchronously and Step 17's assertions are unchanged. | Waiting for leases inside `close()` would deadlock a shutdown called from within a lease and would make Step 17's bounded teardown unbounded. Deferring is the only option that is both bounded and safe. |
+| 2026-08-14 | 18 | Decision | `close()` became a required `VectorStoreProtocol` member (Step 10 declared it as intent for this step). Both backends drain buffered writes first, then release; a closed store is *empty* rather than poisoned. | Draining first is required: LanceDB's durability boundary is the table, so closing over an un-drained buffer would discard a write that had already returned. Empty-rather-than-raising is because shutdown diagnostics still call `count()`, and a late count should report zero rather than turn a clean shutdown into a failed one. |
+| 2026-08-14 | 18 | Decision | Retention protection is process state: `publish_generation(..., protect=...)` receives `KnowCodeService.live_generation_ids()` so a leased generation *directory* is not removed while a request reads out of it, and a later publication removes it once nobody holds it. A publication from a separate process applies plain retention. | Closing a bundle is not enough on its own — `retire_generations` deletes directories. ADR 4's one-writer-process-per-artifact-root rule is what keeps the cross-process gap narrow, and the reader is not broken by it (its handles are already open). Both behaviours are pinned by tests so the boundary cannot move silently. |
+| 2026-08-14 | 18 | Decision | The server's ownership interface changed from `OwnedService.get_indexer()` to `watch_writer()`, returning a `ServiceWatchWriter` that resolves the current bundle under a lease per commit. `BackgroundIndexer` now types its collaborator as a two-method `WatchIndexer` protocol. | The worker held one indexer for the process's lifetime, so after a reload it committed into the generation the service had left — and once retirement started *closing* superseded resources, into a closed repository. Leasing per commit fixes both, and keeps a reload racing a commit from closing a store mid-transaction. |
+| 2026-08-14 | 18 | Discovery | The watch worker still commits into the **current published generation's** artifacts in place, so a watched edit invalidates the manifest digests ADR 4 records and, with the FAISS/NumPy backend, is not durable at all (`flush()` correctly refuses to rewrite a published generation). Carried forward from the Step 15, 16, and 17 logs. | **Inserted as Step 18b** under the plan mutation protocol rather than fixed here. Step 18 owns the reader handoff that makes the fix possible — leases, atomic swap, deterministic retirement — but publishing watch commits needs a cadence decision weighed against Step 15's full-copy staging cost, which is a separate design and a separate reviewable PR. The Mermaid graph, traceability table, and ledger are updated accordingly. |
+| 2026-08-14 | 18 | Discovery | `POST /api/v1/context/query` is unreachable: SlowAPI's `limit` decorator inspects the parameter named `request` and rejects it unless it is a `starlette.requests.Request`, but that name is bound to the `QueryRequest` body model (`Exception: parameter 'request' must be an instance of starlette.requests.Request`). No test covered the endpoint over the real ASGI stack, so it went unnoticed. Reproduced on `main` at `6794d84` as well as on this branch, so it is pre-existing. | Out of Step 18's scope and squarely in **Step 21**'s (rate limiting through the real server stack); mixing it in would violate anti-pattern 18. The Step 18 server race test therefore exercises `/search`, `/stats`, and `/reload`, and the query path's lease is proven at the `retrieve_context_for_query` entry point that the CLI and MCP both use. |
+| 2026-08-14 | 18 | Discovery | `KnowCodeService._artifact_dir()` became unreferenced once the bundle carried its own generation, and `get_stats` reported index statistics from a truthy `self._indexer` check that would have *opened* a chunk repository — inside an immutable published generation — merely to count rows. | The dead helper was removed, and `get_stats` now reports chunk/vector counts only when the leased bundle's indexer is already open. Covered by `test_stats_report_the_leased_generation`, which asserts `not bundle.has_indexer` after a cold `get_stats()`. |
+| 2026-08-14 | 18 | Discovery | `src/knowcode/service.py` is now 1445 lines (1159 before this step), well past the repository's 800-line file guideline. The bundle primitive and the watch-writer handle were extracted into their own modules, but the lease/swap/retirement plumbing stays with the service that owns it. | Not split further in this PR: the module was already 45% over the guideline before Step 18, so splitting it is a refactor of the whole service layer rather than of this change, and doing it here would bury the behavioural diff a reviewer has to check. Logged as maintenance work — a `GenerationBundleManager` owning `_bundle`, `_retired_bundles`, both locks, `_swap`, and `live_generation_ids` is the natural seam. |
 
 ## Definition of Complete
 

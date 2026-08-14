@@ -132,3 +132,68 @@ def test_hostile_id_get_embedding_is_exact(backend: str, make_store) -> None:
 @pytest.mark.parametrize("backend", BACKENDS)
 def test_hostile_id_upsert_is_exact(backend: str, make_store) -> None:
     assert_hostile_id_upsert_is_exact(lambda: make_store(backend))
+
+
+# --- close(): the retirement boundary added in Step 18 ---
+#
+# ``close()`` became a required protocol member once reader leases made closing
+# a superseded generation's store safe. The contract is the same on every
+# backend: buffered writes drain first (so a write that already returned is not
+# lost by the close that follows it), the store is then empty rather than
+# poisoned, and a repeat call does nothing.
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_close_is_a_protocol_member(backend: str, make_store) -> None:
+    from knowcode.protocols import VectorStoreProtocol
+
+    store = make_store(backend)
+    assert isinstance(store, VectorStoreProtocol)
+    assert callable(store.close)
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_close_drains_buffered_writes_before_releasing(
+    backend: str, make_store, tmp_path: Path
+) -> None:
+    """A write that returned must be durable before the handle goes away."""
+    store = make_store(backend)
+    store.add("a", [1.0, 0.0])
+    store.add("b", [0.0, 1.0])
+    store.save(tmp_path / "closing")
+
+    store.close()
+
+    reopened = make_store(backend)
+    reopened.load(tmp_path / "closing")
+    assert reopened.count() == 2
+    assert sorted(chunk_id for chunk_id, _ in reopened.search([1.0, 0.0], limit=5)) == [
+        "a",
+        "b",
+    ]
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_a_closed_store_is_empty_rather_than_poisoned(
+    backend: str, make_store
+) -> None:
+    """Shutdown diagnostics may still call ``count()``; it must not raise."""
+    store = make_store(backend)
+    store.add("a", [1.0, 0.0])
+
+    store.close()
+
+    assert store.count() == 0
+    assert store.is_closed
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_close_is_idempotent(backend: str, make_store) -> None:
+    store = make_store(backend)
+    store.add("a", [1.0, 0.0])
+
+    store.close()
+    store.close()
+
+    assert store.is_closed
+    assert store.count() == 0

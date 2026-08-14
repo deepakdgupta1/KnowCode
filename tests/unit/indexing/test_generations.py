@@ -558,3 +558,60 @@ def test_retention_without_an_explicit_current_reads_the_pointer(
 
     assert len(removed) == 2
     assert list_generations(tmp_path) == [published[-1].generation_id]
+
+
+# ----------------------------------------------------------------------
+# Reader-lease protection (Step 18, ADR 4)
+# ----------------------------------------------------------------------
+
+
+def test_retention_keeps_a_generation_a_reader_still_holds(tmp_path: Path) -> None:
+    """A leased generation survives retention until its reader releases.
+
+    Removing a directory whose ``chunks.db`` a request still has open is the
+    directory-level form of the race reader leases exist to prevent, so the
+    service passes its live generation ids through publication.
+    """
+    published = []
+    for index in range(3):
+        staging, manifest = _stage(tmp_path, entity_ids=[f"m.py::e{index}"])
+        published.append(publish_generation(tmp_path, staging, manifest, retain=99))
+    leased = published[0].generation_id
+
+    removed = generations.retire_generations(tmp_path, keep=1, protect=[leased])
+
+    assert [path.name for path in removed] == [published[1].generation_id]
+    assert list_generations(tmp_path) == sorted(
+        [leased, published[-1].generation_id]
+    )
+
+
+def test_a_protected_generation_is_removed_once_it_is_released(
+    tmp_path: Path,
+) -> None:
+    published = []
+    for index in range(3):
+        staging, manifest = _stage(tmp_path, entity_ids=[f"m.py::e{index}"])
+        published.append(publish_generation(tmp_path, staging, manifest, retain=99))
+    leased = published[0].generation_id
+
+    generations.retire_generations(tmp_path, keep=1, protect=[leased])
+    generations.retire_generations(tmp_path, keep=1)
+
+    assert list_generations(tmp_path) == [published[-1].generation_id]
+
+
+def test_publication_protects_the_generations_it_is_given(tmp_path: Path) -> None:
+    """The protection reaches retention through ``publish_generation``."""
+    first = publish_generation(tmp_path, *_stage(tmp_path, entity_ids=["m.py::a"]))
+    second = publish_generation(tmp_path, *_stage(tmp_path, entity_ids=["m.py::b"]))
+    third = publish_generation(
+        tmp_path,
+        *_stage(tmp_path, entity_ids=["m.py::c"]),
+        retain=1,
+        protect=[first.generation_id],
+    )
+
+    assert first.path.is_dir(), "a leased generation was removed by retention"
+    assert not second.path.is_dir()
+    assert third.path.is_dir()

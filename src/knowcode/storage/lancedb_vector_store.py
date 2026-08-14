@@ -38,6 +38,9 @@ from knowcode.errors import (
     VectorDimensionError,
 )
 from knowcode.utils.atomic_write import atomic_write_json
+from knowcode.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 try:
     import lancedb
@@ -102,6 +105,7 @@ class LanceDBVectorStore:
         self.db = lancedb.connect(self.path)
         self._lock = threading.RLock()
         self._generation = 0
+        self._closed = False
 
         # Buffered inserts keyed by chunk ID, so a replacement that has not
         # reached the table yet overwrites in place instead of duplicating.
@@ -212,6 +216,45 @@ class LanceDBVectorStore:
         """Drain buffered writes and pending deletes into the durable table."""
         with self._lock:
             self._flush_locked()
+
+    def close(self) -> None:
+        """Drain the buffer and release the database handle. Idempotent (Step 18).
+
+        A retired generation's store is closed only after its last reader
+        releases, so this runs with nobody reading. The buffer is drained first
+        because a write that already returned must not be lost by the close
+        that follows it — this backend's durability boundary is the table, and
+        an un-drained buffer would silently discard committed work.
+
+        A closed store is empty rather than poisoned, matching
+        :class:`~knowcode.storage.vector_store.VectorStore`: the retiring
+        service has stopped routing readers here, and a late ``count()`` from
+        shutdown diagnostics should report zero rather than raise.
+        """
+        with self._lock:
+            if self._closed:
+                return
+            try:
+                self._flush_locked()
+            except Exception:  # noqa: BLE001 - reported; the handle still closes
+                logger.exception(
+                    "Draining the LanceDB buffer during close failed; "
+                    "releasing the handle anyway"
+                )
+            self._closed = True
+            self._table = None
+            self.db = None
+            self._buffer = {}
+            self._pending_deletes = set()
+            self._durable_ids = set()
+            self._live_keys = {}
+            self._generation += 1
+
+    @property
+    def is_closed(self) -> bool:
+        """Whether :meth:`close` has released this store's handle."""
+        with self._lock:
+            return self._closed
 
     def _flush_locked(self) -> None:
         """Apply pending deletes, then buffered inserts, in that order.

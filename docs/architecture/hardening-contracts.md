@@ -992,7 +992,7 @@ Two cases are deliberately skipped, and reported rather than performed:
   checksums at publication, so rewriting `vectors.*` or `index_manifest.json`
   inside it would invalidate the manifest describing it. Watch commits against
   a published generation are not made durable here; routing them through a
-  staged generation is Step 18.
+  staged generation is Step 18b (see below).
 * **An index that never existed.** An empty store with no artifact beside it has
   nothing to persist. An empty store *with* one is still written — that records
   that everything was removed.
@@ -1007,8 +1007,106 @@ demand, so one server's shutdown never breaks the next one's logging in the same
 process.
 
 Concurrent *reload* — handing in-flight readers from one generation to the next,
-and closing retired resources behind them — is deliberately not here. That is
-Step 18.
+and closing retired resources behind them — is not here. That is the generation
+bundle below.
+
+## Generation bundles and reader leases (Step 18)
+
+ADR 4 ends with a reader contract that Steps 14 and 15 could not yet honour:
+"readers acquire one generation lease and use it for sparse, dense, graph, and
+context work. Superseded generations are retired only after reader leases end."
+Until Step 18 the service kept the knowledge store, the indexer, and the search
+engine in three independent, unlocked lazy fields, which produced three distinct
+failures:
+
+* Four threads racing first use opened four `SqliteKnowledgeStore` instances,
+  three of which leaked.
+* `reload()` replaced those fields one at a time, so an operation already under
+  way could answer its graph half from one generation and its dense half from
+  the next.
+* Retired stores were dropped without being closed — closing them would have
+  torn a connection out from under whichever request still held it — leaking a
+  writer and a reader connection per reload.
+
+### One bundle per generation
+
+`GenerationBundle` is the complete, immutable reader set for exactly one
+published generation: its knowledge store, its indexer (chunk repository plus
+vector store), and the search engine derived from both.
+
+* **Lazy but single-flight.** A bundle nobody reads opens no connection; a
+  bundle two threads read opens each component once. A failed open caches
+  nothing, so the next caller retries against a whole bundle rather than a
+  half-built one.
+* **Immutable membership.** Components are never replaced inside a bundle.
+  Moving to a newer generation means building a *new* bundle.
+
+### The lease
+
+`KnowCodeService.generation_lease()` pins one bundle for a whole operation.
+While it is held, `store`, `get_indexer()`, and `get_search_engine()` all
+resolve to that bundle — including inside nested service calls, because the
+lease lives in a `ContextVar` keyed by service instance rather than being
+threaded through every signature. Nesting reuses the lease already held rather
+than taking a second one.
+
+Every service method that makes more than one store call takes a lease
+internally (`search`, `get_context`, `get_stats`, `get_callers`, `get_callees`,
+`get_entity_details`, `retrieve_context_for_query`), and the API's query
+endpoint takes one around retrieval *and* the chunk resolution that follows it.
+
+### Swap and retirement
+
+`reload()` builds its replacement bundle off to the side and warms it to
+whatever the outgoing bundle had already opened. Only a bundle that opened
+successfully is installed, and it is installed whole, under a narrow lock. A
+generation that cannot be loaded is rejected while the current one keeps
+serving — before Step 18 the same situation left the service with no store at
+all, so one failed refresh permanently broke a working service.
+
+The replaced bundle is then *retired*: it refuses new leases and closes when its
+last reader releases. Retirement runs outside the swap lock, because closing a
+SQLite store waits for that store's own in-flight readers to drain (Step 09).
+
+`close()` on the vector stores is the member this made safe to require; it is
+now part of `VectorStoreProtocol`. Both backends drain buffered writes first, so
+a write that already returned is never lost by the close that follows it, and a
+closed store is empty rather than poisoned.
+
+### Directory retention
+
+Closing a bundle is not enough on its own: retention deletes superseded
+generation *directories*, and one of them may be the directory a request is
+reading out of. `publish_generation(..., protect=...)` takes the ids the service
+reports through `live_generation_ids()` — the current bundle plus every retired
+bundle still leased — and retention skips them. A protected generation is simply
+removed by a later publication, once nobody holds it.
+
+This protection is process state, so it covers publications made by the serving
+process, which is what ADR 4's one-writer-process-per-artifact-root rule
+assumes. A publication from a separate process applies plain retention; a reader
+holding open handles keeps answering, but the directory can disappear beneath
+it.
+
+### The watch worker
+
+The worker used to be constructed with one `service.get_indexer()` result and
+hold it for the process's lifetime, so after a reload it kept committing into
+the generation the service had moved off — and, once retirement started closing
+things, into a closed repository. It is now given a `ServiceWatchWriter`, which
+resolves the current bundle under a lease per commit. A reload racing a commit
+therefore cannot close a repository mid-transaction; the swap takes effect from
+the next commit.
+
+### Deferred: where watch commits publish
+
+The worker still commits into the *current* generation's artifacts in place.
+That predates this step (Steps 14–16 wiring) and is recorded in the plan as
+Step 18b: a watched edit invalidates the manifest digests describing an
+immutable generation, and with the FAISS backend it is not durable at all,
+because `flush()` correctly refuses to rewrite a published generation. Fixing it
+means publishing watch commits through staged generations on some cadence, which
+is a distinct design from the reader handoff this step owns.
 
 ## Baseline evidence
 

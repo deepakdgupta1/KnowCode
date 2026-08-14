@@ -37,10 +37,9 @@ import time
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional, Sequence
+from typing import Any, Callable, Optional, Protocol, Sequence
 
 from knowcode.indexing.file_updates import FileUpdateError
-from knowcode.indexing.indexer import Indexer
 from knowcode.indexing.watch_queue import WatchOp, WatchQueue, WatchWork
 from knowcode.utils.logger import get_logger
 
@@ -59,6 +58,24 @@ FAILURE_HISTORY = 100
 #: Liveness backstop for a consumer waiting on the queue. Correctness comes
 #: from the queue's condition variables; this only bounds a missed wakeup.
 _TAKE_TIMEOUT = 0.5
+
+
+class WatchIndexer(Protocol):
+    """The two commit operations a watch worker drives.
+
+    Narrower than :class:`~knowcode.indexing.indexer.Indexer` on purpose. The
+    worker used to be handed one indexer bound to one generation and hold it
+    forever; since Step 18 the server passes a
+    :class:`~knowcode.service_watch.ServiceWatchWriter`, which resolves the
+    current generation under a lease per commit. Both satisfy this protocol, so
+    the worker never has to know which it got.
+    """
+
+    def replace_file(self, file_path: str | Path) -> Any:
+        """Replace one file's chunks and vectors as one transaction."""
+
+    def delete_file(self, file_path: str | Path) -> Any:
+        """Remove one file's chunks and vectors as one transaction."""
 
 
 @dataclass(frozen=True)
@@ -116,7 +133,7 @@ class BackgroundIndexer:
 
     def __init__(
         self,
-        indexer: Indexer,
+        indexer: WatchIndexer,
         *,
         max_attempts: int = 3,
         retry_delays: Sequence[float] = DEFAULT_RETRY_DELAYS,
@@ -125,8 +142,11 @@ class BackgroundIndexer:
         """Initialize the background worker.
 
         Args:
-            indexer: Indexer whose ``replace_file``/``delete_file`` transactions
-                commit each work item.
+            indexer: Writer whose ``replace_file``/``delete_file`` transactions
+                commit each work item. The server passes a
+                :class:`~knowcode.service_watch.ServiceWatchWriter` so commits
+                follow generation swaps; a direct ``Indexer`` also satisfies
+                the protocol for single-generation callers and tests.
             max_attempts: Total attempts for one work item, retryable failures
                 included. ``1`` disables retries.
             retry_delays: Backoff before each retry. The last value repeats if

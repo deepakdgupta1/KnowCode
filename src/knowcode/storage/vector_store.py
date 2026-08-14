@@ -182,6 +182,7 @@ class VectorStore:
         self._lock = threading.RLock()
         self._generation = 0
         self._next_native_id = 0
+        self._closed = False
         self.index: Any = self._new_index(dimension)
         self.id_map: dict[int, str] = {}  # native id -> chunk_id
         self._native_ids: dict[str, int] = {}  # chunk_id -> native id
@@ -285,6 +286,32 @@ class VectorStore:
     def flush(self) -> None:
         """No-op: FAISS/NumPy commits each mutation immediately, with no buffer."""
         return None
+
+    def close(self) -> None:
+        """Release the in-memory index. Idempotent (Step 18).
+
+        This backend owns no file handle or connection — the native index lives
+        in memory and is written only by :meth:`save` — so closing is about
+        releasing the rows a retired generation is still holding, not about
+        durability. A closed store is empty rather than poisoned: the retiring
+        service has already stopped routing readers to it, and raising here
+        would turn a benign late ``count()`` during shutdown reporting into an
+        error.
+        """
+        with self._lock:
+            if self._closed:
+                return
+            self._closed = True
+            self.index = self._new_index(self.dimension)
+            self.id_map = {}
+            self._native_ids = {}
+            self._generation += 1
+
+    @property
+    def is_closed(self) -> bool:
+        """Whether :meth:`close` has released this store's index."""
+        with self._lock:
+            return self._closed
 
     def _require_dimension(self, embedding: list[float]) -> None:
         """Raise VectorDimensionError when the embedding length disagrees."""

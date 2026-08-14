@@ -49,9 +49,9 @@ class VectorStoreProtocol(Protocol):
     The FAISS/NumPy backend satisfies this today because FAISS commits each
     ``add`` immediately and has no buffer; LanceDB must ``flush()`` its mutable
     write buffer before any read, save, remove, or count to make "when is a
-    write visible" defined. The per-generation reader-lease handoff,
-    ``close()``, and generation IDs are declared here as intent and are
-    implemented in Steps 11/12/18 (Step 10 does not change the artifact format).
+    write visible" defined. ``close()`` became a required member in Step 18,
+    once the per-generation reader lease existed to make closing a retired
+    store safe; both backends implement it. Generation IDs stay declarative.
     """
 
     dimension: int
@@ -135,6 +135,17 @@ class VectorStoreProtocol(Protocol):
         """Return the number of live vectors in the index.
 
         Snapshot-safe read; reflects exactly the IDs searchable by ``search``.
+        """
+
+    def close(self) -> None:
+        """Release this store's rows and any handle it holds. Idempotent.
+
+        Called by :class:`~knowcode.generation_bundle.GenerationBundle` when a
+        superseded generation retires, which happens only after its last reader
+        has released its lease (Step 18). Buffered writes are drained first, so
+        closing never discards a write that has already returned. A closed store
+        is empty rather than poisoned: shutdown diagnostics may still call
+        ``count()``, and that should report zero rather than raise.
         """
 
 
