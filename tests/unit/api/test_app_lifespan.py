@@ -168,6 +168,7 @@ def test_lifespan_shutdown_reports_incomplete_work(tmp_path: Path) -> None:
         worker.queue_file(tmp_path / "n.py")
 
     gate.set()
+    worker.join(timeout=TIMEOUT)
     report = app.state.shutdown_report
     assert not report.completed
     assert report.incomplete_work

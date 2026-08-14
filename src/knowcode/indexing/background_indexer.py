@@ -265,6 +265,27 @@ class BackgroundIndexer:
             completed=self._queue.join(timeout) and not self.failures()
         )
 
+    def join(self, timeout: float = 5.0) -> bool:
+        """Wait for the worker thread to terminate.
+
+        Unlike :meth:`stop`, this does not close the queue or drain work —
+        it only waits for the thread to exit. Useful when external test
+        scaffolding unblocks the thread after a timed-out shutdown, and the
+        caller needs to guarantee the thread is gone before the next test.
+
+        Args:
+            timeout: Upper bound on the wait.
+
+        Returns:
+            Whether the thread terminated within the timeout.
+        """
+        with self._lifecycle:
+            thread = self._thread
+        if thread is None:
+            return True
+        thread.join(timeout=timeout)
+        return not thread.is_alive()
+
     @property
     def is_running(self) -> bool:
         """Whether a worker thread is alive and consuming."""
