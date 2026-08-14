@@ -912,6 +912,104 @@ reject exactly those files — the same watch/build disagreement in the other
 direction. The resolved probe is the fallback, for an event carrying an alias
 of the root itself (`/var/...` for a `/private/var/...` root).
 
+## Server lifecycle ownership (Step 17)
+
+Step 16 made the watch worker's queue lossless. Step 17 makes the *process*
+that hosts it lossless: the server releases what it created, in one order,
+within one deadline, and says what it could not finish.
+
+Reproduced against the pre-Step-17 app through a real ASGI lifespan, with no
+fault injection:
+
+| After a complete lifespan (startup *and* shutdown) | Before | After |
+| --- | --- | --- |
+| Watch worker thread | still running | stopped |
+| Watchdog observer | still alive | stopped and joined |
+| SQLite chunk repository | still open | closed |
+| `api._service` | still installed | uninstalled |
+| Two edits queued at shutdown | 0 chunks committed, nothing reported | both committed, or both named in the report |
+| Watched vectors, FAISS backend | 1 in memory, 0 on disk | persisted by the flush |
+
+### One creator, one closer
+
+| Resource | Created by | Closed by |
+| --- | --- | --- |
+| Knowledge store, chunk repository, vector store | `KnowCodeService` | `KnowCodeService.close()` |
+| Background worker, file monitor | `ServerResources.startup()` | `ServerResources.shutdown()` |
+| The service itself | `create_app` | the app's lifespan, through `ServerResources` |
+| Telemetry writer pool | `knowcode.telemetry`, on first use | `shutdown_telemetry()` |
+
+The watch resources start in the ASGI **lifespan**, not in `create_app`. An app
+that is built but never run therefore owns no threads, and every app that *is*
+run is guaranteed a matching teardown.
+
+### The close order
+
+`SHUTDOWN_ORDER` is `monitor → worker → flush → stores → telemetry`, and every
+shutdown reports all five stages, including the ones with nothing to do:
+
+1. **monitor** — stop the observer first, so the drain works against an inbox
+   nothing is still filling.
+2. **worker** — `BackgroundIndexer.stop()` within the remaining budget. Its
+   Step 16 `DrainReport` decides this stage: `completed` passes it, anything
+   else fails it and contributes `incomplete_work`.
+3. **flush** — `KnowCodeService.flush()`: drain the vector write buffer, then
+   persist the vector artifact and index manifest.
+4. **stores** — `KnowCodeService.close()`: chunk repository, then knowledge
+   store. Both drain in-flight readers before closing (Step 09).
+5. **telemetry** — last, because the stages above still log.
+
+A stage that fails does **not** skip the stages after it. Losing buffered data
+and then also leaking the connection is strictly worse than losing the data, so
+failures are recorded and teardown continues.
+
+The whole call shares one deadline, so a commit that hangs cannot hold the
+process open. Both `startup()` and `shutdown()` are idempotent; a shutdown
+returns its first report rather than closing anything twice, and a failed
+startup rolls its worker back so a half-wired server leaves no consumer running.
+
+### Never claim unearned durability
+
+`ShutdownReport` is structured, not prose: `completed`, `failed_stages`,
+`incomplete_work`, and a per-stage outcome with the error text. `completed` is
+true only when every stage succeeded *and* the worker drained everything it
+accepted. `incomplete_work` carries repository paths — the same surface the
+watch worker already exposes — and no query text, credential, or config value
+passes through it.
+
+### What `flush` will and will not write
+
+Chunks are durable as they commit (Step 15), but vectors are not, and the two
+backends differ: LanceDB buffers writes, while FAISS/NumPy keeps the whole index
+in memory and writes it only in `Indexer.save`. A watch session with the FAISS
+backend therefore ended with vectors in memory and none on disk — durable chunks
+beside no vectors, which is this plan's split-brain reappearing at the process
+boundary. `flush()` drains the buffer and writes the artifact.
+
+Two cases are deliberately skipped, and reported rather than performed:
+
+* **A published generation.** ADR 4 makes it immutable and records artifact
+  checksums at publication, so rewriting `vectors.*` or `index_manifest.json`
+  inside it would invalidate the manifest describing it. Watch commits against
+  a published generation are not made durable here; routing them through a
+  staged generation is Step 18.
+* **An index that never existed.** An empty store with no artifact beside it has
+  nothing to persist. An empty store *with* one is still written — that records
+  that everything was removed.
+
+### Telemetry as an owned resource
+
+The writer pool was a module-level `ThreadPoolExecutor` created at import and
+never shut down, so a queued write could still be in the pool at process exit.
+It is now created on first use and released by `shutdown_telemetry(timeout)`,
+which returns whether every accepted write finished. The pool is re-created on
+demand, so one server's shutdown never breaks the next one's logging in the same
+process.
+
+Concurrent *reload* — handing in-flight readers from one generation to the next,
+and closing retired resources behind them — is deliberately not here. That is
+Step 18.
+
 ## Baseline evidence
 
 The baseline is `main` at `d239b22` on 2026-08-12. Before Step 01 additions,

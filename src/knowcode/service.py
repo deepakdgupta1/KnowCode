@@ -86,6 +86,7 @@ class KnowCodeService:
         self._indexer: Optional["Indexer"] = None
         self._generation: Optional[ResolvedGeneration] = None
         self._generation_resolved = False
+        self._closed = False
         self._retrieval_orchestrator = RetrievalOrchestrator(self)
 
     @property
@@ -702,6 +703,96 @@ class KnowCodeService:
         self._store = None
         self._indexer = None
         self._search_engine = None
+
+    # ------------------------------------------------------------------
+    # Resource ownership (Step 17)
+    # ------------------------------------------------------------------
+
+    def flush(self) -> None:
+        """Make this service's in-memory index state durable.
+
+        Two things are durable in different ways, so both are handled:
+
+        * The vector store's write buffer is drained into its table. LanceDB
+          buffers; FAISS/NumPy does not, and its flush is a documented no-op.
+        * The vector *artifact* and the index manifest are written back to the
+          artifact directory. Step 15 commits keep chunks durable in SQLite as
+          they go, but with the FAISS backend the vectors live only in memory
+          until someone calls :meth:`Indexer.save`. A watch session that ended
+          without this left one vector in memory and none on disk, so a restart
+          found durable chunks and no vectors.
+
+        A *published* generation is deliberately left untouched. ADR 4 makes it
+        immutable and records artifact checksums at publication, so rewriting
+        ``vectors.*`` or ``index_manifest.json`` inside it would invalidate the
+        manifest that describes it. Watch commits against a published
+        generation are therefore not made durable here; routing them through a
+        staged generation is Step 18's, and this method says so rather than
+        pretending the write happened.
+        """
+        indexer = self._indexer
+        if indexer is None:
+            return
+
+        indexer.vector_store.flush()
+
+        artifact_dir = self._artifact_dir()
+        generation = self.current_generation()
+        if generation is not None and artifact_dir == generation.path:
+            logger.info(
+                "Skipping the index artifact flush: generation %s is published "
+                "and immutable (ADR 4).",
+                generation.generation_id,
+            )
+            return
+        if not self._has_index_state(indexer, artifact_dir):
+            # Nothing was ever indexed here, so there is nothing to make
+            # durable. Writing anyway would publish a metadata envelope
+            # describing an index that does not exist, which fails closed on
+            # the next load — an empty LanceDB save produces exactly that.
+            return
+        indexer.save(artifact_dir)
+
+    @staticmethod
+    def _has_index_state(indexer: "Indexer", artifact_dir: Path) -> bool:
+        """Whether flushing this indexer would persist anything real.
+
+        An empty store beside a previously saved artifact is still worth
+        writing: it records that everything was removed. An empty store with no
+        artifact is simply an index nobody built.
+        """
+        if indexer.vector_store.count() > 0:
+            return True
+        return (artifact_dir / "vectors.json").exists()
+
+    def close(self) -> None:
+        """Close every store this service opened. Idempotent.
+
+        Released in reverse order of dependency — derived readers first, then
+        the chunk repository, then the knowledge store — so nothing is closed
+        while something built on top of it is still reachable. Both SQLite
+        stores drain their in-flight readers before closing (Step 09), so this
+        blocks until active reads finish rather than closing beneath them.
+        """
+        if self._closed:
+            return
+        self._closed = True
+
+        self._search_engine = None
+        indexer, self._indexer = self._indexer, None
+        store, self._store = self._store, None
+
+        if indexer is not None:
+            indexer.chunk_repo.close()
+        # The JSON knowledge store holds no connection and has no close().
+        close = getattr(store, "close", None)
+        if callable(close):
+            close()
+
+    @property
+    def is_closed(self) -> bool:
+        """Whether :meth:`close` has released this service's stores."""
+        return self._closed
 
     def _extract_query_keywords(self, query: str) -> list[str]:
         """Extract identifier-like keywords from a natural-language query."""

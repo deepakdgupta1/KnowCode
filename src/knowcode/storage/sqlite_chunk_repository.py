@@ -813,6 +813,11 @@ class SqliteChunkRepository(ChunkRepository):
                 logger.debug("Writer connection already closed: %s", e)
             self._closed = True
 
+    @property
+    def is_closed(self) -> bool:
+        """Whether this repository's connections have been released."""
+        return self._closed
+
     def save(self, path: Path) -> None:
         """Persist data (no-op as SQLite auto-persists)."""
         pass

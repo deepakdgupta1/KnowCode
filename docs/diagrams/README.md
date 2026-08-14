@@ -339,6 +339,12 @@ Abstract base `EmbeddingProvider` with `embed(texts[])` and `embed_single(text)`
 - Retryable failures back off and retry up to `max_attempts`; terminal and exhausted ones land in `failures()` with the file's previous generation intact
 - `start()` / `stop(timeout)` — idempotent; `stop` drains within one deadline and returns a `DrainReport` naming any uncommitted work
 
+**`ServerResources` (`api/lifecycle.py`)**
+- Owns everything the API server creates: the service, the worker, the monitor
+- `startup()` — starts the watch resources from the ASGI lifespan; idempotent, and rolls the worker back if the observer cannot start
+- `shutdown(timeout)` — releases them in `SHUTDOWN_ORDER` (`monitor → worker → flush → stores → telemetry`) under one deadline; idempotent
+- Returns a `ShutdownReport`: `completed`, `failed_stages`, `incomplete_work`, and a per-stage outcome — a stage failure never skips the stages after it
+
 ### TemporalAnalyzer + CoverageProcessor
 
 **`TemporalAnalyzer` (`analysis/temporal.py`)**
@@ -1253,8 +1259,11 @@ KnowCodeService:
 
 ### Step 4 — Start BackgroundIndexer
 
+Started by the ASGI **lifespan**, not by `create_app`, so an app that is built
+but never run owns no threads and every app that runs gets a matching teardown.
+
 ```
-KnowCodeService → BackgroundIndexer:
+ServerResources.startup() → BackgroundIndexer:
   BackgroundIndexer(indexer).start()  →  True
   → one daemon thread started
   + WatchQueue() initialized
@@ -1264,9 +1273,10 @@ KnowCodeService → BackgroundIndexer:
 ### Step 5 — Start FileMonitor
 
 ```
-KnowCodeService → FileMonitor:
+ServerResources.startup() → FileMonitor:
   FileMonitor(watch_root, bg_indexer).start()
   → watchdog Observer.start()  [uses inotify / FSEvents / kqueue per OS]
+  [if this raises, the worker started above is stopped again before the error]
 ```
 
 ### Step 6 — Server ready
@@ -1274,6 +1284,27 @@ KnowCodeService → FileMonitor:
 ```
 KnowCodeService:  FastAPI + Uvicorn listening on :8000
 ```
+
+---
+
+## Server Shutdown
+
+`ServerResources.shutdown(timeout)` runs on lifespan exit: one owner, one order,
+one deadline for the whole call. Every stage is reported, including the ones
+with nothing to do, and a stage that fails does not skip the stages after it.
+
+```
+1. monitor    FileMonitor.stop()          → stop new events first
+2. worker     BackgroundIndexer.stop()    → DrainReport decides this stage
+3. flush      KnowCodeService.flush()     → vector buffer, then artifact + manifest
+4. stores     KnowCodeService.close()     → chunk repo, then knowledge store
+5. telemetry  shutdown_telemetry()        → last; the stages above still log
+```
+
+The result is a `ShutdownReport`: `completed` is true only when every stage
+succeeded *and* the worker drained everything it accepted. Anything else is
+named in `failed_stages` and `incomplete_work` rather than logged as a clean
+stop. `api._service` is uninstalled so a closed service cannot serve a request.
 
 ---
 

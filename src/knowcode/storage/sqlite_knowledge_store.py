@@ -662,6 +662,11 @@ class SqliteKnowledgeStore:
                 pass
             self._closed = True
 
+    @property
+    def is_closed(self) -> bool:
+        """Whether this store's connections have been released."""
+        return self._closed
+
     @classmethod
     def from_json(cls, json_path: str | Path, db_path: str | Path) -> "SqliteKnowledgeStore":
         """Migrate from a JSON knowledge store to SQLite."""
