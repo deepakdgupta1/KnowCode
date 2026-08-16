@@ -1,28 +1,24 @@
 ---
 trigger: always_on
-last_updated: 2026-06-07
+last_updated: 2026-08-16
 ---
 
-Follow `docs/mcp-contract.md` for the canonical KnowCode MCP retrieval policy.
+Follow `docs/mcp-contract.md` for the canonical KnowCode MCP retrieval
+policy — including the default starting budgets per query type, the
+verbosity escalation ladder, and the configured `sufficiency_threshold`
+(default 0.8). Do not restate or override those values here or in any other
+agent config.
+
 Use the current chat context first. When repository context is still needed,
 call `retrieve_context_for_query` with `verbosity=minimal` and the smallest
-budget that fits the task.
+budget that fits the task, per the contract's table.
 
-Do NOT use generic file-system or search tools (such as `view_file`, `grep_search`, or `list_dir`) for initial context gathering or codebase exploration. Only use generic file-system tools when you have identified a specific file to edit, or when MCP retrieval is insufficient (sufficiency_score < 0.8) and you need to inspect specific file details.
-
-Default starting points:
-
-- Locate or explain one symbol: `max_tokens=1500`, `limit_entities=1`, `expand_deps=false`.
-- Debug a concrete failure: `max_tokens=2000`, `limit_entities=2`, `expand_deps=true`.
-- Review or extend a feature area: `max_tokens=3000`, `limit_entities=2-3`, `expand_deps=true`.
-
-If `context_text` is insufficient, escalate in this order: increase breadth while
-staying in `minimal`, then use `standard` for implementation detail, then use
-`verbose` for ranking evidence. Use `diagnostic` only for retrieval debugging.
-
-Use the configured `config.sufficiency_threshold` from `aimodels.yaml` to decide
-whether local context is sufficient (default: `0.8`). If the score is below threshold, recover
-missing local context before falling back to a larger external prompt.
+Do NOT use generic file-system or search tools (such as `view_file`,
+`grep_search`, or `list_dir`) for initial context gathering or codebase
+exploration. Only use generic file-system tools when you have identified a
+specific file to edit, or when MCP retrieval is insufficient
+(sufficiency_score below the configured threshold) and you need to inspect
+specific file details.
 
 Use focused KnowCode tools only after the first retrieval call:
 

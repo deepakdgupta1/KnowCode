@@ -84,3 +84,5 @@ nav:
   - Workflow Diagrams: diagrams/README.md
   - Research:
       - Prose Evaluation: research/knowcode_evaluation_report.md
+      - Architecture Synthesis (50M+ LOC): research/knowcode-architecture-synthesis.md
+      - Document Collateral Retrieval: research/document_collateral_retrieval_2026.md

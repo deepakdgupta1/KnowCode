@@ -87,3 +87,9 @@ These are pinned by `tests/e2e/test_release_gate_limitations.py`. If a release
       implemented behavior.
 - [ ] Configuration examples (`aimodels.yaml`) reflect any new environment
       variables or supported model families.
+- [ ] Docs drift audit: `uv run mkdocs build --strict` passes; any new or
+      renamed command/flag/endpoint/config key is reflected in exactly one
+      canonical page (`docs/user/cli-reference.md`,
+      `docs/user/configuration.md`, `docs/user/rest-api.md`) with other
+      pages linking to it rather than restating it; CLI command count
+      claims match `knowcode --help`.
