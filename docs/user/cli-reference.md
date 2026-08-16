@@ -284,4 +284,4 @@ Any extension not listed (e.g., `.go`, `.cpp`, `.h`, `.swift`, `.rb`, `.php`,
 `.css`, `.html`) is **ignored** during analyze/index/build. Per-parser
 construct coverage (what exactly each parser extracts, and its known
 limitations) is tracked in the
-[parser construct matrix](../architecture/parser-construct-matrix.md).
+[parser construct matrix](../engineering/parser-matrix.md).

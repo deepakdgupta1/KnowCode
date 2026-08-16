@@ -72,7 +72,7 @@ defaults use:
 | `GLM_BASE_URL` | Optional endpoint override for OpenAI-compatible providers |
 | `VOYAGE_API_KEY_1` | voyage-code-3 embeddings + rerank-2.5 cross-encoder |
 | `GOOGLE_API_KEY` | Optional Gemini chat models |
-| `KNOWCODE_ROUTING_POLICY_ARTIFACT` / `KNOWCODE_ROUTING_POLICY_SHA256` | Path + expected SHA-256 of the machine-verified routing policy artifact (see [retrieval evals](../retrieval-evals.md)) |
+| `KNOWCODE_ROUTING_POLICY_ARTIFACT` / `KNOWCODE_ROUTING_POLICY_SHA256` | Path + expected SHA-256 of the machine-verified routing policy artifact (see [retrieval evals](../engineering/testing.md)) |
 | `KNOWCODE_TELEMETRY_RAW` | `1` enables opt-in raw query capture — see [telemetry](telemetry.md#opt-in-raw-query-capture) |
 
 `.env.example` in the repository root documents the same variables and is a

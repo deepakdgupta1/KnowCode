@@ -70,12 +70,17 @@ nav:
       - Business Logic: product/business-logic.md
   - Roadmap: roadmap.md
   - MCP Contract: mcp-contract.md
-  - API Reference: api_reference.md
-  - Architecture & Roadmap: architecture/reference_architecture.md
-  - Storage Analysis ADR: architecture/json-storage-analysis.md
-  - Hardening Contracts: architecture/hardening-contracts.md
-  - Parser Construct Matrix: architecture/parser-construct-matrix.md
+  - Engineering:
+      - Architecture: engineering/architecture.md
+      - ADR Index: engineering/adr/index.md
+      - Internals:
+          - Indexing & Generations: engineering/internals/indexing-generations.md
+          - Retrieval & Synthesis: engineering/internals/retrieval-synthesis.md
+          - Storage Formats: engineering/internals/storage-formats.md
+      - Parser Matrix: engineering/parser-matrix.md
+      - Source API Reference: engineering/api-source.md
+      - Testing & Evaluation: engineering/testing.md
+      - Release Checklist: engineering/release.md
   - Workflow Diagrams: diagrams/README.md
-  - Retrieval Quality Evals: retrieval-evals.md
   - Research:
       - Prose Evaluation: research/knowcode_evaluation_report.md

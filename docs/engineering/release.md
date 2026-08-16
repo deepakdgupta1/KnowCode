@@ -6,7 +6,7 @@ security boundaries against hostile input — not only the MCP contract.
 
 This checklist is the human-facing gate that sits on top of the automated
 release gate (`tests/e2e/test_release_gate_*.py`) and the per-step contracts in
-[`architecture/hardening-contracts.md`](architecture/hardening-contracts.md).
+the [ADR index](adr/index.md).
 
 ## 1. Gates are green
 
@@ -83,7 +83,7 @@ These are pinned by `tests/e2e/test_release_gate_limitations.py`. If a release
 ## 7. Documentation & examples
 
 - [ ] `docs/mcp-contract.md` reflects any schema changes.
-- [ ] `docs/architecture/hardening-contracts.md` and this checklist match the
+- [ ] the [ADR index](adr/index.md) and this checklist match the
       implemented behavior.
 - [ ] Configuration examples (`aimodels.yaml`) reflect any new environment
       variables or supported model families.

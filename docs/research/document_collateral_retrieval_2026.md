@@ -4,7 +4,7 @@
 
 > **Status:** Design proposal — not yet implemented
 > **Owner:** Solo
-> **Companion to:** [`reference_architecture.md`](../architecture/reference_architecture.md) · [`knowcode-architecture-synthesis.md`](./knowcode-architecture-synthesis.md) · [`retrieval-evals.md`](../retrieval-evals.md)
+> **Companion to:** reference_architecture.md (archived) · [`knowcode-architecture-synthesis.md`](./knowcode-architecture-synthesis.md) · [`Testing & Evaluation`](../engineering/testing.md)
 > **`[ASPIRATIONAL]`** items are target design, not shipped features — consistent with the `[HARDENED]` convention in the reference architecture.
 
 ---

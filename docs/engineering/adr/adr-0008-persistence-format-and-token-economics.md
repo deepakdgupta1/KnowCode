@@ -1,4 +1,4 @@
-# ADR: KnowCode Persistence Format and Token Economics
+# ADR 0008: KnowCode Persistence Format and Token Economics
 
 **Status**: Proposed
 **Date**: 2026-03-07
@@ -221,7 +221,7 @@ from the context bundle without calling any external LLM. This saves the **entir
 frontier LLM cost** for that query — both the tool result injection (Step 14) AND
 the answer generation (Step 15).
 
-The documented workflow from [reference_architecture.md](reference_architecture.md):
+The documented workflow from reference_architecture.md (archived: docs/archive/):
 1. User prompts IDE agent
 2. IDE agent invokes `retrieve_context_for_query` via MCP
 3. KnowCode returns context bundle + sufficiency score

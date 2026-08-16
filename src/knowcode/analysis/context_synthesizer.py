@@ -25,7 +25,7 @@ class ContextBundle:
     sufficiency_score: float = 0.0  # 0.0-1.0 confidence in context adequacy
 
 
-# Task-specific templates defining content priorities (from docs/architecture/reference_architecture.md Layer 9)
+# Task-specific templates defining content priorities (from docs/engineering/internals/retrieval-synthesis.md)
 # Higher numbers = higher priority
 TASK_TEMPLATES = {
     TaskType.DEBUG: {
@@ -392,7 +392,7 @@ class ContextSynthesizer:
     ) -> Optional[ContextBundle]:
         """Synthesize context bundle with task-specific prioritization.
 
-        Uses task templates from docs/architecture/reference_architecture.md Layer 9 to prioritize content
+        Uses task templates from docs/engineering/internals/retrieval-synthesis.md to prioritize content
         based on the type of task (debug, extend, review, explain, locate).
 
         Args:

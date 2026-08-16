@@ -9,7 +9,7 @@ fixture contracts in `tests/fixtures/parser_contracts/`. It is the single
 source of truth referenced by the release gate (blueprint Step 22).
 
 The parser and graph invariants themselves live in
-[`hardening-contracts.md`](hardening-contracts.md) (ADR 1). Anything not listed
+[ADR 1](adr/adr-0001-entity-and-file-identity.md). Anything not listed
 as supported here is either an explicit limitation below or outside the
 committed fixtures.
 

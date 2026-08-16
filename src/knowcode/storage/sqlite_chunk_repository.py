@@ -23,7 +23,7 @@ snapshot and can never see an in-flight writer transaction. ``close()`` and
 connections, so an active reader never observes a closed handle.
 
 See: docs/research/knowcode-architecture-synthesis.md §3.1
-     docs/architecture/hardening-contracts.md (ADR 1, 2, 3, 7)
+     docs/engineering/adr/ (ADR 1, 2, 3, 7)
 """
 
 from __future__ import annotations

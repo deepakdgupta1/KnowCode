@@ -51,7 +51,7 @@ class RelationshipKind(str, Enum):
 class TaskType(str, Enum):
     """Query/task types for context prioritization.
 
-    These correspond to task-specific templates in docs/architecture/reference_architecture.md (Layer 9).
+    These correspond to task-specific templates in docs/engineering/internals/retrieval-synthesis.md.
     """
 
     EXPLAIN = "explain"  # "How does X work?", "Explain the flow of Y"

@@ -4,7 +4,7 @@ The release gate is honest about what the assembled system does *not* yet do.
 Four items were flagged during Steps 12-19 for Step 22 to resolve. None is a
 newly introduced defect and none is silently patched here; each is pinned by a
 test asserting the *current* behavior so it cannot change unnoticed, and each is
-documented in ``docs/architecture/hardening-contracts.md`` and the release
+documented in ``docs/engineering/adr/`` and the release
 checklist. Fixing any of them is product work (a new scoped step), not a
 weakened assertion in this gate.
 

@@ -18,7 +18,7 @@ The most important open evidence is retrieval routing quality. The committed
 prohibited claims, and AST-resolved source citations. It is not a locked
 holdout and cannot enable local answering. Runtime routing therefore defaults
 to an empty task allowlist until independent machine adjudication and the
-blocking Python external gates pass. See [Retrieval Quality Evals](retrieval-evals.md)
+blocking Python external gates pass. See [Testing & Evaluation](engineering/testing.md)
 for the evidence contract.
 
 ## Release Principles
@@ -122,7 +122,7 @@ implicit reliance on fields hidden by minimal mode.
   final retrieval instead of querying a fourth time.
 - Integration coverage now exercises local and LLM routing against the actual
   `RetrievalOrchestrator` projection.
-- **Done:** `knowcode doctor --mcp` and the `docs/RELEASE_CHECKLIST.md` conformance audit are completed, validating the canonical tool `retrieve_context_for_query` and minimal projection response formatting.
+- **Done:** `knowcode doctor --mcp` and the `docs/engineering/release.md` conformance audit are completed, validating the canonical tool `retrieve_context_for_query` and minimal projection response formatting.
 
 ### P3 - Finish the MCP Token Diet
 
