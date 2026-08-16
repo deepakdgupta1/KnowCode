@@ -159,11 +159,9 @@ class YamlParser:
                     lines=lines,
                 )
 
-    def _find_key_line(
-        self, key: str, prefix: str, lines: list[str]
-    ) -> int:
+    def _find_key_line(self, key: str, prefix: str, lines: list[str]) -> int:
         """Try to find the line number for a key.
-        
+
         Note: This is a simple heuristic that searches for "key:" matches.
         It attempts to verify indentation depth but may fail on:
         - Duplicate keys at similar indentation (valid in some contexts, or invalid YAML)

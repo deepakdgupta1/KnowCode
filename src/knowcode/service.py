@@ -81,6 +81,7 @@ class GenerationBuildResult:
     error: Optional[str] = None
     stage: Optional[str] = None
     graph_stats: dict[str, Any] = field(default_factory=dict)
+    preflight_report: Optional[dict[str, Any]] = None
 
 
 class KnowCodeService:
@@ -219,9 +220,7 @@ class KnowCodeService:
             f"{_LEASE_ACQUIRE_ATTEMPTS} attempts"
         )
 
-    def _live_bundle(
-        self, index_path: Optional[str | Path] = None
-    ) -> GenerationBundle:
+    def _live_bundle(self, index_path: Optional[str | Path] = None) -> GenerationBundle:
         """The bundle new operations start from, built once on first use.
 
         Single-flight: the lock covers the check *and* the construction, so
@@ -482,7 +481,11 @@ class KnowCodeService:
         resolved = self._store_file()
         if resolved.exists():
             return resolved
-        db_path = output_path / "knowledge.db" if output_path.is_dir() else output_path.with_suffix(".db")
+        db_path = (
+            output_path / "knowledge.db"
+            if output_path.is_dir()
+            else output_path.with_suffix(".db")
+        )
         if db_path.exists():
             return db_path
         return (
@@ -541,18 +544,20 @@ class KnowCodeService:
         """
         return cast("SearchEngine", self._current_bundle(index_path).search_engine)
 
-    def get_exact_query_engine(self, index_path: Optional[str | Path] = None) -> "SearchEngineProtocol":
+    def get_exact_query_engine(
+        self, index_path: Optional[str | Path] = None
+    ) -> "SearchEngineProtocol":
         """Build and return an ExactQueryEngine.
-        
+
         Args:
             index_path: Directory containing the index. If None, uses default.
-            
+
         Returns:
             ExactQueryEngine instance.
         """
         if index_path is None:
             index_path = self.ensure_index()
-            
+
         return ExactQueryEngine(self.get_indexer(index_path).chunk_repo)
 
     def retrieve_context_for_query(
@@ -578,6 +583,8 @@ class KnowCodeService:
             limit_entities: Maximum number of unique entities to include.
             per_entity_max_tokens: Optional per-entity token budget; defaults to an even split.
             expand_deps: Whether to expand dependency context during retrieval.
+            verbosity: Level of detail in the response.
+            include_metadata: Whether to include entity metadata.
 
         Returns:
             Dictionary with context_text, sufficiency_score, evidence, and metadata.
@@ -591,9 +598,10 @@ class KnowCodeService:
         # it (Step 20): the retrieval below joins the scope rather than opening
         # its own, so this call is counted exactly once no matter how many
         # layers it passes through, and the query text stays out of the record.
-        with self.generation_lease(), query_scope(
-            self.store_path, query=query, entry_point="service"
-        ) as scope:
+        with (
+            self.generation_lease(),
+            query_scope(self.store_path, query=query, entry_point="service") as scope,
+        ):
             freshness = self.get_freshness_metadata()
             is_stale = freshness.get("is_stale", False)
 
@@ -654,7 +662,10 @@ class KnowCodeService:
                     latest_source_change = max(os.path.getmtime(f.path) for f in files)
         except OSError as e:
             import logging
-            logging.getLogger(__name__).warning("Failed to check source staleness (OS error): %s", e)
+
+            logging.getLogger(__name__).warning(
+                "Failed to check source staleness (OS error): %s", e
+            )
 
         if last_store_rebuild == 0.0:
             is_stale = True
@@ -687,13 +698,10 @@ class KnowCodeService:
             RuntimeError: The generation could not be published. The previously
                 published generation, if any, is untouched.
         """
-        result = self.build_generation(
-            directory, index_path, incremental=incremental
-        )
+        result = self.build_generation(directory, index_path, incremental=incremental)
         if not result.published or result.kind != generations.KIND_FULL:
             raise RuntimeError(
-                f"Semantic index build failed at stage {result.stage!r}: "
-                f"{result.error}"
+                f"Semantic index build failed at stage {result.stage!r}: {result.error}"
             )
         return result.chunk_count
 
@@ -707,6 +715,7 @@ class KnowCodeService:
         coverage: Path | None = None,
         incremental: bool = False,
         builder: Optional[GraphBuilder] = None,
+        run_preflight: bool = True,
     ) -> GenerationBuildResult:
         """Stage, validate, and atomically publish one complete generation.
 
@@ -745,6 +754,11 @@ class KnowCodeService:
             )
         graph_stats: dict[str, Any] = builder.stats()
 
+        # Pre-flight assessment: runs post-parse, pre-index
+        preflight_dict: Optional[dict[str, Any]] = None
+        if run_preflight and self.app_config.preflight.enabled:
+            preflight_dict = self._run_preflight(builder)
+
         provider = create_embedding_provider(app_config=self.app_config)
         dimension = provider.config.dimension
 
@@ -759,6 +773,7 @@ class KnowCodeService:
                     error=str(exc),
                     stage=STAGE_KNOWLEDGE_STORE,
                     graph_stats=graph_stats,
+                    preflight_report=preflight_dict,
                 )
 
             chunk_count = 0
@@ -808,6 +823,7 @@ class KnowCodeService:
                         error=str(semantic_error),
                         stage=STAGE_SEMANTIC_INDEX,
                         graph_stats=graph_stats,
+                        preflight_report=preflight_dict,
                     )
                 kind = generations.KIND_GRAPH_ONLY
                 self._discard_semantic_artifacts(staging.path)
@@ -847,11 +863,22 @@ class KnowCodeService:
                     error=str(exc),
                     stage=STAGE_PUBLICATION,
                     graph_stats=graph_stats,
+                    preflight_report=preflight_dict,
                 )
 
             staging.published = True
 
         self.adopt_generation(published)
+
+        # Persist the pre-flight report inside the published generation
+        if preflight_dict is not None:
+            from knowcode.analysis.preflight_writer import write_preflight_report
+
+            try:
+                write_preflight_report(preflight_dict, published.path)
+            except OSError as exc:
+                logger.warning("Failed to persist pre-flight report: %s", exc)
+
         return GenerationBuildResult(
             published=True,
             generation_id=published.generation_id,
@@ -860,7 +887,53 @@ class KnowCodeService:
             error=str(semantic_error) if semantic_error is not None else None,
             stage=STAGE_SEMANTIC_INDEX if semantic_error is not None else None,
             graph_stats=graph_stats,
+            preflight_report=preflight_dict,
         )
+
+    def _run_preflight(
+        self,
+        builder: GraphBuilder,
+    ) -> dict[str, Any]:
+        """Run pre-flight assessment on a completed GraphBuilder.
+
+        Returns the report as a serializable dictionary.
+        """
+        from knowcode.analysis.preflight import assess_codebase
+
+        report = assess_codebase(
+            entities=builder.entities,
+            relationships=builder.relationships,
+            scanned_files=builder.scanned_files,
+            parse_errors=builder.errors,
+            weights=self.app_config.preflight.weights,
+        )
+        return report.to_dict()
+
+    def preflight(
+        self,
+        directory: str | Path,
+        *,
+        ignore: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Run a standalone pre-flight quality assessment on a directory.
+
+        This builds the graph from scratch (scan + parse) without creating a
+        knowledge store or semantic index — useful for ad-hoc quality checks
+        before committing to a full ``build``.
+
+        Args:
+            directory: Root directory of the target codebase.
+            ignore: Additional patterns to ignore during scanning.
+
+        Returns:
+            The pre-flight report as a serializable dictionary.
+        """
+        builder = GraphBuilder()
+        builder.build_from_directory(
+            root_dir=directory,
+            additional_ignores=ignore,
+        )
+        return self._run_preflight(builder)
 
     def _write_staged_knowledge_store(
         self, staging_dir: Path, builder: GraphBuilder
@@ -1154,6 +1227,7 @@ class KnowCodeService:
             ignore: Additional ignore patterns.
             temporal: Whether to include git history analysis.
             coverage: Optional Cobertura coverage report path.
+            export_json: Whether to export a JSON copy of the knowledge store.
             incremental: Whether to use incremental index build.
 
         Returns:
@@ -1177,7 +1251,11 @@ class KnowCodeService:
             # The legacy JSON exporter is deliberately outside the generation:
             # ADR 7 allows reading it, never mixing it into a published one.
             store = KnowledgeStore.from_graph_builder(builder)
-            json_path = output_path / KnowledgeStore.DEFAULT_FILENAME if output_path.is_dir() else output_path.with_suffix(".json")
+            json_path = (
+                output_path / KnowledgeStore.DEFAULT_FILENAME
+                if output_path.is_dir()
+                else output_path.with_suffix(".json")
+            )
             store.save(json_path)
 
         result = self.build_generation(
@@ -1197,6 +1275,8 @@ class KnowCodeService:
         if result.error:
             stats["index_error"] = result.error
             stats["index_error_stage"] = result.stage
+        if result.preflight_report is not None:
+            stats["preflight_report"] = result.preflight_report
         return stats
 
     def search(self, pattern: str) -> list[dict[str, Any]]:
@@ -1236,6 +1316,8 @@ class KnowCodeService:
             target: Entity ID or search pattern.
             max_tokens: Maximum token budget for the context bundle.
             task_type: Optional task type for context prioritization.
+            summarize: Whether to summarize context to reduce token count.
+            is_stale: Whether to use a live source loader to fetch fresh content.
 
         Returns:
             Dictionary containing context text and metadata.
@@ -1258,9 +1340,12 @@ class KnowCodeService:
             live_loader = None
             if is_stale:
                 from knowcode.analysis.live_source_loader import LiveSourceLoader
+
                 live_loader = LiveSourceLoader(self._store_root())
 
-            synthesizer = ContextSynthesizer(self.store, max_tokens=max_tokens, live_loader=live_loader)
+            synthesizer = ContextSynthesizer(
+                self.store, max_tokens=max_tokens, live_loader=live_loader
+            )
 
             # Use task-specific synthesis if task_type provided
             if task_type is not None:
@@ -1407,8 +1492,7 @@ class KnowCodeService:
                 candidate.warm(
                     store=True,
                     indexer=previous is not None and previous.has_indexer,
-                    search_engine=previous is not None
-                    and previous.has_search_engine,
+                    search_engine=previous is not None and previous.has_search_engine,
                 )
             except Exception as exc:  # noqa: BLE001 - classified, not swallowed
                 candidate.close()

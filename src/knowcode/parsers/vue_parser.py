@@ -5,7 +5,14 @@ from pathlib import Path
 from typing import Any, Iterable, Union, cast
 import re
 
-from knowcode.data_models import Entity, EntityKind, Relationship, RelationshipKind, Location, ParseResult
+from knowcode.data_models import (
+    Entity,
+    EntityKind,
+    Relationship,
+    RelationshipKind,
+    Location,
+    ParseResult,
+)
 from knowcode.parsers.base import TreeSitterParser
 from knowcode.parsers.javascript_parser import JavaScriptParser
 from knowcode.parsers.typescript_parser import TypeScriptParser
@@ -145,7 +152,7 @@ class VueParser(TreeSitterParser):
                 "script_lang": (
                     (script_section.lang or "js") if script_section else "none"
                 ),
-            }
+            },
         )
         entities.append(component_entity)
 
@@ -433,7 +440,7 @@ class VueParser(TreeSitterParser):
             is_reactive = False
             is_arrow_function = False
 
-            if decl_type in ['const', 'let', 'var']:
+            if decl_type in ["const", "let", "var"]:
                 # Identifiers may contain '$', so the name must never be treated
                 # as regex syntax.
                 escaped_name = re.escape(decl_name)
@@ -441,24 +448,23 @@ class VueParser(TreeSitterParser):
                 # Check if it's a ref/reactive call
                 ref_check = re.search(
                     rf"{escaped_name}\s*=\s*(?:ref|reactive)\s*(?:<[^>]+>)?\s*\(",
-                    script_content
+                    script_content,
                 )
                 is_reactive = ref_check is not None
 
                 # Check if it's an arrow function: const foo = () => {} or const bar = async () => {}
                 arrow_check = re.search(
-                    rf"{escaped_name}\s*=\s*(?:async\s+)?\([^)]*\)\s*=>",
-                    script_content
+                    rf"{escaped_name}\s*=\s*(?:async\s+)?\([^)]*\)\s*=>", script_content
                 )
                 is_arrow_function = arrow_check is not None
 
             # Determine entity kind
             # Arrow functions should be treated as FUNCTION entities, not VARIABLE
-            if decl_type == 'function' or is_arrow_function:
+            if decl_type == "function" or is_arrow_function:
                 entity_kind = EntityKind.FUNCTION
                 # Override decl_type for arrow functions
                 if is_arrow_function:
-                    decl_type = 'function'
+                    decl_type = "function"
             else:
                 entity_kind = EntityKind.VARIABLE
 
@@ -543,7 +549,8 @@ class VueParser(TreeSitterParser):
                 relationships,
                 context,
                 name=computed_name,
-                span=index.lookup(computed_name, prefer_member=True) or index.fallback(),
+                span=index.lookup(computed_name, prefer_member=True)
+                or index.fallback(),
                 kind=EntityKind.VARIABLE,
                 category=BindingCategory.COMPUTED,
                 metadata={
@@ -602,7 +609,7 @@ class VueParser(TreeSitterParser):
                         "vue_component", component_name
                     ),
                     kind=RelationshipKind.REFERENCES,
-                    metadata={"usage_type": "template"}
+                    metadata={"usage_type": "template"},
                 )
             )
 
@@ -652,9 +659,7 @@ class VueParser(TreeSitterParser):
                 relationships.append(
                     Relationship(
                         source_id=parent_id,
-                        target_id=build_external_reference_id(
-                            "vue_component", binding
-                        ),
+                        target_id=build_external_reference_id("vue_component", binding),
                         kind=RelationshipKind.IMPORTS,
                         metadata={"import_path": statement.module},
                     )
@@ -681,9 +686,7 @@ class VueParser(TreeSitterParser):
 
         # Pattern 1: Find defineProps call
         props_match = re.search(
-            r"defineProps\s*(<[^>]*>)?\s*\(([^)]*)\)",
-            script_content,
-            re.DOTALL
+            r"defineProps\s*(<[^>]*>)?\s*\(([^)]*)\)", script_content, re.DOTALL
         )
 
         if not props_match:
@@ -693,7 +696,9 @@ class VueParser(TreeSitterParser):
                 start_pos = props_start.end() - 1
                 # Determine delimiter
                 delimiter = script_content[start_pos]
-                close_delimiter = '>' if delimiter == '<' else ')' if delimiter == '(' else '}'
+                close_delimiter = (
+                    ">" if delimiter == "<" else ")" if delimiter == "(" else "}"
+                )
 
                 # Find matching closing delimiter
                 bracket_count = 1
@@ -708,7 +713,9 @@ class VueParser(TreeSitterParser):
                 if bracket_count == 0:
                     props_text = script_content[start_pos:end_pos]
                     # Extract property names
-                    prop_names = re.findall(r"^\s*(\w+)\s*[?:]", props_text, re.MULTILINE)
+                    prop_names = re.findall(
+                        r"^\s*(\w+)\s*[?:]", props_text, re.MULTILINE
+                    )
                     props.extend(prop_names)
 
         else:
@@ -721,9 +728,11 @@ class VueParser(TreeSitterParser):
                 # Remove angle brackets
                 type_text = type_param[1:-1].strip()
                 # Check if it's an inline type definition or external interface
-                if '{' in type_text:
+                if "{" in type_text:
                     # Inline type: { foo: string, bar: number }
-                    prop_names = re.findall(r"^\s*(\w+)\s*[?:]", type_text, re.MULTILINE)
+                    prop_names = re.findall(
+                        r"^\s*(\w+)\s*[?:]", type_text, re.MULTILINE
+                    )
                     props.extend(prop_names)
                 else:
                     # External interface: just return the interface name
@@ -748,9 +757,7 @@ class VueParser(TreeSitterParser):
         emits = []
         # Match: defineEmits<{ (e: 'update', value: string): void }>()
         # Or: defineEmits(['update', 'close'])
-        emits_match = re.search(
-            r"defineEmits\s*[<([]\s*[\s\S]*?[>)\]]", script_content
-        )
+        emits_match = re.search(r"defineEmits\s*[<([]\s*[\s\S]*?[>)\]]", script_content)
         if emits_match:
             emits_text = emits_match.group(0)
             # Extract event names
@@ -758,7 +765,9 @@ class VueParser(TreeSitterParser):
             emits.extend(event_names)
         return _ordered_unique(emits)
 
-    def _extract_all_setup_declarations(self, script_content: str) -> list[tuple[str, str]]:
+    def _extract_all_setup_declarations(
+        self, script_content: str
+    ) -> list[tuple[str, str]]:
         """Extract ALL top-level declarations in <script setup>.
 
         In Composition API with <script setup>, ALL top-level declarations
@@ -773,12 +782,14 @@ class VueParser(TreeSitterParser):
         # Pattern 1: const/let/var declarations
         # Matches: const foo = ..., let bar = ..., var baz = ...
         # Handle destructuring: const { x, y } = ..., const [a, b] = ...
-        variable_pattern = r"(?:^|\n)\s*(const|let|var)\s+([a-zA-Z_$][\w$]*|\{[^}]+\}|\[[^\]]+\])\s*="
+        variable_pattern = (
+            r"(?:^|\n)\s*(const|let|var)\s+([a-zA-Z_$][\w$]*|\{[^}]+\}|\[[^\]]+\])\s*="
+        )
         for match in re.finditer(variable_pattern, script_content, re.MULTILINE):
             decl_type = match.group(1)
             var_names = match.group(2)
             # Handle destructuring
-            if var_names.startswith('{') or var_names.startswith('['):
+            if var_names.startswith("{") or var_names.startswith("["):
                 # Vue 3.5 reactive props destructure binds the props themselves:
                 # `const { label } = defineProps({ label: String })` declares one
                 # binding, not a prop plus a separate const of the same name.
@@ -786,9 +797,9 @@ class VueParser(TreeSitterParser):
                     continue
                 # Extract names from destructuring
                 inner = var_names[1:-1]
-                names = re.findall(r'([a-zA-Z_$][\w$]*)', inner)
+                names = re.findall(r"([a-zA-Z_$][\w$]*)", inner)
                 for name in names:
-                    if name not in ['as', 'const', 'let', 'var']:  # Skip keywords
+                    if name not in ["as", "const", "let", "var"]:  # Skip keywords
                         declarations.append((name, decl_type))
             else:
                 declarations.append((var_names, decl_type))
@@ -797,21 +808,25 @@ class VueParser(TreeSitterParser):
         # Matches: function foo() {}, async function bar() {}
         function_pattern = r"(?:^|\n)\s*(?:async\s+)?function\s+([a-zA-Z_$][\w$]*)\s*\("
         for match in re.finditer(function_pattern, script_content, re.MULTILINE):
-            declarations.append((match.group(1), 'function'))
+            declarations.append((match.group(1), "function"))
 
         # Pattern 3: arrow function assignments (already covered by variable_pattern but add type info)
         # Matches: const foo = () => {}, const bar = async () => {}
-        arrow_function_pattern = r"(?:^|\n)\s*const\s+([a-zA-Z_$][\w$]*)\s*=\s*(?:async\s+)?\([^)]*\)\s*=>"
+        arrow_function_pattern = (
+            r"(?:^|\n)\s*const\s+([a-zA-Z_$][\w$]*)\s*=\s*(?:async\s+)?\([^)]*\)\s*=>"
+        )
         for match in re.finditer(arrow_function_pattern, script_content, re.MULTILINE):
             name = match.group(1)
             # Update type to function if already in list
-            declarations = [(n, 'function' if n == name else t) for n, t in declarations]
+            declarations = [
+                (n, "function" if n == name else t) for n, t in declarations
+            ]
 
         # Pattern 4: class declarations
         # Matches: class Foo {}
         class_pattern = r"(?:^|\n)\s*class\s+([a-zA-Z_$][\w$]*)\s*[\s{]"
         for match in re.finditer(class_pattern, script_content, re.MULTILINE):
-            declarations.append((match.group(1), 'class'))
+            declarations.append((match.group(1), "class"))
 
         # Pattern 5: TypeScript type declarations
         # Matches: interface Foo {}, type Bar = ...
@@ -861,8 +876,10 @@ class VueParser(TreeSitterParser):
         if returned is None:
             return []
         returned_object = find_balanced_block(data_body, returned.end() - 1)
-        return [] if returned_object is None else _ordered_unique(
-            top_level_keys(returned_object)
+        return (
+            []
+            if returned_object is None
+            else _ordered_unique(top_level_keys(returned_object))
         )
 
     def _extract_methods(self, script_content: str) -> list[str]:
@@ -897,27 +914,55 @@ class VueParser(TreeSitterParser):
 
             # Filter out inline expressions with operators
             # Common operators: ++, --, =, +=, -=, +, -, *, /, %, &&, ||, !, <, >, etc.
-            if any(op in expression for op in ['++', '--', '+=', '-=', '*=', '/=', '%=', '&&', '||', '===', '!==', '==', '!=', '<=', '>=', '=', '+', '-', '*', '/', '%', '!', '<', '>']):
+            if any(
+                op in expression
+                for op in [
+                    "++",
+                    "--",
+                    "+=",
+                    "-=",
+                    "*=",
+                    "/=",
+                    "%=",
+                    "&&",
+                    "||",
+                    "===",
+                    "!==",
+                    "==",
+                    "!=",
+                    "<=",
+                    ">=",
+                    "=",
+                    "+",
+                    "-",
+                    "*",
+                    "/",
+                    "%",
+                    "!",
+                    "<",
+                    ">",
+                ]
+            ):
                 continue
 
             # Filter out expressions with parentheses (function calls with args)
-            if '(' in expression and ')' in expression:
+            if "(" in expression and ")" in expression:
                 # Extract function name before parentheses
-                func_match = re.match(r'(\w+)\s*\(', expression)
+                func_match = re.match(r"(\w+)\s*\(", expression)
                 if func_match:
                     handlers.append(func_match.group(1))
                 continue
 
             # Filter out expressions with dots (property access like item.show = true)
-            if '.' in expression:
+            if "." in expression:
                 continue
 
             # Filter out $emit calls (these are emits, not method handlers)
-            if expression.startswith('$emit'):
+            if expression.startswith("$emit"):
                 continue
 
             # If it's a simple identifier (method name), capture it
-            if re.match(r'^[a-zA-Z_$][\w$]*$', expression):
+            if re.match(r"^[a-zA-Z_$][\w$]*$", expression):
                 handlers.append(expression)
 
         return handlers
@@ -977,8 +1022,11 @@ class VueParser(TreeSitterParser):
         for match in re.finditer(binding_pattern, style_content):
             var_name = match.group(1)
             # Convert kebab-case to camelCase if needed (CSS allows kebab-case)
-            if '-' in var_name:
-                var_name = ''.join(word.capitalize() if i > 0 else word for i, word in enumerate(var_name.split('-')))
+            if "-" in var_name:
+                var_name = "".join(
+                    word.capitalize() if i > 0 else word
+                    for i, word in enumerate(var_name.split("-"))
+                )
             bindings.append(var_name)
         return bindings
 
@@ -1015,7 +1063,7 @@ class VueParser(TreeSitterParser):
         for match in re.finditer(kebab_pattern, template_content):
             kebab_name = match.group(1)
             # Convert kebab-case to PascalCase
-            pascal_name = ''.join(word.capitalize() for word in kebab_name.split('-'))
+            pascal_name = "".join(word.capitalize() for word in kebab_name.split("-"))
             components.append(pascal_name)
 
         return _ordered_unique(components)

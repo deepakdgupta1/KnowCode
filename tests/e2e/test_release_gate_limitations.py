@@ -80,7 +80,9 @@ def test_directory_level_watch_events_are_ignored_by_design(tmp_path: Path) -> N
     worker = _RecordingWorker()
     handler = IndexingHandler(worker, tmp_path)  # type: ignore[arg-type]
 
-    handler.on_deleted(types.SimpleNamespace(is_directory=True, src_path=str(tmp_path / "sub")))
+    handler.on_deleted(
+        types.SimpleNamespace(is_directory=True, src_path=str(tmp_path / "sub"))
+    )
     handler.on_moved(
         types.SimpleNamespace(
             is_directory=True,

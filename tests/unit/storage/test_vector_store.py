@@ -244,9 +244,7 @@ def test_save_load_roundtrip_preserves_ids_after_removal(
     assert loaded.get_embedding("b") is None
 
 
-def test_reloaded_store_keeps_upsert_exact(
-    store: VectorStore, tmp_path: Path
-) -> None:
+def test_reloaded_store_keeps_upsert_exact(store: VectorStore, tmp_path: Path) -> None:
     """Native ID assignment resumes after load without colliding."""
     path = _saved_store(store, tmp_path / "vectors")
 
@@ -320,9 +318,7 @@ def test_load_rejects_engine_mismatch(
         loaded.load(path)
 
 
-def test_load_rejects_dimension_mismatch(
-    store: VectorStore, tmp_path: Path
-) -> None:
+def test_load_rejects_dimension_mismatch(store: VectorStore, tmp_path: Path) -> None:
     """Metadata dimension must agree with the persisted native index."""
     path = _saved_store(store, tmp_path / "vectors")
     payload = _read_metadata(path)
@@ -427,9 +423,7 @@ def test_load_rejects_unreadable_id_map_keys(
         loaded.load(path)
 
 
-def test_load_rejects_non_integer_dimension(
-    store: VectorStore, tmp_path: Path
-) -> None:
+def test_load_rejects_non_integer_dimension(store: VectorStore, tmp_path: Path) -> None:
     """A textual dimension cannot be compared against the native index."""
     path = _saved_store(store, tmp_path / "vectors")
     payload = _read_metadata(path)
@@ -543,9 +537,7 @@ def test_rejected_load_leaves_the_previous_index_intact(
     assert live.get_embedding("keep") == pytest.approx([1.0, 0.0])
 
 
-def test_load_adopts_the_artifacts_own_dimension(
-    engine: str, tmp_path: Path
-) -> None:
+def test_load_adopts_the_artifacts_own_dimension(engine: str, tmp_path: Path) -> None:
     """A valid artifact is adopted, not rejected against the constructor value."""
     source = VectorStore(dimension=3)
     source.add("c1", [1.0, 0.0, 0.0])
@@ -772,9 +764,7 @@ def test_save_publishes_the_native_artifact_before_the_metadata_envelope(
     assert published == [_native_artifact(path, engine).name, "vectors.json"]
 
 
-def test_save_leaves_no_temporary_files(
-    store: VectorStore, tmp_path: Path
-) -> None:
+def test_save_leaves_no_temporary_files(store: VectorStore, tmp_path: Path) -> None:
     """Publication cleans up its staging files."""
     path = _saved_store(store, tmp_path / "vectors")
 

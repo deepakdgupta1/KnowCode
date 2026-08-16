@@ -106,7 +106,11 @@ NATIVE_VECTOR_ARTIFACTS = ("vectors.lancedb", "vectors.index", "vectors.npy")
 
 #: The chunk/vector half of a generation: everything a successor inherits when
 #: it is derived from an existing generation rather than built from scratch.
-SEMANTIC_ARTIFACTS = (CHUNKS_DB, INDEX_MANIFEST, VECTOR_METADATA) + NATIVE_VECTOR_ARTIFACTS
+SEMANTIC_ARTIFACTS = (
+    CHUNKS_DB,
+    INDEX_MANIFEST,
+    VECTOR_METADATA,
+) + NATIVE_VECTOR_ARTIFACTS
 
 _REBUILD_HINT = "Rebuild with `knowcode build`."
 
@@ -264,8 +268,7 @@ class GenerationManifest:
 
         try:
             artifacts = tuple(
-                ArtifactDigest.from_dict(item)
-                for item in payload.get("artifacts", [])
+                ArtifactDigest.from_dict(item) for item in payload.get("artifacts", [])
             )
             counts = {str(k): int(v) for k, v in dict(payload["counts"]).items()}
             digests = {str(k): str(v) for k, v in dict(payload["digests"]).items()}
@@ -501,7 +504,9 @@ def digest_artifact(path: Path) -> ArtifactDigest:
     )
 
 
-def digest_artifacts(directory: Path, names: Sequence[str]) -> tuple[ArtifactDigest, ...]:
+def digest_artifacts(
+    directory: Path, names: Sequence[str]
+) -> tuple[ArtifactDigest, ...]:
     """Digest every named artifact that exists in ``directory``."""
     return tuple(
         digest_artifact(directory / name)
@@ -624,8 +629,7 @@ def read_manifest(directory: Path) -> GenerationManifest:
         ) from exc
     if not isinstance(payload, dict):
         raise ValueError(
-            f"Generation manifest {manifest_file} is not a JSON object. "
-            f"{_REBUILD_HINT}"
+            f"Generation manifest {manifest_file} is not a JSON object. {_REBUILD_HINT}"
         )
     return GenerationManifest.from_dict(payload)
 
@@ -685,9 +689,7 @@ def validate_generation(
             )
         for artifact in manifest.artifacts:
             if not (path / artifact.name).exists():
-                failures.append(
-                    f"missing artifact {artifact.name}. {_REBUILD_HINT}"
-                )
+                failures.append(f"missing artifact {artifact.name}. {_REBUILD_HINT}")
 
         chunks = manifest.counts.get("chunks", 0)
         vectors = manifest.counts.get("vectors", 0)
@@ -742,9 +744,7 @@ def _verify_digests(path: Path, manifest: GenerationManifest) -> list[str]:
         if not artifact_path.exists():
             continue  # already reported as missing by the structural pass
         if digest_artifact(artifact_path).sha256 != artifact.sha256:
-            failures.append(
-                f"checksum mismatch for {artifact.name}. {_REBUILD_HINT}"
-            )
+            failures.append(f"checksum mismatch for {artifact.name}. {_REBUILD_HINT}")
 
     return failures
 
@@ -782,6 +782,10 @@ def publish_generation(
     leaves the previous generation current.
 
     Args:
+        root: The artifact root directory.
+        staging: The staging directory containing the new artifacts.
+        manifest: The GenerationManifest describing the new generation.
+        retain: Number of generations to retain during cleanup.
         protect: Generation ids a reader still holds open. Retention never
             removes these, which is ADR 4's "superseded generations are retired
             only after reader leases end" at the directory level; the service

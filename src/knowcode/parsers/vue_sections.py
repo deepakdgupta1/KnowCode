@@ -115,7 +115,9 @@ def _read_attribute_value(source: str, cursor: int) -> tuple[str, int] | None:
         return source[cursor:end], end + 1
 
     start = cursor
-    while cursor < len(source) and not source[cursor].isspace() and source[cursor] != ">":
+    while (
+        cursor < len(source) and not source[cursor].isspace() and source[cursor] != ">"
+    ):
         cursor += 1
     return source[start:cursor], cursor
 

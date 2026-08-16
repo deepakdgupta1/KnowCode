@@ -15,7 +15,9 @@ def _write(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
 
 
-def test_load_non_strict_warns_on_unknown_top_level_keys(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+def test_load_non_strict_warns_on_unknown_top_level_keys(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
     """Unknown top-level keys should warn (not fail) in non-strict mode."""
     config_file = tmp_path / "aimodels.yaml"
     _write(
@@ -34,7 +36,9 @@ unknown_top_level: true
     assert any("Unknown top-level config keys" in rec.message for rec in caplog.records)
 
 
-def test_load_non_strict_warns_on_unknown_config_keys(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+def test_load_non_strict_warns_on_unknown_config_keys(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
     """Unknown nested config keys should warn (not fail) in non-strict mode."""
     config_file = tmp_path / "aimodels.yaml"
     _write(
@@ -140,9 +144,7 @@ def test_unverifiable_artifact_fails_closed_without_raising(
         )
 
     assert config.local_answer_task_types == []
-    assert any(
-        "local answering disabled" in rec.message for rec in caplog.records
-    )
+    assert any("local answering disabled" in rec.message for rec in caplog.records)
 
 
 @pytest.mark.parametrize(
@@ -280,9 +282,7 @@ def test_load_strict_rejects_invalid_root_type(tmp_path: Path) -> None:
         AppConfig.load(str(config_file), strict=True)
 
 
-def test_load_non_strict_invalid_file_raises_error(
-    tmp_path: Path
-) -> None:
+def test_load_non_strict_invalid_file_raises_error(tmp_path: Path) -> None:
     """Non-strict mode should still raise on invalid config to prevent silent failures."""
     config_file = tmp_path / "aimodels.yaml"
     _write(config_file, "config: [")

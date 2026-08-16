@@ -65,7 +65,11 @@ class MockStore:
         return self._entities.get(entity_id)
 
     def trace_calls(
-        self, entity_id: str, direction: str = "callees", depth: int = 1, max_results: int = 50
+        self,
+        entity_id: str,
+        direction: str = "callees",
+        depth: int = 1,
+        max_results: int = 50,
     ) -> list[dict]:  # type: ignore
         return [
             {
@@ -87,7 +91,9 @@ class MockServiceWithStore:
         self.store_path = tmp_path
         self.context_calls: list[tuple] = []  # type: ignore
 
-    def get_context(self, target: str, max_tokens: int = 2000, task_type: Any=None) -> Any:  # noqa: ANN001  # type: ignore
+    def get_context(
+        self, target: str, max_tokens: int = 2000, task_type: Any = None
+    ) -> Any:  # noqa: ANN001  # type: ignore
         self.context_calls.append((target, max_tokens, task_type))
         return {
             "entity_id": target,
@@ -127,7 +133,7 @@ def test_handle_tool_call_retrieve_context_for_query(tmp_path: Path) -> None:
 def test_handle_tool_call_search_codebase(tmp_path: Path) -> None:
     """Test search_codebase tool routing (UC2-001)."""
     (tmp_path / "knowcode_knowledge.json").write_text("{}")
-    
+
     server = KnowCodeMCPServer(store_path=tmp_path)
     mock_service = MockServiceWithStore(tmp_path)
     server._ensure_service = lambda allow_missing_store=False: mock_service  # type: ignore
@@ -148,7 +154,7 @@ def test_handle_tool_call_search_codebase(tmp_path: Path) -> None:
 def test_handle_tool_call_get_entity_context(tmp_path: Path) -> None:
     """Test get_entity_context tool routing (UC2-002)."""
     (tmp_path / "knowcode_knowledge.json").write_text("{}")
-    
+
     server = KnowCodeMCPServer(store_path=tmp_path)
     mock_service = MockServiceWithStore(tmp_path)
     server._ensure_service = lambda allow_missing_store=False: mock_service  # type: ignore
@@ -170,7 +176,7 @@ def test_handle_tool_call_get_entity_context(tmp_path: Path) -> None:
 def test_handle_tool_call_trace_calls(tmp_path: Path) -> None:
     """Test trace_calls tool routing (UC2-003)."""
     (tmp_path / "knowcode_knowledge.json").write_text("{}")
-    
+
     server = KnowCodeMCPServer(store_path=tmp_path)
     mock_service = MockServiceWithStore(tmp_path)
     server._ensure_service = lambda allow_missing_store=False: mock_service  # type: ignore
@@ -192,9 +198,7 @@ def test_handle_tool_call_unknown_tool_returns_error(tmp_path: Path) -> None:
     """Test unknown tool returns error (UC2-004)."""
     server = KnowCodeMCPServer(store_path=tmp_path)
 
-    result = json.loads(
-        server.handle_tool_call("nonexistent_tool", {"foo": "bar"})
-    )
+    result = json.loads(server.handle_tool_call("nonexistent_tool", {"foo": "bar"}))
 
     assert "error" in result
     assert "Unknown tool" in result["error"]
@@ -261,7 +265,14 @@ def test_retrieve_context_returns_expected_structure(tmp_path: Path) -> None:
     )
 
     # Check that canonical keys are present in the response
-    for key in ["query", "context_text", "sufficiency_score", "total_tokens", "task_type", "selected_entities"]:
+    for key in [
+        "query",
+        "context_text",
+        "sufficiency_score",
+        "total_tokens",
+        "task_type",
+        "selected_entities",
+    ]:
         assert key in payload
 
 
@@ -275,14 +286,15 @@ def test_handle_tool_call_emits_telemetry(tmp_path: Path) -> None:
     """
     # Write empty knowledge store so it starts but does not raise missing_knowledge_store
     (tmp_path / "knowcode_knowledge.json").write_text("{}")
-    
+
     server = KnowCodeMCPServer(store_path=tmp_path)
     mock_service = MockServiceWithStore(tmp_path)
     server._ensure_service = lambda allow_missing_store=False: mock_service  # type: ignore
 
     import time
+
     _ = server.handle_tool_call("search_codebase", {"query": "Foo", "limit": 5})
-    
+
     # Wait for async logging to complete in a robust retry loop
     log_file = tmp_path / "knowcode_telemetry.jsonl"
     for _ in range(40):
@@ -294,19 +306,17 @@ def test_handle_tool_call_emits_telemetry(tmp_path: Path) -> None:
             except Exception:
                 pass
         time.sleep(0.05)
-        
+
     assert log_file.exists()
-    
+
     import json
+
     lines = log_file.read_text(encoding="utf-8").strip().split("\n")
     records = [json.loads(line) for line in lines]
-    
+
     tool_call_events = [r for r in records if r.get("event_type") == "tool_call"]
     assert len(tool_call_events) == 1
     assert tool_call_events[0]["tool_name"] == "search_codebase"
     assert tool_call_events[0]["argument_count"] == 2
     assert "arguments" not in tool_call_events[0]
     assert '"Foo"' not in log_file.read_text(encoding="utf-8")
-
-
-

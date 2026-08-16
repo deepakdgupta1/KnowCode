@@ -336,7 +336,8 @@ class FakeGeneration:
 def test_a_bundle_reports_the_generation_it_reads() -> None:
     sources, _built = _sources()
     bundle = GenerationBundle(
-        generation=FakeGeneration("g1", semantic=True), sources=sources  # type: ignore[arg-type]
+        generation=FakeGeneration("g1", semantic=True),
+        sources=sources,  # type: ignore[arg-type]
     )
 
     assert bundle.generation_id == "g1"
@@ -346,7 +347,8 @@ def test_a_bundle_reports_the_generation_it_reads() -> None:
 def test_a_graph_only_generation_reports_no_semantic_index() -> None:
     sources, _built = _sources()
     bundle = GenerationBundle(
-        generation=FakeGeneration("g1", semantic=False), sources=sources  # type: ignore[arg-type]
+        generation=FakeGeneration("g1", semantic=False),
+        sources=sources,  # type: ignore[arg-type]
     )
 
     assert not bundle.has_semantic_index

@@ -7,7 +7,9 @@ from knowcode.service import KnowCodeService
 from knowcode.config import AppConfig
 
 
-def test_service_get_freshness_metadata_returns_expected_structure(tmp_path: Path) -> None:
+def test_service_get_freshness_metadata_returns_expected_structure(
+    tmp_path: Path,
+) -> None:
     """Test that get_freshness_metadata returns all expected keys."""
     # Write a dummy store file so it exists
     store_file = tmp_path / "knowcode_knowledge.json"
@@ -45,11 +47,13 @@ def test_service_get_freshness_metadata_returns_expected_structure(tmp_path: Pat
 def test_retrieve_context_contains_freshness_signal(tmp_path: Path) -> None:
     """Test that retrieve_context_for_query results include freshness signal."""
     service = KnowCodeService(store_path=tmp_path)
-    
+
     # Mock retrieve_context_for_query to return a dummy
     service._retrieval_orchestrator = MagicMock()
-    service._retrieval_orchestrator.retrieve_context_for_query.return_value = {"context_text": "CTX"}
-    
+    service._retrieval_orchestrator.retrieve_context_for_query.return_value = {
+        "context_text": "CTX"
+    }
+
     # Mock get_freshness_metadata
     service.get_freshness_metadata = MagicMock(return_value={"is_stale": False})
 

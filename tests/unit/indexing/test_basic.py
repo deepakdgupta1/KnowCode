@@ -32,12 +32,12 @@ class Greeter:
 
         # Verify entities
         assert len(builder.entities) > 0
-        
+
         # Check for function
         functions = builder.get_entities_by_kind("function")
         assert len(functions) == 1
         assert functions[0].name == "hello"
-        
+
         # Check for class
         classes = builder.get_entities_by_kind("class")
         assert len(classes) == 1
@@ -54,7 +54,7 @@ def test_knowledge_store_persistence() -> None:
         # Build and save
         builder = GraphBuilder()
         builder.build_from_directory(tmpdir)
-        
+
         store = KnowledgeStore.from_graph_builder(builder)
         save_path = Path(tmpdir) / "knowledge.json"
         store.save(save_path)
@@ -89,7 +89,7 @@ def callee():
 
         # Get entity
         caller_entity = next(e for e in results if e.name == "caller")
-        
+
         # Check callees
         callees = store.get_callees(caller_entity.id)
         assert len(callees) > 0

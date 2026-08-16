@@ -59,7 +59,14 @@ TASK_TEMPLATES = {
         "include_recent_changes": False,
     },
     TaskType.GENERAL: {
-        "priority": ["docstring", "signature", "source_code", "parent", "callers", "callees"],
+        "priority": [
+            "docstring",
+            "signature",
+            "source_code",
+            "parent",
+            "callers",
+            "callees",
+        ],
         "boost": {},
         "include_tests": False,
         "include_recent_changes": False,
@@ -85,6 +92,7 @@ class ContextSynthesizer:
             store: Knowledge store to query.
             max_tokens: Maximum tokens in context bundle.
             model: Model name for token counting.
+            live_loader: Optional LiveSourceLoader to fetch fresh content.
         """
         self.store = store
         self.max_tokens = max_tokens
@@ -99,11 +107,14 @@ class ContextSynthesizer:
                 return live_source
         return entity.source_code or ""
 
-    def synthesize(self, entity_id: str, summarize: bool = False) -> Optional[ContextBundle]:
+    def synthesize(
+        self, entity_id: str, summarize: bool = False
+    ) -> Optional[ContextBundle]:
         """Synthesize context bundle for an entity.
 
         Args:
             entity_id: ID of the target entity.
+            summarize: Whether to summarize context to reduce token count.
 
         Returns:
             ContextBundle or None if entity not found.
@@ -114,37 +125,37 @@ class ContextSynthesizer:
 
         sections: list[str] = []
         included: list[str] = [entity_id]
-        
-        # STRATEGY: 
+
+        # STRATEGY:
         # We construct the context bundle by adding sections in order of "Semantic Priority".
         # 1. Core Identity (Header, Signature, Docstring) - Essential
         # 2. Source Code - High value, but expensive. Truncated if necessary.
         # 3. Parent Context - Helps LLM understand where this fits.
         # 4. Incoming/Outgoing Relationships - Additional context, added greedily until budget fills.
-        
+
         # We build sections in priority order but display them in logical order usually.
         # However, for simplicity, we'll append and check budget.
-        
+
         # Priority 1: Entity Core (Header, Signature, Description)
         header = self._format_entity_header(entity)
         current_tokens = self.tokenizer.count_tokens(header)
         sections.append(header)
-        
+
         desc = ""
         if entity.docstring:
             desc = f"## Description\n\n{entity.docstring}"
-            
+
         sig = ""
         if entity.signature:
             sig = f"## Signature\n\n```python\n{entity.signature}\n```"
-            
+
         # Add high priority sections if they fit
         if desc:
             t = self.tokenizer.count_tokens(desc)
             if current_tokens + t < self.max_tokens:
                 sections.append(desc)
                 current_tokens += t
-        
+
         if sig:
             t = self.tokenizer.count_tokens(sig)
             if current_tokens + t < self.max_tokens:
@@ -165,22 +176,25 @@ class ContextSynthesizer:
             code_footer = "\n```"
             overhead = self.tokenizer.count_tokens(code_header + code_footer)
             remaining = self.max_tokens - current_tokens - overhead
-            
-            if remaining > 100: # Only add if we have decent space
+
+            if remaining > 100:  # Only add if we have decent space
                 code_body = source_code
                 code_tokens = self.tokenizer.count_tokens(code_body)
-                
+
                 if code_tokens > remaining:
-                    code_body = self.tokenizer.truncate(code_body, remaining) + "\n# ... (truncated)"
+                    code_body = (
+                        self.tokenizer.truncate(code_body, remaining)
+                        + "\n# ... (truncated)"
+                    )
                     # We technically truncated the content
                     # But we will rely on full budget exhaustion check often
-                
+
                 sections.append(f"{code_header}{code_body}{code_footer}")
                 current_tokens += self.tokenizer.count_tokens(sections[-1])
             else:
-                 # Skipped source code due to budget
-                 # We consider this truncation/loss of info
-                 pass 
+                # Skipped source code due to budget
+                # We consider this truncation/loss of info
+                pass
 
         # Priority 3: Parent Context
         parent = self.store.get_parent(entity_id)
@@ -194,25 +208,31 @@ class ContextSynthesizer:
 
         # Priority 4: Relationships (Callers, Callees, Children)
         # We add them greedily until budget exhaust
-        
+
         # Unified list of potential sections
         rel_sections = []
-        
+
         callers = self.store.get_callers(entity_id)
         if callers:
-            rel_sections.append((self._format_callers(callers), [c.id for c in callers]))
+            rel_sections.append(
+                (self._format_callers(callers), [c.id for c in callers])
+            )
 
         callees = self.store.get_callees(entity_id)
         if callees:
-             rel_sections.append((self._format_callees(callees), [c.id for c in callees]))
-             
+            rel_sections.append(
+                (self._format_callees(callees), [c.id for c in callees])
+            )
+
         if entity.kind in {EntityKind.CLASS, EntityKind.MODULE, EntityKind.DOCUMENT}:
             children = self.store.get_children(entity_id)
             if children:
-                rel_sections.append((self._format_children(children), [c.id for c in children]))
+                rel_sections.append(
+                    (self._format_children(children), [c.id for c in children])
+                )
 
         is_truncated = False
-        
+
         for text, ids in rel_sections:
             t = self.tokenizer.count_tokens(text)
             if current_tokens + t < self.max_tokens:
@@ -223,10 +243,10 @@ class ContextSynthesizer:
                 is_truncated = True
 
         context_text = "\n\n---\n\n".join(sections)
-        
+
         # Check if we skipped source code but had it
         if source_code and "## Source Code" not in context_text:
-             is_truncated = True
+            is_truncated = True
 
         return ContextBundle(
             target_entity=entity,
@@ -264,7 +284,11 @@ class ContextSynthesizer:
         """Format callers section."""
         lines = ["## Called By", ""]
         for caller in callers[:10]:  # Limit to 10
-            sig = f" - `{caller.signature.split('(')[0]}(...)`" if caller.signature else ""
+            sig = (
+                f" - `{caller.signature.split('(')[0]}(...)`"
+                if caller.signature
+                else ""
+            )
             lines.append(f"- `{caller.qualified_name}`{sig}")
         if len(callers) > 10:
             lines.append(f"- ... and {len(callers) - 10} more")
@@ -344,8 +368,12 @@ class ContextSynthesizer:
         sections = [f"# Search Results for '{query}'", ""]
 
         for entity in matches:
-            sections.append(f"## {entity.kind.value.title()}: `{entity.qualified_name}`")
-            sections.append(f"File: `{entity.location.file_path}:{entity.location.line_start}`")
+            sections.append(
+                f"## {entity.kind.value.title()}: `{entity.qualified_name}`"
+            )
+            sections.append(
+                f"File: `{entity.location.file_path}:{entity.location.line_start}`"
+            )
             if entity.docstring:
                 # First 200 chars of docstring
                 doc_preview = entity.docstring[:200]
@@ -370,6 +398,7 @@ class ContextSynthesizer:
         Args:
             entity_id: ID of the target entity.
             task_type: Type of task for context prioritization.
+            summarize: Whether to summarize context to reduce token count.
 
         Returns:
             ContextBundle with task_type and sufficiency_score, or None if not found.
@@ -384,7 +413,7 @@ class ContextSynthesizer:
 
         sections: list[str] = []
         included: list[str] = [entity_id]
-        
+
         # Track what we've included for sufficiency scoring
         content_included = {
             "signature": False,
@@ -395,7 +424,7 @@ class ContextSynthesizer:
             "callees": False,
             "children": False,
         }
-        
+
         # Always include header
         header = self._format_entity_header(entity)
         current_tokens = self.tokenizer.count_tokens(header)
@@ -410,13 +439,15 @@ class ContextSynthesizer:
 
         # Build content sections based on priority order
         content_sections = {}
-        
+
         if entity.signature:
-            content_sections["signature"] = f"## Signature\n\n```python\n{entity.signature}\n```"
-            
+            content_sections["signature"] = (
+                f"## Signature\n\n```python\n{entity.signature}\n```"
+            )
+
         if entity.docstring:
             content_sections["docstring"] = f"## Description\n\n{entity.docstring}"
-            
+
         source_code = self._get_entity_source(entity)
         if source_code and not summarize:
             code_header = "## Source Code\n\n```python\n"
@@ -426,45 +457,48 @@ class ContextSynthesizer:
             max_code_tokens = int(self.max_tokens * 0.5)  # Reserve half for code max
             code_tokens = self.tokenizer.count_tokens(code_body)
             if code_tokens > max_code_tokens:
-                code_body = self.tokenizer.truncate(code_body, max_code_tokens) + "\n# ... (truncated)"
+                code_body = (
+                    self.tokenizer.truncate(code_body, max_code_tokens)
+                    + "\n# ... (truncated)"
+                )
             content_sections["source_code"] = f"{code_header}{code_body}{code_footer}"
-            
+
         parent = self.store.get_parent(entity_id)
         if parent:
             content_sections["parent"] = self._format_parent_context(parent)
-            
+
         callers = self.store.get_callers(entity_id)
         if callers:
             content_sections["callers"] = self._format_callers(callers)
-            
+
         callees = self.store.get_callees(entity_id)
         if callees:
             content_sections["callees"] = self._format_callees(callees)
-            
+
         if entity.kind in {EntityKind.CLASS, EntityKind.MODULE, EntityKind.DOCUMENT}:
             children = self.store.get_children(entity_id)
             if children:
                 content_sections["children"] = self._format_children(children)
-        
+
         # Add sections in priority order until budget exhausted
         is_truncated = False
-        
+
         for section_name in priority_order:  # type: ignore
             if section_name not in content_sections:
                 continue
-                
+
             section_text = content_sections[section_name]
             t = self.tokenizer.count_tokens(section_text)
-            
+
             # Apply boost: if boosted, allocate more budget
             boost = boosts.get(section_name, 1.0)  # type: ignore
             effective_budget = self.max_tokens * boost
-            
+
             if current_tokens + t < min(effective_budget, self.max_tokens):
                 sections.append(section_text)
                 current_tokens += t
                 content_included[section_name] = True
-                
+
                 # Track included entity IDs
                 if section_name == "parent" and parent:
                     included.append(parent.id)
@@ -478,14 +512,14 @@ class ContextSynthesizer:
                         included.extend(c.id for c in children_list[:15])
             else:
                 is_truncated = True
-        
+
         context_text = "\n\n---\n\n".join(sections)
-        
+
         # Calculate sufficiency score based on task requirements
         sufficiency = self._calculate_sufficiency(
             task_type, content_included, entity, context_text
         )
-        
+
         return ContextBundle(
             target_entity=entity,
             context_text=context_text,
@@ -505,44 +539,44 @@ class ContextSynthesizer:
         context_text: str,
     ) -> float:
         """Calculate sufficiency score (0.0-1.0) for local-first answering.
-        
+
         Higher scores indicate the context is likely sufficient to answer
         without needing an external LLM.
-        
+
         Args:
             task_type: The type of task being performed.
             content_included: Dict tracking what content was included.
             entity: The target entity.
             context_text: The synthesized context.
-            
+
         Returns:
             Sufficiency score from 0.0 to 1.0.
         """
         template = TASK_TEMPLATES.get(task_type, TASK_TEMPLATES[TaskType.GENERAL])
         priority_order = template["priority"]
-        
+
         score = 0.0
         max_score = 0.0
-        
+
         # Weight each priority item by its position (higher priority = more weight)
         for i, section_name in enumerate(priority_order):  # type: ignore
             weight = 1.0 / (i + 1)  # Decreasing weight by position
             max_score += weight
-            
+
             if content_included.get(section_name, False):
                 score += weight
-        
+
         # Bonus for having source code (always valuable)
         source_code = self._get_entity_source(entity)
         if source_code and "## Source Code" in context_text:
             score += 0.2
             max_score += 0.2
-            
+
         # Bonus for having docstring (helps LLM understand intent)
         if entity.docstring and len(entity.docstring) > 50:
             score += 0.1
             max_score += 0.1
-            
+
         # Penalize if context is very short
         min_useful_tokens = 100
         if len(context_text) < min_useful_tokens:

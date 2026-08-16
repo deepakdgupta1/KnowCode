@@ -177,7 +177,10 @@ def dedupe_entities_by_id(
         if entity.id in seen:
             prev_idx = seen[entity.id]
             prev_entity = deduped[prev_idx]
-            if prev_entity.kind == EntityKind.MODULE and entity.kind != EntityKind.MODULE:
+            if (
+                prev_entity.kind == EntityKind.MODULE
+                and entity.kind != EntityKind.MODULE
+            ):
                 deduped[prev_idx] = entity
                 continue
             errors.append(

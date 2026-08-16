@@ -203,8 +203,7 @@ class VectorStore:
     def _has_artifacts(path: Path) -> bool:
         """Whether any vector artifact exists beside the given base path."""
         return any(
-            path.with_suffix(suffix).exists()
-            for suffix in (".json", ".index", ".npy")
+            path.with_suffix(suffix).exists() for suffix in (".json", ".index", ".npy")
         )
 
     @staticmethod

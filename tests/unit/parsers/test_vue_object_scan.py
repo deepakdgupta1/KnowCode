@@ -32,7 +32,9 @@ def test_returns_body_between_matching_braces() -> None:
         ("{}", 5),
     ],
 )
-def test_returns_none_when_no_balanced_block_starts_there(text: str, index: int) -> None:
+def test_returns_none_when_no_balanced_block_starts_there(
+    text: str, index: int
+) -> None:
     assert find_balanced_block(text, index) is None
 
 

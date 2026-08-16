@@ -49,46 +49,47 @@ def test_parse_simple_js(tmp_path: Path) -> None:
         const x = new MyClass();
     }
     """
-    
+
     file_path = tmp_path / "test.js"
     file_path.write_text(source, encoding="utf-8")
-    
+
     parser = JavaScriptParser()
     result = parser.parse_file(file_path)
-    
+
     assert not result.errors
-    
+
     # Check entities
     entities = {e.qualified_name: e for e in result.entities}
     assert "MyClass" in entities
     assert entities["MyClass"].kind == EntityKind.CLASS
-    
+
     # Check method (might be MyClass.myMethod or just myMethod dependent on implementation details)
     # Our implementation uses qualified names
     assert "MyClass.myMethod" in entities
     assert entities["MyClass.myMethod"].kind == EntityKind.METHOD
-    
+
     assert "globalFunc" in entities
     assert entities["globalFunc"].kind == EntityKind.FUNCTION
-    
+
     # Check relationships
     rels = result.relationships
-    
+
     # Import
     imports = [r for r in rels if r.kind == RelationshipKind.IMPORTS]
     assert len(imports) == 1
-    assert imports[0].target_id == build_external_reference_id(
-        "npm", "external-module"
-    )
-    
+    assert imports[0].target_id == build_external_reference_id("npm", "external-module")
+
     # Calls
     calls = [r for r in rels if r.kind == RelationshipKind.CALLS]
     # something() inside myMethod
     # new MyClass() inside globalFunc (constructor call)
     targets = {r.target_id for r in calls}
-    assert build_unresolved_reference_id(
-        "javascript", file_path, "MyClass.myMethod", "something"
-    ) in targets
+    assert (
+        build_unresolved_reference_id(
+            "javascript", file_path, "MyClass.myMethod", "something"
+        )
+        in targets
+    )
     assert build_internal_entity_id(file_path, "MyClass") in targets
 
 
@@ -255,8 +256,7 @@ def test_commonjs_require_is_an_external_import(tmp_path: Path) -> None:
     load_id = build_internal_entity_id(file_path, "load")
     assert any(
         relationship.source_id == load_id
-        and relationship.target_id
-        == build_external_reference_id("npm", "@scope/pkg")
+        and relationship.target_id == build_external_reference_id("npm", "@scope/pkg")
         and relationship.kind is RelationshipKind.IMPORTS
         for relationship in result.relationships
     )

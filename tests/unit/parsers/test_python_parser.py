@@ -55,10 +55,7 @@ def test_nested_function_call_resolves_locally_without_leaking(tmp_path: Path) -
     the outer one (no ast.walk leak across definition boundaries)."""
     src = tmp_path / "scope.py"
     src.write_text(
-        "def outer():\n"
-        "    def duplicate():\n"
-        "        helper()\n"
-        "    duplicate()\n",
+        "def outer():\n    def duplicate():\n        helper()\n    duplicate()\n",
         encoding="utf-8",
     )
     result = PythonParser().parse_file(src)
@@ -68,11 +65,7 @@ def test_nested_function_call_resolves_locally_without_leaking(tmp_path: Path) -
     outer_id = by_qname["outer"].id
     duplicate_id = by_qname["outer.duplicate"].id
 
-    calls = [
-        rel
-        for rel in result.relationships
-        if rel.kind is RelationshipKind.CALLS
-    ]
+    calls = [rel for rel in result.relationships if rel.kind is RelationshipKind.CALLS]
     # outer() calls its locally defined duplicate() -> internal target.
     assert any(
         rel.source_id == outer_id and rel.target_id == duplicate_id for rel in calls
@@ -115,8 +108,7 @@ def test_method_local_call_resolves_to_nested_function(tmp_path: Path) -> None:
     calls = [
         rel
         for rel in result.relationships
-        if rel.kind is RelationshipKind.CALLS
-        and rel.source_id == method_id
+        if rel.kind is RelationshipKind.CALLS and rel.source_id == method_id
     ]
     assert len(calls) == 1
     assert calls[0].target_id == dup_id
@@ -144,12 +136,8 @@ def test_async_nested_function_keeps_function_kind_and_scope(tmp_path: Path) -> 
 
     inner_id = by_qname["outer.inner"].id
     outer_id = by_qname["outer"].id
-    calls = [
-        rel for rel in result.relationships if rel.kind is RelationshipKind.CALLS
-    ]
-    assert any(
-        rel.source_id == outer_id and rel.target_id == inner_id for rel in calls
-    )
+    calls = [rel for rel in result.relationships if rel.kind is RelationshipKind.CALLS]
+    assert any(rel.source_id == outer_id and rel.target_id == inner_id for rel in calls)
     inner_calls = [rel for rel in calls if rel.source_id == inner_id]
     assert len(inner_calls) == 1
     assert classify_endpoint_id(inner_calls[0].target_id) is EndpointKind.UNRESOLVED
@@ -206,9 +194,7 @@ def test_module_variables_cover_annotation_chaining_and_unpacking(
 ) -> None:
     src = tmp_path / "vars.py"
     src.write_text(
-        "threshold: int = 3\n"
-        "primary = secondary = 'ready'\n"
-        "left, right = (1, 2)\n",
+        "threshold: int = 3\nprimary = secondary = 'ready'\nleft, right = (1, 2)\n",
         encoding="utf-8",
     )
     result = PythonParser().parse_file(src)
@@ -243,10 +229,7 @@ def test_local_assignments_are_not_treated_as_module_variables(
     """Only module-level assignments become entities; function-local names do not."""
     src = tmp_path / "assigns.py"
     src.write_text(
-        "GLOBAL = 1\n"
-        "def f():\n"
-        "    inner = 2\n"
-        "    other = 3\n",
+        "GLOBAL = 1\ndef f():\n    inner = 2\n    other = 3\n",
         encoding="utf-8",
     )
     result = PythonParser().parse_file(src)
@@ -283,9 +266,9 @@ def test_python_parser_output_is_deterministic(tmp_path: Path) -> None:
     second = PythonParser().parse_file(src)
 
     assert [e.id for e in first.entities] == [e.id for e in second.entities]
-    assert [
-        (r.source_id, r.target_id, r.kind) for r in first.relationships
-    ] == [(r.source_id, r.target_id, r.kind) for r in second.relationships]
+    assert [(r.source_id, r.target_id, r.kind) for r in first.relationships] == [
+        (r.source_id, r.target_id, r.kind) for r in second.relationships
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -310,8 +293,7 @@ def test_missing_file_is_reported_without_raising(tmp_path: Path) -> None:
 def test_imports_become_external_module_edges(tmp_path: Path) -> None:
     src = tmp_path / "imp.py"
     src.write_text(
-        "import os\n"
-        "from collections import OrderedDict\n",
+        "import os\nfrom collections import OrderedDict\n",
         encoding="utf-8",
     )
     result = PythonParser().parse_file(src)
@@ -330,7 +312,9 @@ def test_inheritance_emits_ref_edge_for_base(tmp_path: Path) -> None:
     """Inheritance is preserved as a ``ref::`` target so GraphBuilder can still
     link it to a local base entity."""
     src = tmp_path / "inh.py"
-    src.write_text("class Base:\n    pass\nclass Child(Base):\n    pass\n", encoding="utf-8")
+    src.write_text(
+        "class Base:\n    pass\nclass Child(Base):\n    pass\n", encoding="utf-8"
+    )
     result = PythonParser().parse_file(src)
     child = next(e for e in result.entities if e.qualified_name == "Child")
     inherits = [
@@ -348,11 +332,7 @@ def test_dotted_bases_and_attribute_calls_become_unresolved_references(
     local definition; they become scoped unresolved references."""
     src = tmp_path / "dotted.py"
     src.write_text(
-        "def f(pkg):\n"
-        "    pkg.run()\n"
-        "    a.b.c()\n"
-        "class Sub(a.b.Base):\n"
-        "    pass\n",
+        "def f(pkg):\n    pkg.run()\n    a.b.c()\nclass Sub(a.b.Base):\n    pass\n",
         encoding="utf-8",
     )
     result = PythonParser().parse_file(src)
@@ -398,8 +378,7 @@ def test_duplicate_module_variable_name_is_not_duplicated(tmp_path: Path) -> Non
 def test_signature_captures_annotations_varargs_and_kwargs(tmp_path: Path) -> None:
     src = tmp_path / "sig.py"
     src.write_text(
-        "def f(a: int, *args: str, **kwargs: float) -> bool:\n"
-        "    return True\n",
+        "def f(a: int, *args: str, **kwargs: float) -> bool:\n    return True\n",
         encoding="utf-8",
     )
     result = PythonParser().parse_file(src)
@@ -419,9 +398,7 @@ def test_lambda_body_calls_do_not_leak_into_enclosing_function(
     enclosing function."""
     src = tmp_path / "lam.py"
     src.write_text(
-        "def f():\n"
-        "    handler = lambda: handle()\n"
-        "    handler()\n",
+        "def f():\n    handler = lambda: handle()\n    handler()\n",
         encoding="utf-8",
     )
     result = PythonParser().parse_file(src)

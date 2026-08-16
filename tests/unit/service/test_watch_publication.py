@@ -276,9 +276,7 @@ def test_publishing_with_nothing_staged_is_a_no_op(
 # ----------------------------------------------------------------------
 
 
-def test_a_long_burst_publishes_at_the_batch_cap(
-    tmp_path: Path, backend: str
-) -> None:
+def test_a_long_burst_publishes_at_the_batch_cap(tmp_path: Path, backend: str) -> None:
     """A burst that never goes idle still publishes, bounding staleness."""
     src = _write(tmp_path, "alpha")
     service = _service(tmp_path, backend)
@@ -649,8 +647,9 @@ def test_a_watch_publication_carries_the_graph_across_unchanged(
     current = service.current_generation()
     assert current is not None
     assert generations.read_entity_ids(current.knowledge_db) == entities_before
-    assert current.manifest.counts["relationships"] == (
-        base.manifest.counts["relationships"]
+    assert (
+        current.manifest.counts["relationships"]
+        == (base.manifest.counts["relationships"])
     )
     # The chunk half *did* move, and the generation still validates as a whole.
     assert any("beta.py" in path for path in _indexed_files(service))

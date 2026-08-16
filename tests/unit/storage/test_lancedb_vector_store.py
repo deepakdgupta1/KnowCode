@@ -241,7 +241,9 @@ def test_absent_hostile_id_read_returns_none(hostile: str, make_store) -> None:
 
 
 @pytest.mark.parametrize("hostile", HOSTILE_IDS)
-def test_hostile_id_survives_save_and_load(hostile: str, tmp_path: Path, make_store) -> None:
+def test_hostile_id_survives_save_and_load(
+    hostile: str, tmp_path: Path, make_store
+) -> None:
     """A hostile ID round-trips through persistence as exact-match data."""
     store = make_store()
     store.add("safe", [0.0, 1.0])
@@ -462,11 +464,15 @@ def test_generation_advances_on_every_mutation(tmp_path: Path, make_store) -> No
     store.add("a", [1.0, 0.0])
     path = tmp_path / "vectors"
     store.save(path)
-    first = json.loads(path.with_suffix(".json").read_text(encoding="utf-8"))["generation"]
+    first = json.loads(path.with_suffix(".json").read_text(encoding="utf-8"))[
+        "generation"
+    ]
 
     store.remove("a")
     store.save(path)
-    second = json.loads(path.with_suffix(".json").read_text(encoding="utf-8"))["generation"]
+    second = json.loads(path.with_suffix(".json").read_text(encoding="utf-8"))[
+        "generation"
+    ]
 
     assert second > first
 
@@ -747,7 +753,9 @@ def test_constructing_on_a_legacy_table_fails_closed(tmp_path: Path) -> None:
 
 def test_loading_a_legacy_table_fails_closed(tmp_path: Path) -> None:
     path = tmp_path / "vectors"
-    _write_legacy_table(path.with_suffix(".lancedb"), [{"id": "a", "vector": [1.0, 0.0]}])
+    _write_legacy_table(
+        path.with_suffix(".lancedb"), [{"id": "a", "vector": [1.0, 0.0]}]
+    )
     _write_envelope(path)
 
     with pytest.raises(VectorArtifactVersionError):
@@ -857,7 +865,9 @@ def test_a_digest_collision_is_reported_not_silently_widened(
 ) -> None:
     """Two IDs sharing one key could not be addressed separately."""
     store = make_store()
-    monkeypatch.setattr(LanceDBVectorStore, "_digest", classmethod(lambda cls, _: "a" * 64))
+    monkeypatch.setattr(
+        LanceDBVectorStore, "_digest", classmethod(lambda cls, _: "a" * 64)
+    )
 
     store.add("first", [1.0, 0.0])
 
@@ -874,7 +884,9 @@ def test_loading_a_table_whose_ids_collide_fails_closed(
     path = tmp_path / "vectors"
     store.save(path)
 
-    monkeypatch.setattr(LanceDBVectorStore, "_digest", classmethod(lambda cls, _: "b" * 64))
+    monkeypatch.setattr(
+        LanceDBVectorStore, "_digest", classmethod(lambda cls, _: "b" * 64)
+    )
     with pytest.raises(VectorArtifactVersionError, match="share one exact-match key"):
         LanceDBVectorStore(dimension=2).load(path)
 
@@ -1002,9 +1014,7 @@ def test_save_leaves_no_temporary_files(make_store, tmp_path: Path) -> None:
     assert leftovers == []
 
 
-def test_load_rejects_a_truncated_metadata_envelope(
-    make_store, tmp_path: Path
-) -> None:
+def test_load_rejects_a_truncated_metadata_envelope(make_store, tmp_path: Path) -> None:
     """A half-written pre-Step-13 envelope fails closed with rebuild guidance."""
     store = make_store()
     store.add("c1", [1.0, 0.0])

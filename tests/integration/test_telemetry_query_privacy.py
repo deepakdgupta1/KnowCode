@@ -54,7 +54,10 @@ def _telemetry_files(root: Path) -> list[Path]:
 
 
 def _payload(root: Path) -> str:
-    return "".join(path.read_text(encoding="utf-8", errors="replace") for path in _telemetry_files(root))
+    return "".join(
+        path.read_text(encoding="utf-8", errors="replace")
+        for path in _telemetry_files(root)
+    )
 
 
 def test_a_query_containing_a_credential_leaves_neither_on_disk(
@@ -69,7 +72,9 @@ def test_a_query_containing_a_credential_leaves_neither_on_disk(
     assert "how does" not in payload
 
 
-def test_one_query_is_counted_exactly_once(service: KnowCodeService, tmp_path: Path) -> None:
+def test_one_query_is_counted_exactly_once(
+    service: KnowCodeService, tmp_path: Path
+) -> None:
     before = telemetry.get_telemetry_summary(tmp_path)["total_queries"]
 
     service.retrieve_context_for_query(QUERY)
@@ -78,14 +83,20 @@ def test_one_query_is_counted_exactly_once(service: KnowCodeService, tmp_path: P
     assert after == before + 1
 
 
-def test_every_telemetry_file_is_owner_only(service: KnowCodeService, tmp_path: Path) -> None:
+def test_every_telemetry_file_is_owner_only(
+    service: KnowCodeService, tmp_path: Path
+) -> None:
     service.retrieve_context_for_query(QUERY)
 
-    for path in _telemetry_files(tmp_path) + [telemetry_files.correlation_key_path(tmp_path)]:
+    for path in _telemetry_files(tmp_path) + [
+        telemetry_files.correlation_key_path(tmp_path)
+    ]:
         assert stat.S_IMODE(os.stat(path).st_mode) == 0o600, path
 
 
-def test_telemetry_lives_only_at_the_store_root(service: KnowCodeService, tmp_path: Path) -> None:
+def test_telemetry_lives_only_at_the_store_root(
+    service: KnowCodeService, tmp_path: Path
+) -> None:
     service.retrieve_context_for_query(QUERY)
 
     assert _telemetry_files(tmp_path) == [telemetry_files.telemetry_path(tmp_path)]
@@ -98,7 +109,9 @@ def test_the_query_event_is_readable_aggregate_metadata(
 
     records = [
         json.loads(line)
-        for line in telemetry_files.telemetry_path(tmp_path).read_text(encoding="utf-8").splitlines()
+        for line in telemetry_files.telemetry_path(tmp_path)
+        .read_text(encoding="utf-8")
+        .splitlines()
         if line.strip()
     ]
     queries = [record for record in records if record["event_type"] == "query"]

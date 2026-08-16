@@ -88,9 +88,7 @@ class TestBasicCRUD:
 class TestBM25Search:
     """FTS5-backed BM25 search should rank rare tokens higher than common ones."""
 
-    def test_search_by_tokens_bm25_ranking(
-        self, repo: SqliteChunkRepository
-    ) -> None:
+    def test_search_by_tokens_bm25_ranking(self, repo: SqliteChunkRepository) -> None:
         """Rare identifiers should rank higher than common tokens like 'self'.
 
         This is the critical quality test — the whole reason P0 exists.
@@ -124,9 +122,7 @@ class TestBM25Search:
         assert len(results) > 0
         assert results[0].id == "rare_chunk"
 
-    def test_search_by_tokens_respects_limit(
-        self, repo: SqliteChunkRepository
-    ) -> None:
+    def test_search_by_tokens_respects_limit(self, repo: SqliteChunkRepository) -> None:
         """Token search should respect the limit parameter."""
         for i in range(10):
             repo.add(
@@ -735,9 +731,11 @@ class TestSchemaVersioning:
     ) -> None:
         assert repo.schema_version == SqliteChunkRepository.SCHEMA_VERSION
         # schema_meta table is the source of truth on disk.
-        row = repo._reader_conn().execute(
-            "SELECT version FROM schema_meta LIMIT 1"
-        ).fetchone()
+        row = (
+            repo._reader_conn()
+            .execute("SELECT version FROM schema_meta LIMIT 1")
+            .fetchone()
+        )
         assert row is not None and row[0] == SqliteChunkRepository.SCHEMA_VERSION
 
     def test_chunks_table_has_embedding_columns(
@@ -745,7 +743,9 @@ class TestSchemaVersioning:
     ) -> None:
         columns = {
             row[1]
-            for row in repo._reader_conn().execute("PRAGMA table_info(chunks)").fetchall()
+            for row in repo._reader_conn()
+            .execute("PRAGMA table_info(chunks)")
+            .fetchall()
         }
         assert "embedding" in columns
         assert "embedding_dim" in columns
@@ -772,17 +772,17 @@ class TestSchemaVersioning:
         message = str(excinfo.value).lower()
         assert "rebuild" in message or "migration" in message
 
-    def test_load_initializes_schema_for_fresh_target(
-        self, tmp_path: Path
-    ) -> None:
+    def test_load_initializes_schema_for_fresh_target(self, tmp_path: Path) -> None:
         """load() into a directory without chunks.db must initialize the schema."""
         repo = SqliteChunkRepository(tmp_path / "start.db")
         repo.load(tmp_path / "fresh_dir")
         try:
             assert repo.schema_version == SqliteChunkRepository.SCHEMA_VERSION
-            row = repo._reader_conn().execute(
-                "SELECT version FROM schema_meta LIMIT 1"
-            ).fetchone()
+            row = (
+                repo._reader_conn()
+                .execute("SELECT version FROM schema_meta LIMIT 1")
+                .fetchone()
+            )
             assert row is not None
         finally:
             repo.close()
@@ -1087,9 +1087,11 @@ class TestSharedInstanceConcurrency:
         assert observed == [1]
         assert repo.schema_version == SqliteChunkRepository.SCHEMA_VERSION
         assert repo.count() == 0
-        row = repo._reader_conn().execute(
-            "SELECT version FROM schema_meta LIMIT 1"
-        ).fetchone()
+        row = (
+            repo._reader_conn()
+            .execute("SELECT version FROM schema_meta LIMIT 1")
+            .fetchone()
+        )
         assert row is not None and row[0] == SqliteChunkRepository.SCHEMA_VERSION
 
     def test_closed_repository_raises_on_operations(

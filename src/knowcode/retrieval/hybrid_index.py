@@ -22,7 +22,7 @@ class HybridIndex:
         self,
         chunk_repo: ChunkRepository,
         vector_store: VectorStoreProtocol,
-        alpha: float = 0.2  # Dense weight; 0.2 = sparse-heavy, matches AppConfig default
+        alpha: float = 0.2,  # Dense weight; 0.2 = sparse-heavy, matches AppConfig default
     ) -> None:
         """Initialize the hybrid index.
 
@@ -36,10 +36,7 @@ class HybridIndex:
         self.alpha = alpha
 
     def search(
-        self,
-        query: str,
-        query_embedding: list[float],
-        limit: int = 10
+        self, query: str, query_embedding: list[float], limit: int = 10
     ) -> list[tuple[CodeChunk, float]]:
         """Search using hybrid retrieval.
 

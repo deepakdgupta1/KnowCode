@@ -72,9 +72,7 @@ def create_app(
                 # A closed service must not stay reachable by a later request.
                 api._service = None
             if not report.completed:
-                logger.warning(
-                    "Server did not shut down cleanly: %s", report.as_dict()
-                )
+                logger.warning("Server did not shut down cleanly: %s", report.as_dict())
 
     app = FastAPI(
         title="KnowCode API",
@@ -93,12 +91,15 @@ def create_app(
 
     # Attach rate limiting middleware (must be after router inclusion)
     from knowcode.api.rate_limit import setup_rate_limiting
+
     setup_rate_limiting(app)
 
     return app
 
 
-def build_server(app: FastAPI, host: str = "127.0.0.1", port: int = 8000) -> uvicorn.Server:
+def build_server(
+    app: FastAPI, host: str = "127.0.0.1", port: int = 8000
+) -> uvicorn.Server:
     """Build the uvicorn server for ``app`` with the hardened proxy configuration.
 
     This is the single place the direct-server proxy-trust decision (ADR 6) is
@@ -123,7 +124,12 @@ def build_server(app: FastAPI, host: str = "127.0.0.1", port: int = 8000) -> uvi
     return uvicorn.Server(config)
 
 
-def start_server(host: str = "127.0.0.1", port: int = 8000, store_path: str = ".", watch: bool = False) -> None:
+def start_server(
+    host: str = "127.0.0.1",
+    port: int = 8000,
+    store_path: str = ".",
+    watch: bool = False,
+) -> None:
     """Start the uvicorn server with the configured app.
 
     Args:

@@ -170,6 +170,7 @@ def run_doctor(
     _check_agent_rules(context.store_root, checks)
     _check_unsupported_languages(context.store_root, checks)
     _check_freshness(context, checks)
+    _check_preflight_quality(context, checks)
 
     if include_mcp:
         checks.append(
@@ -658,9 +659,7 @@ def _check_index_generation(
         )
         return
 
-    checks.append(
-        DoctorCheck(name="Index generation", status="pass", message=message)
-    )
+    checks.append(DoctorCheck(name="Index generation", status="pass", message=message))
 
 
 def _check_semantic_index(context: ReadinessContext, checks: list[DoctorCheck]) -> None:
@@ -1247,6 +1246,97 @@ def _check_freshness(context: ReadinessContext, checks: list[DoctorCheck]) -> No
                     DoctorSuggestion(
                         label="Build KnowCode artifacts",
                         command=f"knowcode build {context.store_root}",
+                    ),
+                ),
+            )
+        )
+
+
+def _check_preflight_quality(
+    context: ReadinessContext,
+    checks: list[DoctorCheck],
+) -> None:
+    """Check the persisted pre-flight quality report for the target codebase."""
+    from knowcode.analysis.preflight_writer import load_preflight_report
+
+    # Try the current generation directory first, then the index root
+    report = None
+    if context.generation is not None:
+        report = load_preflight_report(context.generation.path)
+    if report is None:
+        report = load_preflight_report(context.index_path)
+
+    if report is None:
+        checks.append(
+            DoctorCheck(
+                name="Codebase Quality",
+                status="warn",
+                message="No pre-flight quality report found.",
+                hint=(
+                    "Run 'knowcode build' (which includes pre-flight by default) "
+                    "or 'knowcode preflight <dir>' for a standalone assessment."
+                ),
+                suggestions=(
+                    DoctorSuggestion(
+                        label="Run pre-flight assessment",
+                        command=f"knowcode preflight {context.store_root}",
+                    ),
+                ),
+            )
+        )
+        return
+
+    overall_score = report.get("overall_score", 0.0)
+    overall_grade = report.get("overall_grade", "?")
+
+    # Use the configured minimum or a sensible default
+    min_score = context.config.preflight.min_score
+    effective_threshold = min_score if min_score > 0.0 else 0.5
+
+    if overall_score >= effective_threshold:
+        low_dims = [
+            d for d in report.get("dimensions", []) if d.get("score", 1.0) < 0.5
+        ]
+        detail = ""
+        if low_dims:
+            names = ", ".join(
+                d.get("dimension", "").replace("_", " ") for d in low_dims[:3]
+            )
+            detail = f" (weak areas: {names})"
+        checks.append(
+            DoctorCheck(
+                name="Codebase Quality",
+                status="pass",
+                message=(
+                    f"Target codebase quality: {overall_grade} "
+                    f"({overall_score:.0%}){detail}."
+                ),
+            )
+        )
+    else:
+        recommendations = report.get("recommendations", [])
+        hint_parts = [
+            f"Quality score ({overall_score:.0%}) is below "
+            f"threshold ({effective_threshold:.0%})."
+        ]
+        if recommendations:
+            hint_parts.append(f"Top recommendation: {recommendations[0]}")
+
+        checks.append(
+            DoctorCheck(
+                name="Codebase Quality",
+                status="warn",
+                message=(
+                    f"Target codebase quality: {overall_grade} "
+                    f"({overall_score:.0%}) — KnowCode output accuracy "
+                    "may be reduced."
+                ),
+                hint=" ".join(hint_parts),
+                suggestions=(
+                    DoctorSuggestion(
+                        label="View full assessment",
+                        command=f"knowcode preflight {context.store_root}",
+                        detail="See per-dimension breakdowns and recommendations.",
                     ),
                 ),
             )

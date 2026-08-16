@@ -5,7 +5,13 @@ from pathlib import Path
 
 import pytest
 
-from knowcode.data_models import Entity, EntityKind, Location, Relationship, RelationshipKind
+from knowcode.data_models import (
+    Entity,
+    EntityKind,
+    Location,
+    Relationship,
+    RelationshipKind,
+)
 from knowcode.storage.knowledge_store import KnowledgeStore
 from knowcode.utils import atomic_write
 from knowcode.utils.atomic_write import TEMP_SUFFIX

@@ -38,7 +38,7 @@ class Agent:
 
     def __init__(self, service: KnowCodeService, config: AppConfig) -> None:
         """Initialize the agent.
-        
+
         Args:
             service: KnowCodeService instance for context retrieval.
             config: Application configuration containing model priorities.
@@ -53,11 +53,11 @@ class Agent:
         client_key = f"{config.provider}_{config.api_key_env}"
         if client_key in self.clients:
             return self.clients[client_key]
-            
+
         api_key = os.environ.get(config.api_key_env)
         if not api_key:
             return None
-            
+
         if config.provider == "google":
             client = _create_google_client(api_key)
         else:
@@ -67,9 +67,9 @@ class Agent:
                 base_url = "https://openrouter.ai/api/v1"
             elif config.provider in ("glm", "z-ai"):
                 base_url = os.environ.get("GLM_BASE_URL")
-            
+
             client = _create_openai_client(api_key=api_key, base_url=base_url)
-            
+
         self.clients[client_key] = client
         return client
 
@@ -89,7 +89,7 @@ class Agent:
 
         Returns:
             The agent's answer.
-            
+
         Raises:
             ValueError: If no API keys are set.
             Exception: If all models fail.
@@ -118,19 +118,21 @@ class Agent:
 
         # 3. Call LLM with Failover
         last_error = None
-        
+
         for model_config in self.config.models:
-            print(f"🤖 Trying model: {model_config.name} ({model_config.provider})...") 
-            
+            print(f"🤖 Trying model: {model_config.name} ({model_config.provider})...")
+
             # Check Rate Limit (Client-side)
             if not self.rate_limiter.check_availability(model_config):
                 # Warning already printed by check_availability
                 continue
 
             client = self._get_client(model_config)
-            
+
             if not client:
-                print(f"  ⚠️ Skipping {model_config.name}: {model_config.api_key_env} not set.")
+                print(
+                    f"  ⚠️ Skipping {model_config.name}: {model_config.api_key_env} not set."
+                )
                 continue
 
             try:
@@ -144,36 +146,48 @@ class Agent:
                 else:
                     # OpenAI / OpenRouter style
                     extra_headers = {}
-                    if "openrouter" in model_config.provider or model_config.provider == "mistralai":
-                         extra_headers = {
-                             "HTTP-Referer": "https://github.com/deepakdgupta1/KnowCode",
-                             "X-Title": "KnowCode",
-                         }
+                    if (
+                        "openrouter" in model_config.provider
+                        or model_config.provider == "mistralai"
+                    ):
+                        extra_headers = {
+                            "HTTP-Referer": "https://github.com/deepakdgupta1/KnowCode",
+                            "X-Title": "KnowCode",
+                        }
 
                     chat_completion = client.chat.completions.create(
                         model=model_config.name,
                         messages=openai_messages(request),
-                        extra_headers=extra_headers
+                        extra_headers=extra_headers,
                     )
-                    response_text = chat_completion.choices[0].message.content or "No response from LLM."
-                
+                    response_text = (
+                        chat_completion.choices[0].message.content
+                        or "No response from LLM."
+                    )
+
                 # Success! Record usage and return
                 self.rate_limiter.record_usage(model_config.name)
                 return response_text
-            
+
             except Exception as e:
                 if e.__class__.__name__ == "ResourceExhausted":
-                    print(f"  ⚠️ Rate limit exceeded (Server) for {model_config.name}. Switching...")
+                    print(
+                        f"  ⚠️ Rate limit exceeded (Server) for {model_config.name}. Switching..."
+                    )
                     last_error = e
                     continue
-                print(f"  ❌ Error with {model_config.name}: {format_provider_error(e)}")
+                print(
+                    f"  ❌ Error with {model_config.name}: {format_provider_error(e)}"
+                )
                 last_error = e
                 continue
 
         if last_error:
             raise last_error
-        
-        raise ValueError("No valid configuration found or all models skipped (check API keys or limits).")
+
+        raise ValueError(
+            "No valid configuration found or all models skipped (check API keys or limits)."
+        )
 
     def _retrieve_context(
         self,
@@ -226,11 +240,11 @@ class Agent:
         ``routing_quality_floor`` is a hard lower bound, so a policy may set a
         lower ``sufficiency_threshold`` but local answering is never permitted
         below the verified floor.
-        
+
         Args:
             query: User's question.
             force_llm: If True, always use LLM regardless of sufficiency.
-            
+
         Returns:
             Dict with:
                 - answer: The response text
@@ -242,9 +256,7 @@ class Agent:
         retrieval = self._retrieve_context(query)
         avg_sufficiency = float(retrieval.get("sufficiency_score", 0.0))
         context_str = retrieval.get("context_text", "")
-        initial_task_type = TaskType(
-            retrieval.get("task_type", TaskType.GENERAL.value)
-        )
+        initial_task_type = TaskType(retrieval.get("task_type", TaskType.GENERAL.value))
         can_route_locally = (
             initial_task_type.value in self.config.local_answer_task_types
         )
@@ -286,16 +298,14 @@ class Agent:
             context_str = retrieval.get("context_text", "")
 
         task_type = TaskType(retrieval.get("task_type", TaskType.GENERAL.value))
-        routing_policy_allowed = (
-            task_type.value in self.config.local_answer_task_types
-        )
+        routing_policy_allowed = task_type.value in self.config.local_answer_task_types
         confidence = float(retrieval.get("task_confidence", 0.0))
         print(f"  📋 Query type: {task_type.value} (confidence: {confidence:.0%})")
         print(
             f"  📊 Sufficiency: {avg_sufficiency:.0%} "
             f"(threshold: {threshold:.0%}, floor: {self.config.routing_quality_floor:.0%})"
         )
-        
+
         # 3. Decide: local answer or LLM
         if (
             not force_llm
@@ -305,9 +315,9 @@ class Agent:
         ):
             # Local-first: sufficient context found
             print("  ✅ Answering locally (sufficient context)")
-            
+
             local_answer = self._format_local_answer(query, task_type, context_str)
-            
+
             res = {
                 "answer": local_answer,
                 "source": "local",
@@ -320,9 +330,9 @@ class Agent:
         else:
             # Need LLM
             print("  🤖 Calling LLM (sufficiency below threshold or forced)")
-            
+
             llm_answer = self.answer(query, retrieval=retrieval)
-            
+
             res = {
                 "answer": llm_answer,
                 "source": "llm",
@@ -335,6 +345,7 @@ class Agent:
 
         try:
             from knowcode.telemetry import current_query_id, log_event
+
             log_event(
                 self.service.store_path,
                 {
@@ -352,14 +363,14 @@ class Agent:
                     "task_type": task_type.value,
                     "routing_policy_allowed": routing_policy_allowed,
                     "llm_tokens_saved": res["llm_tokens_saved"],
-                }
+                },
             )
         except Exception as e:
             import logging
+
             logging.getLogger(__name__).warning("Ignored exception: %s", e)
 
         return res
-
 
     def _format_local_answer(
         self,
@@ -368,17 +379,17 @@ class Agent:
         context: str,
     ) -> str:
         """Format a local answer without LLM.
-        
+
         For simple queries like 'locate', we can answer directly from context.
         For more complex queries, we format the context nicely.
         """
         if task_type == TaskType.LOCATE:
             # Extract locations from context
             return f"**Found in codebase:**\n\n{context}"
-        
+
         elif task_type == TaskType.EXPLAIN:
             return f"**Based on the codebase context:**\n\n{context}\n\n*Note: This is a local answer based on retrieved context. For more detailed explanations, use `force_llm=True`.*"
-        
+
         else:
             # General format
             return f"**Relevant context from codebase:**\n\n{context}\n\n*Local answer based on high-confidence context match. Use `force_llm=True` for LLM-enhanced responses.*"

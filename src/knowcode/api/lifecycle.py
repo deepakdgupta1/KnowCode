@@ -323,7 +323,9 @@ class ServerResources:
             return StageOutcome("telemetry", ok=False, detail=str(exc))
         if drained:
             return StageOutcome("telemetry", ok=True)
-        return StageOutcome("telemetry", ok=False, detail="pending writes were not drained")
+        return StageOutcome(
+            "telemetry", ok=False, detail="pending writes were not drained"
+        )
 
     @staticmethod
     def _run_stage(name: str, action: Callable[[], None]) -> StageOutcome:

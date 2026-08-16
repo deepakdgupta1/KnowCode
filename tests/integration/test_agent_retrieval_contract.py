@@ -96,7 +96,9 @@ class ContractService:
         }
 
 
-def _make_agent(service: ContractService, threshold: float = 0.8, floor: float = 0.9) -> Agent:
+def _make_agent(
+    service: ContractService, threshold: float = 0.8, floor: float = 0.9
+) -> Agent:
     config = AppConfig(
         models=[
             ModelConfig(

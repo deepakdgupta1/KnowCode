@@ -261,9 +261,7 @@ class BackgroundIndexer:
 
     def drain(self, timeout: float = 5.0) -> DrainReport:
         """Wait for the queue to empty without stopping the worker."""
-        return self._report(
-            completed=self._queue.join(timeout) and not self.failures()
-        )
+        return self._report(completed=self._queue.join(timeout) and not self.failures())
 
     def join(self, timeout: float = 5.0) -> bool:
         """Wait for the worker thread to terminate.

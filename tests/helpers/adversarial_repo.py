@@ -122,7 +122,7 @@ def validate(item: str) -> str:
 '''
 
 
-_JS_APP = f'''\
+_JS_APP = f"""\
 // {HOSTILE_MARKERS[2]}
 class Widget extends BaseComponent {{
   render() {{
@@ -137,10 +137,10 @@ class Widget extends BaseComponent {{
 export function boot() {{
   return new Widget();
 }}
-'''
+"""
 
 
-_TS_SVC = '''\
+_TS_SVC = """\
 export interface User {
   id: number;
   name: string;
@@ -166,10 +166,10 @@ export function load(u: User): UserId {
 }
 
 export const make = (id: UserId): User => ({ id, name: "x" });
-'''
+"""
 
 
-_VUE_WIDGET = '''\
+_VUE_WIDGET = """\
 <template lang="html" class="root">
   <button @click="onClick">{{ label }}</button>
 </template>
@@ -190,10 +190,10 @@ button {
   color: v-bind(label);
 }
 </style>
-'''
+"""
 
 
-_RS_CORE = f'''\
+_RS_CORE = f"""\
 // {HOSTILE_MARKERS[2]}
 impl Core {{
     pub fn double(&self) -> i32 {{
@@ -214,7 +214,7 @@ impl Render for Core {{
         format!("{{}}", self.double())
     }}
 }}
-'''
+"""
 
 
 _PY_EXOTIC = f'''\

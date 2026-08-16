@@ -90,8 +90,10 @@ def _validate_subject(artifact: Mapping[str, Any]) -> None:
     if product_version != installed_version:
         raise ValueError("Blessed artifact targets a different KnowCode version.")
     revision = subject.get("source_revision")
-    if not isinstance(revision, str) or len(revision) != 40 or not all(
-        character in "0123456789abcdef" for character in revision.lower()
+    if (
+        not isinstance(revision, str)
+        or len(revision) != 40
+        or not all(character in "0123456789abcdef" for character in revision.lower())
     ):
         raise ValueError("Blessed artifact lacks a valid product source revision.")
 
@@ -109,7 +111,9 @@ def _validate_internal_dataset(artifact: Mapping[str, Any]) -> None:
         or isinstance(dataset.get("case_count"), bool)
         or int(dataset["case_count"]) < 29
     ):
-        raise ValueError("Blessed artifact contains an invalid locked holdout identity.")
+        raise ValueError(
+            "Blessed artifact contains an invalid locked holdout identity."
+        )
 
 
 def _validate_external_datasets(artifact: Mapping[str, Any]) -> None:
@@ -151,7 +155,9 @@ def _validate_judges(artifact: Mapping[str, Any]) -> None:
             raise ValueError("Blessed artifact contains an incomplete judge identity.")
         providers.add(str(provider))
     if providers != {"openai", "google"}:
-        raise ValueError("Blessed artifact requires independent OpenAI and Google judges.")
+        raise ValueError(
+            "Blessed artifact requires independent OpenAI and Google judges."
+        )
 
 
 def _validate_evidence(artifact: Mapping[str, Any]) -> float:

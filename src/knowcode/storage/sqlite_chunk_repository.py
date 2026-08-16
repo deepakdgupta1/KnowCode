@@ -49,8 +49,7 @@ logger = get_logger(__name__)
 # Columns selected for every CodeChunk hydration, in the order ``_row_to_chunk``
 # unpacks them. Keep the INSERT column list in the same relative order.
 _SELECT_COLUMNS = (
-    "chunk_id, entity_id, content, tokens_text, metadata_json, "
-    "embedding, embedding_dim"
+    "chunk_id, entity_id, content, tokens_text, metadata_json, embedding, embedding_dim"
 )
 _INSERT_SQL = (
     "INSERT OR REPLACE INTO chunks "
@@ -95,9 +94,7 @@ class SqliteChunkRepository(ChunkRepository):
         """
         self._db_path = Path(db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._configured_dimension = (
-            int(dimension) if dimension is not None else None
-        )
+        self._configured_dimension = int(dimension) if dimension is not None else None
 
         # An in-memory database (``:memory:``) is per-connection, so the
         # writer/reader split would hand readers an isolated empty database.
@@ -105,9 +102,7 @@ class SqliteChunkRepository(ChunkRepository):
         # connection of this one instance shares a single in-memory database
         # (file-backed databases are unaffected and keep their WAL isolation).
         self._in_memory = str(self._db_path) == ":memory:"
-        self._in_memory_uri = (
-            f"file:knowcode_chunk_{id(self)}?mode=memory&cache=shared"
-        )
+        self._in_memory_uri = f"file:knowcode_chunk_{id(self)}?mode=memory&cache=shared"
 
         # Serialized writer connection (ADR 2). ``isolation_level="DEFERRED"``
         # is deferred mode so ``with self._writer_conn:`` issues a real
@@ -359,9 +354,7 @@ class SqliteChunkRepository(ChunkRepository):
             END;
         """)
 
-        self._writer_conn.execute(
-            "CREATE TABLE schema_meta (version INTEGER NOT NULL)"
-        )
+        self._writer_conn.execute("CREATE TABLE schema_meta (version INTEGER NOT NULL)")
         self._writer_conn.execute(
             "INSERT INTO schema_meta (version) VALUES (?)",
             (self.SCHEMA_VERSION,),
@@ -371,9 +364,7 @@ class SqliteChunkRepository(ChunkRepository):
         """Fail closed when an existing chunks table predates durable embeddings."""
         columns = {
             row[1]
-            for row in self._writer_conn.execute(
-                "PRAGMA table_info(chunks)"
-            ).fetchall()
+            for row in self._writer_conn.execute("PRAGMA table_info(chunks)").fetchall()
         }
         if "embedding" not in columns or "embedding_dim" not in columns:
             raise ValueError(
@@ -485,8 +476,10 @@ class SqliteChunkRepository(ChunkRepository):
         """
         tokens_text = " ".join(chunk.tokens) if chunk.tokens else ""
         metadata_json = json.dumps(chunk.metadata) if chunk.metadata else "{}"
-        stored_path = file_path if file_path is not None else (
-            self._file_path_from_entity_id(chunk.entity_id)
+        stored_path = (
+            file_path
+            if file_path is not None
+            else (self._file_path_from_entity_id(chunk.entity_id))
         )
         embedding_blob, embedding_dim = self._encode_embedding(chunk.embedding)
         return (
@@ -609,7 +602,7 @@ class SqliteChunkRepository(ChunkRepository):
         try:
             with self._read_lease() as conn:
                 cursor = conn.execute(
-                    f"""SELECT c.{_SELECT_COLUMNS.replace(', ', ', c.')}
+                    f"""SELECT c.{_SELECT_COLUMNS.replace(", ", ", c.")}
                        FROM chunks_fts fts
                        JOIN chunks c ON c.rowid = fts.rowid
                        WHERE chunks_fts MATCH ?
@@ -847,9 +840,7 @@ class SqliteChunkRepository(ChunkRepository):
             try:
                 self._writer_conn.close()
             except sqlite3.ProgrammingError as e:
-                logger.debug(
-                    "Writer connection already closed during re-load: %s", e
-                )
+                logger.debug("Writer connection already closed during re-load: %s", e)
             self._db_path = db_path
             self._db_path.parent.mkdir(parents=True, exist_ok=True)
             self._in_memory = str(self._db_path) == ":memory:"

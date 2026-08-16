@@ -375,9 +375,13 @@ def trace_calls(
     how many hops from the starting entity.
     """
     from typing import cast
-    return cast(list[dict[str, Any]], service.store.trace_calls(
-        entity_id, direction=direction.value, depth=depth, max_results=max_results
-    ))
+
+    return cast(
+        list[dict[str, Any]],
+        service.store.trace_calls(
+            entity_id, direction=direction.value, depth=depth, max_results=max_results
+        ),
+    )
 
 
 @router.get("/impact/{entity_id:path}", summary="Impact Analysis")
@@ -399,4 +403,7 @@ def get_impact(
     - risk_score: 0.0-1.0 indicating modification risk
     """
     from typing import cast
-    return cast(dict[str, Any], service.store.get_impact(entity_id, max_depth=max_depth))
+
+    return cast(
+        dict[str, Any], service.store.get_impact(entity_id, max_depth=max_depth)
+    )

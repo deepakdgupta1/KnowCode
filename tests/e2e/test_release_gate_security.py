@@ -165,9 +165,7 @@ def test_a_provider_error_quoting_the_repo_is_bounded(service: KnowCodeService) 
 
 def _telemetry_payload(root: Path) -> str:
     files = sorted(root.rglob("*.jsonl*"))
-    return "".join(
-        path.read_text(encoding="utf-8", errors="replace") for path in files
-    )
+    return "".join(path.read_text(encoding="utf-8", errors="replace") for path in files)
 
 
 def test_repository_sourced_secret_is_never_persisted_by_telemetry(

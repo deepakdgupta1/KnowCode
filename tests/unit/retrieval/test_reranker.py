@@ -31,12 +31,20 @@ def test_rerank_empty_chunks() -> None:
 
 def test_signal_based_reranking_heuristics() -> None:
     """Signal-based reranking should apply boosts for docstrings and exact matches."""
-    c1 = CodeChunk(id="c1", entity_id="e1", content="def foo(): pass", tokens=[], metadata={})
-    c2 = CodeChunk(id="c2", entity_id="e2", content="def bar(): pass", tokens=[], metadata={"has_docstring": "true"})
-    
+    c1 = CodeChunk(
+        id="c1", entity_id="e1", content="def foo(): pass", tokens=[], metadata={}
+    )
+    c2 = CodeChunk(
+        id="c2",
+        entity_id="e2",
+        content="def bar(): pass",
+        tokens=[],
+        metadata={"has_docstring": "true"},
+    )
+
     reranker = Reranker(use_voyageai=False)
     chunks = [(c1, 0.5), (c2, 0.5)]
-    
+
     # c2 should rank higher due to has_docstring metadata boost (1.2x)
     results = reranker.rerank("query", chunks)
     assert results[0][0].id == "c2"
@@ -45,12 +53,20 @@ def test_signal_based_reranking_heuristics() -> None:
 
 def test_signal_based_reranking_query_match() -> None:
     """Signal-based reranking should boost exact query matches in content."""
-    c1 = CodeChunk(id="c1", entity_id="e1", content="some random code", tokens=[], metadata={})
-    c2 = CodeChunk(id="c2", entity_id="e2", content="this matches secret_function", tokens=[], metadata={})
-    
+    c1 = CodeChunk(
+        id="c1", entity_id="e1", content="some random code", tokens=[], metadata={}
+    )
+    c2 = CodeChunk(
+        id="c2",
+        entity_id="e2",
+        content="this matches secret_function",
+        tokens=[],
+        metadata={},
+    )
+
     reranker = Reranker(use_voyageai=False)
     chunks = [(c1, 0.5), (c2, 0.5)]
-    
+
     # c2 should rank higher due to exact match boost (1.5x)
     results = reranker.rerank("secret_function", chunks)
     assert results[0][0].id == "c2"
@@ -63,13 +79,13 @@ def test_voyageai_rerank_fallback_on_failure(mock_get_client: MagicMock) -> None
     mock_client = MagicMock()
     mock_client.rerank.side_effect = Exception("API Error")
     mock_get_client.return_value = mock_client
-    
+
     reranker = Reranker(use_voyageai=True, api_key_env="TEST_KEY")
-    reranker.voyage_client = mock_client # Force client assignment
-    
+    reranker.voyage_client = mock_client  # Force client assignment
+
     c1 = CodeChunk(id="c1", entity_id="e1", content="A", tokens=[])
     chunks = [(c1, 0.5)]
-    
+
     # Should not raise, but fallback
     results = reranker.rerank("query", chunks)
     assert len(results) == 1
@@ -82,7 +98,7 @@ def test_rerank_top_k_truncation() -> None:
     c2 = CodeChunk(id="c2", entity_id="e2", content="B", tokens=[])
     reranker = Reranker(use_voyageai=False)
     chunks = [(c1, 0.5), (c2, 0.4)]
-    
+
     results = reranker.rerank("query", chunks, top_k=1)
     assert len(results) == 1
     assert results[0][0].id == "c1"

@@ -487,9 +487,7 @@ class PythonParser:
         return {"decorators": decorators}
 
     @staticmethod
-    def _source_lines(
-        source_lines: list[str], start_line: int, end_line: int
-    ) -> str:
+    def _source_lines(source_lines: list[str], start_line: int, end_line: int) -> str:
         return "\n".join(source_lines[start_line - 1 : end_line])
 
     @staticmethod

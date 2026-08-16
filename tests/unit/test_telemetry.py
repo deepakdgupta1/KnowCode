@@ -72,12 +72,16 @@ def _query_event(store: Path, **overrides: Any) -> None:
 # ----------------------------------------------------------------------
 
 
-def test_every_record_carries_the_schema_version_and_a_timestamp(tmp_path: Path) -> None:
+def test_every_record_carries_the_schema_version_and_a_timestamp(
+    tmp_path: Path,
+) -> None:
     """A reader must be able to tell the new schema from legacy JSONL."""
     _query_event(tmp_path)
 
     record = _records(tmp_path)[0]
-    assert record["telemetry_schema_version"] == telemetry_policy.TELEMETRY_SCHEMA_VERSION
+    assert (
+        record["telemetry_schema_version"] == telemetry_policy.TELEMETRY_SCHEMA_VERSION
+    )
     assert record["event_type"] == telemetry_policy.QUERY_EVENT
     assert isinstance(record["timestamp"], int)
 
@@ -111,7 +115,9 @@ def test_an_unknown_event_type_is_rejected_rather_than_written(tmp_path: Path) -
     assert telemetry.dropped_event_count() == before + 1
 
 
-def test_a_raw_query_field_is_dropped_even_when_a_caller_passes_one(tmp_path: Path) -> None:
+def test_a_raw_query_field_is_dropped_even_when_a_caller_passes_one(
+    tmp_path: Path,
+) -> None:
     """Defense in depth: the sink refuses raw text no matter who sends it."""
     telemetry.log_event(
         tmp_path,
@@ -189,7 +195,8 @@ def test_a_separate_event_type_is_not_counted_as_a_query(tmp_path: Path) -> None
     """`agent_decision` describes an already-counted query."""
     _query_event(tmp_path)
     telemetry.log_event(
-        tmp_path, {"event_type": "agent_decision", "source": "llm", "task_type": "explain"}
+        tmp_path,
+        {"event_type": "agent_decision", "source": "llm", "task_type": "explain"},
     )
 
     summary = telemetry.get_telemetry_summary(tmp_path)
@@ -253,7 +260,9 @@ def test_an_unresolvable_store_path_drops_the_event(tmp_path: Path) -> None:
     before_bytes = cwd_log.read_bytes() if cwd_log.exists() else None
     before = telemetry.dropped_event_count()
 
-    telemetry.log_event(None, {"event_type": "reranker_latency", "method": "signal_based"})
+    telemetry.log_event(
+        None, {"event_type": "reranker_latency", "method": "signal_based"}
+    )
 
     assert telemetry.dropped_event_count() == before + 1
     assert (cwd_log.read_bytes() if cwd_log.exists() else None) == before_bytes
@@ -264,10 +273,17 @@ def test_an_event_without_a_store_path_uses_the_active_scope(tmp_path: Path) -> 
     with telemetry.query_scope(tmp_path, query="q"):
         telemetry.log_event(
             None,
-            {"event_type": "reranker_latency", "method": "signal_based", "num_chunks": 3},
+            {
+                "event_type": "reranker_latency",
+                "method": "signal_based",
+                "num_chunks": 3,
+            },
         )
 
-    assert [r["event_type"] for r in _records(tmp_path)] == ["reranker_latency", "query"]
+    assert [r["event_type"] for r in _records(tmp_path)] == [
+        "reranker_latency",
+        "query",
+    ]
 
 
 # ----------------------------------------------------------------------
@@ -300,7 +316,9 @@ def test_an_existing_loose_log_file_is_tightened(tmp_path: Path) -> None:
     assert stat.S_IMODE(os.stat(log).st_mode) == 0o600
 
 
-def test_the_log_rotates_at_the_size_bound(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_log_rotates_at_the_size_bound(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Unbounded growth is the retention defect; rotation is the bound."""
     monkeypatch.setattr(telemetry_files, "MAX_FILE_BYTES", 400)
 
@@ -312,7 +330,9 @@ def test_the_log_rotates_at_the_size_bound(tmp_path: Path, monkeypatch: pytest.M
     assert telemetry_files.rotation_path(log, 1).exists()
 
 
-def test_rotation_keeps_a_bounded_number_of_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_rotation_keeps_a_bounded_number_of_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Total on-disk telemetry is bounded, not merely chunked."""
     monkeypatch.setattr(telemetry_files, "MAX_FILE_BYTES", 200)
     monkeypatch.setattr(telemetry_files, "MAX_ROTATIONS", 2)
@@ -340,7 +360,9 @@ def test_retention_deletes_rotations_older_than_the_window(
     assert not stale.exists()
 
 
-def test_the_summary_reads_rotated_files_too(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_summary_reads_rotated_files_too(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Rotation must not silently reset the trend the summary reports.
 
     A query record is ~390 bytes, so this bound holds three per file: eight
@@ -356,7 +378,9 @@ def test_the_summary_reads_rotated_files_too(tmp_path: Path, monkeypatch: pytest
     assert telemetry.get_telemetry_summary(tmp_path)["total_queries"] == 8
 
 
-def test_delete_telemetry_removes_every_artifact(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_delete_telemetry_removes_every_artifact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """One documented operation, no leftovers, including the correlation key."""
     monkeypatch.setenv("KNOWCODE_TELEMETRY_RAW", "1")
     monkeypatch.setattr(telemetry_files, "MAX_FILE_BYTES", 200)
@@ -400,17 +424,26 @@ def test_raw_capture_opt_in_writes_a_separate_warned_file(
         _query_event(tmp_path)
 
     raw = telemetry_files.raw_telemetry_path(tmp_path)
-    assert json.loads(raw.read_text(encoding="utf-8").strip())["query"] == "who calls place_order?"
+    assert (
+        json.loads(raw.read_text(encoding="utf-8").strip())["query"]
+        == "who calls place_order?"
+    )
     assert stat.S_IMODE(os.stat(raw).st_mode) == 0o600
-    assert "place_order" not in telemetry_files.telemetry_path(tmp_path).read_text(encoding="utf-8")
+    assert "place_order" not in telemetry_files.telemetry_path(tmp_path).read_text(
+        encoding="utf-8"
+    )
     assert any("raw" in message.lower() for message in caplog.messages)
 
 
-def test_raw_capture_still_redacts_secrets(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_raw_capture_still_redacts_secrets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Opting into raw text is not opting into storing credentials."""
     monkeypatch.setenv("KNOWCODE_TELEMETRY_RAW", "1")
 
-    with telemetry.query_scope(tmp_path, query="deploy with sk-ant-api03-XXXXXXXXXXXXXXXXXXXX"):
+    with telemetry.query_scope(
+        tmp_path, query="deploy with sk-ant-api03-XXXXXXXXXXXXXXXXXXXX"
+    ):
         pass
 
     payload = telemetry_files.raw_telemetry_path(tmp_path).read_text(encoding="utf-8")
@@ -423,7 +456,9 @@ def test_raw_capture_still_redacts_secrets(tmp_path: Path, monkeypatch: pytest.M
 # ----------------------------------------------------------------------
 
 
-def test_the_pending_queue_is_bounded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_pending_queue_is_bounded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Telemetry drops rather than growing without bound behind a slow disk."""
     monkeypatch.delenv("KNOWCODE_TESTING", raising=False)
     monkeypatch.setattr(telemetry, "MAX_PENDING_EVENTS", 4)
@@ -439,7 +474,9 @@ def test_the_pending_queue_is_bounded(tmp_path: Path, monkeypatch: pytest.Monkey
     monkeypatch.setattr(telemetry, "_write_event_sync", blocking_write)
     before = telemetry.dropped_event_count()
     for _ in range(20):
-        telemetry.log_event(tmp_path, {"event_type": "reranker_latency", "num_chunks": 1})
+        telemetry.log_event(
+            tmp_path, {"event_type": "reranker_latency", "num_chunks": 1}
+        )
     release.set()
 
     assert telemetry.shutdown_telemetry(timeout=TIMEOUT)
@@ -456,6 +493,7 @@ def test_a_write_failure_is_isolated_from_the_query_path(tmp_path: Path) -> None
 
 def test_concurrent_writers_produce_whole_lines(tmp_path: Path) -> None:
     """Interleaved appends must stay parseable JSONL."""
+
     def emit() -> None:
         for _ in range(20):
             _query_event(tmp_path)
@@ -488,7 +526,12 @@ def test_summary_of_an_empty_store(tmp_path: Path) -> None:
 def test_summary_aggregates_the_new_schema(tmp_path: Path) -> None:
     _query_event(tmp_path, local_or_escalated="local", sufficiency_score=0.8)
     _query_event(tmp_path, local_or_escalated="escalated", sufficiency_score=0.4)
-    _query_event(tmp_path, local_or_escalated="local", sufficiency_score=0.9, user_marked_miss=True)
+    _query_event(
+        tmp_path,
+        local_or_escalated="local",
+        sufficiency_score=0.9,
+        user_marked_miss=True,
+    )
 
     summary = telemetry.get_telemetry_summary(tmp_path)
 
@@ -503,7 +546,12 @@ def test_summary_still_reads_legacy_records(tmp_path: Path) -> None:
     legacy = [
         {"query": "Q1", "local_or_escalated": "local", "sufficiency_score": 0.8},
         {"query": "Q2", "local_or_escalated": "escalated", "sufficiency_score": 0.4},
-        {"query": "Q3", "source": "local", "sufficiency_score": 0.9, "user_marked_miss": True},
+        {
+            "query": "Q3",
+            "source": "local",
+            "sufficiency_score": 0.9,
+            "user_marked_miss": True,
+        },
     ]
     telemetry_files.telemetry_path(tmp_path).write_text(
         "".join(json.dumps(event) + "\n" for event in legacy), encoding="utf-8"
@@ -519,7 +567,9 @@ def test_summary_still_reads_legacy_records(tmp_path: Path) -> None:
 
 def test_a_corrupt_line_does_not_break_the_summary(tmp_path: Path) -> None:
     _query_event(tmp_path)
-    with open(telemetry_files.telemetry_path(tmp_path), "a", encoding="utf-8") as handle:
+    with open(
+        telemetry_files.telemetry_path(tmp_path), "a", encoding="utf-8"
+    ) as handle:
         handle.write("{not json\n")
 
     assert telemetry.get_telemetry_summary(tmp_path)["total_queries"] == 1
@@ -542,7 +592,10 @@ def test_a_relative_store_path_resolves_to_the_working_directory(
 
     _query_event(Path("."))
 
-    assert telemetry_files.telemetry_path(".") == tmp_path / telemetry_files.TELEMETRY_FILENAME
+    assert (
+        telemetry_files.telemetry_path(".")
+        == tmp_path / telemetry_files.TELEMETRY_FILENAME
+    )
     assert telemetry.get_telemetry_summary(".")["total_queries"] == 1
 
 
@@ -585,7 +638,9 @@ def test_an_unserializable_sanitized_event_is_dropped(tmp_path: Path) -> None:
     assert telemetry.dropped_event_count() == before + 1
 
 
-def test_a_failing_raw_write_is_isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_failing_raw_write_is_isolated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Opt-in capture must not be able to fail the query that enabled it."""
     monkeypatch.setenv("KNOWCODE_TELEMETRY_RAW", "1")
     telemetry_files.raw_telemetry_path(tmp_path).mkdir()  # a directory, not a file
@@ -597,7 +652,9 @@ def test_a_failing_raw_write_is_isolated(tmp_path: Path, monkeypatch: pytest.Mon
     assert len(_records(tmp_path)) == 1
 
 
-def test_an_unreadable_summary_reports_empty(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_an_unreadable_summary_reports_empty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A summary failure is reported as no data, never as an exception."""
     _query_event(tmp_path)
 

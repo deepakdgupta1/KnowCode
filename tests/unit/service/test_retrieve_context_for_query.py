@@ -244,6 +244,7 @@ def test_ensure_index_builds_only_when_missing(tmp_path: Path) -> None:
     service.ensure_index()
     assert service.build_index_calls == 1
 
+
 def test_retrieve_context_routes_quoted_query_to_exact_engine(tmp_path: Path) -> None:
     _write_store_file(tmp_path)
     (tmp_path / "knowcode_index").mkdir()

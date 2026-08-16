@@ -3,9 +3,9 @@
 import re
 
 # Pre-compiled patterns for performance.
-_CAMEL_SPLIT_RE = re.compile(r'([a-z])([A-Z])')
-_PUNCT_RE = re.compile(r'[^\w\s]')
-_IDENTIFIER_RE = re.compile(r'[a-zA-Z_][a-zA-Z0-9_]*')
+_CAMEL_SPLIT_RE = re.compile(r"([a-z])([A-Z])")
+_PUNCT_RE = re.compile(r"[^\w\s]")
+_IDENTIFIER_RE = re.compile(r"[a-zA-Z_][a-zA-Z0-9_]*")
 
 
 def tokenize_code(text: str) -> list[str]:
@@ -34,17 +34,17 @@ def tokenize_code(text: str) -> list[str]:
     for match in _IDENTIFIER_RE.finditer(text):
         identifier = match.group()
         # Only care about multi-word identifiers (camelCase or snake_case).
-        if '_' in identifier or _CAMEL_SPLIT_RE.search(identifier):
-            joined = re.sub(r'_', '', identifier).lower()
+        if "_" in identifier or _CAMEL_SPLIT_RE.search(identifier):
+            joined = re.sub(r"_", "", identifier).lower()
             if len(joined) > 1:
                 compounds.append(joined)
 
     # 2. Split camelCase
-    text = _CAMEL_SPLIT_RE.sub(r'\1 \2', text)
+    text = _CAMEL_SPLIT_RE.sub(r"\1 \2", text)
     # 3. Split snake_case
-    text = text.replace('_', ' ')
+    text = text.replace("_", " ")
     # 4. Remove punctuation except spaces
-    text = _PUNCT_RE.sub(' ', text)
+    text = _PUNCT_RE.sub(" ", text)
     # 5. Lowercase and split
     tokens = text.lower().split()
     # 6. Filter short tokens

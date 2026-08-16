@@ -260,7 +260,9 @@ class GenerationBundle:
             self._search_engine = None
 
         if indexer is not None:
-            self._close_quietly(getattr(indexer, "chunk_repo", None), "chunk repository")
+            self._close_quietly(
+                getattr(indexer, "chunk_repo", None), "chunk repository"
+            )
             self._close_quietly(getattr(indexer, "vector_store", None), "vector store")
         # The JSON knowledge store holds no connection and has no ``close``.
         self._close_quietly(store, "knowledge store")

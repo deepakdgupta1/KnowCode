@@ -22,7 +22,7 @@ _DRIFT = 2
 
 def _reconstruct(text: str, chunk) -> str:
     lines = text.splitlines()
-    return "\n".join(lines[chunk.start_line - 1:chunk.end_line]).strip("\n")
+    return "\n".join(lines[chunk.start_line - 1 : chunk.end_line]).strip("\n")
 
 
 def test_frontmatter_parsed_with_correct_body_offset():
@@ -56,7 +56,9 @@ def test_heading_hierarchy_builds_breadcrumb_paths():
 
 def test_parent_child_linkage_follows_nesting():
     text = "# A\nx\n## B\ny\n"
-    sections = {s.heading_path: s for s in _build_sections(text.splitlines(), 1, "d.md", "D")}
+    sections = {
+        s.heading_path: s for s in _build_sections(text.splitlines(), 1, "d.md", "D")
+    }
     a = sections[("A",)]
     b = sections[("A", "B")]
     assert a.parent_id == "d.md::sec::_root"
@@ -87,7 +89,9 @@ def test_table_kept_as_single_block():
 def test_context_header_includes_title_and_path():
     text = "# Requirements\n## Rate Limiting\nThe cap is five retries.\n"
     chunks = ProseChunker().chunk_text(text, "prd/atlas.md")
-    leaf = next(c for c in chunks if c.heading_path == ("Requirements", "Rate Limiting"))
+    leaf = next(
+        c for c in chunks if c.heading_path == ("Requirements", "Rate Limiting")
+    )
     assert leaf.context_header == "atlas > Requirements > Rate Limiting"
     assert leaf.embedding_text.startswith(leaf.context_header)
 

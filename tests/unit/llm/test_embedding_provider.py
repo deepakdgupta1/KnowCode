@@ -66,11 +66,15 @@ def test_voyage_provider_uses_asymmetric_input_types() -> None:
     captured: list[dict[str, Any]] = []
 
     class _FakeClient:
-        def embed(self, texts: list[str], model: str, input_type: str) -> list[list[float]]:
+        def embed(
+            self, texts: list[str], model: str, input_type: str
+        ) -> list[list[float]]:
             captured.append({"texts": texts, "model": model, "input_type": input_type})
             return [[0.1, 0.2, 0.3] for _ in texts]
 
-    cfg = EmbeddingConfig(provider="voyageai", model_name="voyage-3-large", dimension=1024)
+    cfg = EmbeddingConfig(
+        provider="voyageai", model_name="voyage-3-large", dimension=1024
+    )
     provider = VoyageAIEmbeddingProvider(cfg)
     provider.client = _FakeClient()  # bypass network/credentials
 
@@ -149,10 +153,18 @@ def test_create_prose_provider_uses_prose_model_when_configured(
     monkeypatch.setenv("VOYAGE_API_KEY_1", "test-key")
     app_config = AppConfig(
         embedding_models=[
-            ModelConfig(name="voyage-code-3", provider="voyageai", api_key_env="VOYAGE_API_KEY_1")
+            ModelConfig(
+                name="voyage-code-3",
+                provider="voyageai",
+                api_key_env="VOYAGE_API_KEY_1",
+            )
         ],
         prose_embedding_models=[
-            ModelConfig(name="voyage-3-large", provider="voyageai", api_key_env="VOYAGE_API_KEY_1")
+            ModelConfig(
+                name="voyage-3-large",
+                provider="voyageai",
+                api_key_env="VOYAGE_API_KEY_1",
+            )
         ],
     )
 
@@ -169,7 +181,11 @@ def test_create_prose_provider_falls_back_to_code_embedder_when_empty(
     monkeypatch.setenv("VOYAGE_API_KEY_1", "test-key")
     app_config = AppConfig(
         embedding_models=[
-            ModelConfig(name="voyage-code-3", provider="voyageai", api_key_env="VOYAGE_API_KEY_1")
+            ModelConfig(
+                name="voyage-code-3",
+                provider="voyageai",
+                api_key_env="VOYAGE_API_KEY_1",
+            )
         ],
         prose_embedding_models=[],
     )
@@ -178,7 +194,11 @@ def test_create_prose_provider_falls_back_to_code_embedder_when_empty(
     code_provider = create_embedding_provider(app_config=app_config)
 
     assert isinstance(prose_provider, VoyageAIEmbeddingProvider)
-    assert prose_provider.config.model_name == code_provider.config.model_name == "voyage-code-3"
+    assert (
+        prose_provider.config.model_name
+        == code_provider.config.model_name
+        == "voyage-code-3"
+    )
 
 
 def test_create_prose_provider_falls_back_when_prose_key_missing(
@@ -189,11 +209,17 @@ def test_create_prose_provider_falls_back_when_prose_key_missing(
     monkeypatch.setenv("VOYAGE_API_KEY_1", "test-key")
     app_config = AppConfig(
         embedding_models=[
-            ModelConfig(name="voyage-code-3", provider="voyageai", api_key_env="VOYAGE_API_KEY_1")
+            ModelConfig(
+                name="voyage-code-3",
+                provider="voyageai",
+                api_key_env="VOYAGE_API_KEY_1",
+            )
         ],
         prose_embedding_models=[
             ModelConfig(
-                name="voyage-3-large", provider="voyageai", api_key_env="VOYAGE_API_KEY_PROSE"
+                name="voyage-3-large",
+                provider="voyageai",
+                api_key_env="VOYAGE_API_KEY_PROSE",
             )
         ],
     )

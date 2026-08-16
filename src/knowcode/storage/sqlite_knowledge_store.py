@@ -21,7 +21,13 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator, Optional
 
-from knowcode.data_models import Entity, EntityKind, Location, Relationship, RelationshipKind
+from knowcode.data_models import (
+    Entity,
+    EntityKind,
+    Location,
+    Relationship,
+    RelationshipKind,
+)
 from knowcode.errors import RepositoryClosedError
 from knowcode.storage.knowledge_store import KnowledgeStore
 from knowcode.utils.entity_identity import ensure_entity_content_hash
@@ -186,8 +192,12 @@ class SqliteKnowledgeStore:
                 """
             )
             # Indexes
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_entities_kind ON entities(kind)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_entities_name ON entities(name)")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_entities_kind ON entities(kind)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_entities_name ON entities(name)"
+            )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_entities_qualified_name ON entities(qualified_name)"
             )
@@ -433,7 +443,11 @@ class SqliteKnowledgeStore:
                 JOIN relationships r ON e.entity_id = r.target_id
                 WHERE r.source_id = ? AND r.kind IN (?, ?)
                 """,
-                (entity_id, RelationshipKind.CALLS.value, RelationshipKind.IMPORTS.value),
+                (
+                    entity_id,
+                    RelationshipKind.CALLS.value,
+                    RelationshipKind.IMPORTS.value,
+                ),
             )
             rows = cursor.fetchall()
         return [self._row_to_entity(row) for row in rows]
@@ -447,7 +461,11 @@ class SqliteKnowledgeStore:
                 JOIN relationships r ON e.entity_id = r.source_id
                 WHERE r.target_id = ? AND r.kind IN (?, ?)
                 """,
-                (entity_id, RelationshipKind.CALLS.value, RelationshipKind.IMPORTS.value),
+                (
+                    entity_id,
+                    RelationshipKind.CALLS.value,
+                    RelationshipKind.IMPORTS.value,
+                ),
             )
             rows = cursor.fetchall()
         return [self._row_to_entity(row) for row in rows]
@@ -553,7 +571,9 @@ class SqliteKnowledgeStore:
     ) -> list[dict[str, Any]]:
         """Multi-hop call graph traversal using Recursive CTE."""
         if direction not in ("callers", "callees"):
-            raise ValueError(f"direction must be 'callers' or 'callees', got {direction}")
+            raise ValueError(
+                f"direction must be 'callers' or 'callees', got {direction}"
+            )
 
         if direction == "callees":
             start_col, next_col = "source_id", "target_id"
@@ -581,19 +601,27 @@ class SqliteKnowledgeStore:
         with self._read_lease() as conn:
             cursor = conn.execute(
                 query,
-                (entity_id, RelationshipKind.CALLS.value, RelationshipKind.CALLS.value, depth, max_results),
+                (
+                    entity_id,
+                    RelationshipKind.CALLS.value,
+                    RelationshipKind.CALLS.value,
+                    depth,
+                    max_results,
+                ),
             )
             results = []
             for row in cursor:
-                results.append({
-                    "entity_id": row["entity_id"],
-                    "name": row["name"],
-                    "qualified_name": row["qualified_name"],
-                    "kind": row["kind"],
-                    "file": row["file_path"],
-                    "line": row["line_start"],
-                    "call_depth": row["call_depth"],
-                })
+                results.append(
+                    {
+                        "entity_id": row["entity_id"],
+                        "name": row["name"],
+                        "qualified_name": row["qualified_name"],
+                        "kind": row["kind"],
+                        "file": row["file_path"],
+                        "line": row["line_start"],
+                        "call_depth": row["call_depth"],
+                    }
+                )
         return results
 
     def get_impact(self, entity_id: str, max_depth: int = 3) -> dict[str, Any]:
@@ -608,8 +636,12 @@ class SqliteKnowledgeStore:
                 "error": "Entity not found",
             }
 
-        direct = self.trace_calls(entity_id, direction="callers", depth=1, max_results=100)
-        transitive = self.trace_calls(entity_id, direction="callers", depth=max_depth, max_results=100)
+        direct = self.trace_calls(
+            entity_id, direction="callers", depth=1, max_results=100
+        )
+        transitive = self.trace_calls(
+            entity_id, direction="callers", depth=max_depth, max_results=100
+        )
 
         direct_ids = {d["entity_id"] for d in direct}
         transitive_only = [t for t in transitive if t["entity_id"] not in direct_ids]
@@ -668,7 +700,9 @@ class SqliteKnowledgeStore:
         return self._closed
 
     @classmethod
-    def from_json(cls, json_path: str | Path, db_path: str | Path) -> "SqliteKnowledgeStore":
+    def from_json(
+        cls, json_path: str | Path, db_path: str | Path
+    ) -> "SqliteKnowledgeStore":
         """Migrate from a JSON knowledge store to SQLite."""
         store = KnowledgeStore.load(json_path)
         sqlite_store = cls(db_path)

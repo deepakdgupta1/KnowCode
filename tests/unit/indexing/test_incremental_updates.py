@@ -128,7 +128,9 @@ class FlakyVectorStore:
         self._maybe_fail("flush")
         self._inner.flush()
 
-    def search(self, embedding: list[float], limit: int = 10) -> list[tuple[str, float]]:
+    def search(
+        self, embedding: list[float], limit: int = 10
+    ) -> list[tuple[str, float]]:
         return self._inner.search(embedding, limit=limit)
 
     def get_embedding(self, chunk_id: str) -> Optional[list[float]]:
@@ -171,8 +173,7 @@ class Harness:
 
     def dense_ids(self) -> set[str]:
         return {
-            chunk_id
-            for chunk_id, _ in self.vectors.search([0.1, 0.2, 0.3], limit=50)
+            chunk_id for chunk_id, _ in self.vectors.search([0.1, 0.2, 0.3], limit=50)
         }
 
 
@@ -583,9 +584,7 @@ def test_recovery_fails_when_a_durable_embedding_is_missing(
     update = harness.indexer.prepare_file_update(harness.source)
 
     harness.vectors.fail_on = "upsert"
-    monkeypatch.setattr(
-        SqliteChunkRepository, "get", lambda self, chunk_id: None
-    )
+    monkeypatch.setattr(SqliteChunkRepository, "get", lambda self, chunk_id: None)
 
     with pytest.raises(FileUpdateCommitError):
         harness.indexer.commit_file_update(update)

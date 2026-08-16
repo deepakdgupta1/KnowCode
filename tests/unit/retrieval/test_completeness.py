@@ -1,6 +1,13 @@
 """Unit tests for dependency expansion."""
 
-from knowcode.data_models import CodeChunk, Entity, EntityKind, Location, Relationship, RelationshipKind
+from knowcode.data_models import (
+    CodeChunk,
+    Entity,
+    EntityKind,
+    Location,
+    Relationship,
+    RelationshipKind,
+)
 from knowcode.retrieval.completeness import expand_dependencies
 from knowcode.storage.sqlite_chunk_repository import SqliteChunkRepository
 from knowcode.storage.knowledge_store import KnowledgeStore

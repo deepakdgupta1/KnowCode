@@ -66,7 +66,9 @@ def make_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
             from knowcode.storage.lancedb_vector_store import LanceDBVectorStore
 
             counter["i"] += 1
-            return LanceDBVectorStore(dimension=2, path=str(tmp_path / f"db{counter['i']}"))
+            return LanceDBVectorStore(
+                dimension=2, path=str(tmp_path / f"db{counter['i']}")
+            )
         raise ValueError(f"unknown backend: {backend}")
 
     return build
@@ -174,9 +176,7 @@ def test_close_drains_buffered_writes_before_releasing(
 
 
 @pytest.mark.parametrize("backend", BACKENDS)
-def test_a_closed_store_is_empty_rather_than_poisoned(
-    backend: str, make_store
-) -> None:
+def test_a_closed_store_is_empty_rather_than_poisoned(backend: str, make_store) -> None:
     """Shutdown diagnostics may still call ``count()``; it must not raise."""
     store = make_store(backend)
     store.add("a", [1.0, 0.0])

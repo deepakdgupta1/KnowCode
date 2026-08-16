@@ -72,7 +72,9 @@ class WatchWork:
     attempt: int = 1
 
     @classmethod
-    def index(cls, path: str | Path, *, moved_from: Optional[str | Path] = None) -> "WatchWork":
+    def index(
+        cls, path: str | Path, *, moved_from: Optional[str | Path] = None
+    ) -> "WatchWork":
         """Build an index (replace) item, optionally as a move destination."""
         dropped: tuple[str, ...] = ()
         if moved_from is not None:
@@ -172,9 +174,7 @@ class WatchQueue:
         """
         with self._lock:
             dropped = {
-                source
-                for source in work.dropped_paths
-                if source not in self._pending
+                source for source in work.dropped_paths if source not in self._pending
             }
             owner = self._pending.get(work.path) or self._find_dropper(work.path)
             if owner is not None:
@@ -229,9 +229,7 @@ class WatchQueue:
             dropped.update(existing.dropped_paths)
 
         dropped.discard(work.path)
-        self._pending[work.path] = replace(
-            work, dropped_paths=tuple(sorted(dropped))
-        )
+        self._pending[work.path] = replace(work, dropped_paths=tuple(sorted(dropped)))
         self._work_available.notify()
 
     def _forget_drop(self, path: str) -> None:

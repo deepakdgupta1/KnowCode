@@ -80,7 +80,9 @@ class StubService(KnowCodeService):
     def get_search_engine(self, _index_path: Path | None = None) -> StubSearchEngine:  # type: ignore[override]
         return self._engine
 
-    def get_exact_query_engine(self, _index_path: Path | None = None) -> StubSearchEngine:  # type: ignore[override]
+    def get_exact_query_engine(
+        self, _index_path: Path | None = None
+    ) -> StubSearchEngine:  # type: ignore[override]
         return self._engine
 
     def get_context(  # type: ignore[override]
@@ -108,12 +110,15 @@ class StubService(KnowCodeService):
 @pytest.fixture
 def service(tmp_path: Path) -> Any:
     (tmp_path / "knowcode_knowledge.json").write_text(
-        json.dumps({"metadata": {}, "entities": {}, "relationships": []}), encoding="utf-8"
+        json.dumps({"metadata": {}, "entities": {}, "relationships": []}),
+        encoding="utf-8",
     )
     _publish_stub_generation(tmp_path / "knowcode_index")
     entity = "/private/var/repo/src/orders.py::place_order"
     chunk = CodeChunk(id="c1", entity_id=entity, content="one", tokens=["one"])
-    built = StubService(tmp_path, [ScoredChunk(chunk=chunk, score=0.9, source="retrieved")])
+    built = StubService(
+        tmp_path, [ScoredChunk(chunk=chunk, score=0.9, source="retrieved")]
+    )
     try:
         yield built
     finally:
@@ -125,7 +130,11 @@ def _records(store: Path) -> list[dict[str, Any]]:
     log = telemetry_files.telemetry_path(store)
     if not log.exists():
         return []
-    return [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines() if line.strip()]
+    return [
+        json.loads(line)
+        for line in log.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
 
 
 def test_one_retrieval_emits_exactly_one_counted_query_event(

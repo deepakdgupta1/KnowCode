@@ -69,7 +69,9 @@ def _entity_ids(service: KnowCodeService) -> set[str]:
     return {entity["id"] for entity in service.search("")}
 
 
-def test_analyze_publishes_one_coherent_generation(tmp_path: Path, backend: str) -> None:
+def test_analyze_publishes_one_coherent_generation(
+    tmp_path: Path, backend: str
+) -> None:
     src = _repository(tmp_path)
     service = _service(tmp_path, backend)
 
@@ -186,7 +188,10 @@ def test_a_reader_keeps_working_while_a_rebuild_publishes(tmp_path: Path) -> Non
         except BaseException as exc:  # noqa: BLE001 - reported to the assertion
             failures.append(exc)
 
-    threads = [threading.Thread(target=read_repeatedly), threading.Thread(target=rebuild)]
+    threads = [
+        threading.Thread(target=read_repeatedly),
+        threading.Thread(target=rebuild),
+    ]
     for thread in threads:
         thread.start()
     for thread in threads:
@@ -282,7 +287,9 @@ def test_an_abandoned_staging_generation_is_ignored_and_cleaned(
     index_root = tmp_path / "knowcode_index"
     current = resolve_current_generation(index_root)
 
-    abandoned = index_root / f"{generations.STAGING_PREFIX}20200101T000000000000Z-abcdef12.pid1"
+    abandoned = (
+        index_root / f"{generations.STAGING_PREFIX}20200101T000000000000Z-abcdef12.pid1"
+    )
     shutil.copytree(current.path, abandoned)
 
     # A restart resolves past it...

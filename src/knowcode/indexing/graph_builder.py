@@ -56,6 +56,8 @@ class GraphBuilder:
         Args:
             root_dir: Root directory to scan.
             additional_ignores: Additional patterns to ignore.
+            analyze_temporal: Whether to analyze temporal history.
+            coverage_path: Optional path to coverage report.
 
         Returns:
             Self for method chaining.

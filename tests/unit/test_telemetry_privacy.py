@@ -26,18 +26,54 @@ TIMEOUT = 5.0
 
 #: (label, the secret, a plausible carrier string containing it)
 SECRETS: list[tuple[str, str, str]] = [
-    ("openai", "sk-proj-Ab3dEfGh1jKlMn0pQrStUv", "export OPENAI_API_KEY=sk-proj-Ab3dEfGh1jKlMn0pQrStUv"),
-    ("anthropic", "sk-ant-api03-Ab3dEfGh1jKlMn0pQrStUvWx", "sk-ant-api03-Ab3dEfGh1jKlMn0pQrStUvWx"),
-    ("google", "AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6", "key=AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6"),
-    ("github", "ghp_16C7e42F292c6912E7710c838347Ae178B4a", "ghp_16C7e42F292c6912E7710c838347Ae178B4a"),
+    (
+        "openai",
+        "sk-proj-Ab3dEfGh1jKlMn0pQrStUv",
+        "export OPENAI_API_KEY=sk-proj-Ab3dEfGh1jKlMn0pQrStUv",
+    ),
+    (
+        "anthropic",
+        "sk-ant-api03-Ab3dEfGh1jKlMn0pQrStUvWx",
+        "sk-ant-api03-Ab3dEfGh1jKlMn0pQrStUvWx",
+    ),
+    (
+        "google",
+        "AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6",
+        "key=AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6",
+    ),
+    (
+        "github",
+        "ghp_16C7e42F292c6912E7710c838347Ae178B4a",
+        "ghp_16C7e42F292c6912E7710c838347Ae178B4a",
+    ),
     ("aws", "AKIAIOSFODNN7EXAMPLE", "aws_access_key_id = AKIAIOSFODNN7EXAMPLE"),
     ("slack", "xoxb-test-token-fixture-00000000", "xoxb-test-token-fixture-00000000"),
-    ("bearer", "Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2ln", "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2ln"),
-    ("jwt", "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhZG1pbiJ9.9f8e7d6c5b", "token eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhZG1pbiJ9.9f8e7d6c5b"),
-    ("private-key", "-----BEGIN RSA PRIVATE KEY-----", "-----BEGIN RSA PRIVATE KEY-----\nMIIEow=="),
-    ("url-credentials", "deploy:hunter2", "postgres://deploy:hunter2@db.internal:5432/app"),
+    (
+        "bearer",
+        "Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2ln",
+        "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2ln",
+    ),
+    (
+        "jwt",
+        "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhZG1pbiJ9.9f8e7d6c5b",
+        "token eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhZG1pbiJ9.9f8e7d6c5b",
+    ),
+    (
+        "private-key",
+        "-----BEGIN RSA PRIVATE KEY-----",
+        "-----BEGIN RSA PRIVATE KEY-----\nMIIEow==",
+    ),
+    (
+        "url-credentials",
+        "deploy:hunter2",
+        "postgres://deploy:hunter2@db.internal:5432/app",
+    ),
     ("assignment", "s3cr3t-value-not-guessable", "password=s3cr3t-value-not-guessable"),
-    ("long-opaque", "Zm9vYmFyYmF6cXV4MTIzNDU2Nzg5MGFiY2RlZmdoaWprbG1ub3A", "Zm9vYmFyYmF6cXV4MTIzNDU2Nzg5MGFiY2RlZmdoaWprbG1ub3A"),
+    (
+        "long-opaque",
+        "Zm9vYmFyYmF6cXV4MTIzNDU2Nzg5MGFiY2RlZmdoaWprbG1ub3A",
+        "Zm9vYmFyYmF6cXV4MTIzNDU2Nzg5MGFiY2RlZmdoaWprbG1ub3A",
+    ),
 ]
 
 SECRET_IDS = [label for label, _, _ in SECRETS]
@@ -63,7 +99,9 @@ def _payload(store: Path) -> str:
 
 
 @pytest.mark.parametrize(("label", "secret", "carrier"), SECRETS, ids=SECRET_IDS)
-def test_redaction_removes_each_credential_format(label: str, secret: str, carrier: str) -> None:
+def test_redaction_removes_each_credential_format(
+    label: str, secret: str, carrier: str
+) -> None:
     redacted = telemetry_redaction.redact(carrier)
 
     assert secret not in redacted
@@ -86,7 +124,9 @@ def test_redaction_leaves_ordinary_text_intact() -> None:
 def test_redaction_bounds_a_long_string() -> None:
     bounded = telemetry_redaction.redact("a" * 10_000)
 
-    assert len(bounded) <= telemetry_redaction.MAX_STRING_CHARS + len(telemetry_redaction.TRUNCATED)
+    assert len(bounded) <= telemetry_redaction.MAX_STRING_CHARS + len(
+        telemetry_redaction.TRUNCATED
+    )
     assert bounded.endswith(telemetry_redaction.TRUNCATED)
 
 
@@ -99,7 +139,10 @@ def test_redaction_bounds_depth_and_width() -> None:
     redacted = telemetry_redaction.redact(deep)
 
     assert json.dumps(redacted).count("next") <= telemetry_redaction.MAX_DEPTH
-    assert len(telemetry_redaction.redact(list(range(1000)))) <= telemetry_redaction.MAX_ITEMS
+    assert (
+        len(telemetry_redaction.redact(list(range(1000))))
+        <= telemetry_redaction.MAX_ITEMS
+    )
 
 
 # ----------------------------------------------------------------------
@@ -150,7 +193,9 @@ def test_unicode_text_is_bounded_and_still_valid_json(tmp_path: Path) -> None:
 
     telemetry.log_event(tmp_path, {"event_type": "tool_call", "tool_name": name})
 
-    record = json.loads(telemetry_files.telemetry_path(tmp_path).read_text(encoding="utf-8").strip())
+    record = json.loads(
+        telemetry_files.telemetry_path(tmp_path).read_text(encoding="utf-8").strip()
+    )
     assert len(record["tool_name"]) <= telemetry_redaction.MAX_STRING_CHARS + len(
         telemetry_redaction.TRUNCATED
     )
@@ -176,6 +221,7 @@ def test_a_record_that_cannot_be_serialized_is_dropped_not_partially_written(
     tmp_path: Path,
 ) -> None:
     """A serialization failure must not leave half a line in the file."""
+
     class Unserializable:
         def __repr__(self) -> str:  # pragma: no cover - defensive
             return "sk-ant-api03-Ab3dEfGh1jKlMn0pQrStUvWx"

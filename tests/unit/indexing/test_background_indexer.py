@@ -134,7 +134,9 @@ def test_a_burst_of_modify_events_commits_once(worker_for, tmp_path: Path) -> No
     assert indexer.calls == [normalize_file_identity(source)]
 
 
-def test_an_edit_during_a_commit_gets_its_own_transaction(worker_for, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+def test_an_edit_during_a_commit_gets_its_own_transaction(
+    worker_for, tmp_path: Path
+) -> None:  # type: ignore[no-untyped-def]
     """The in-flight commit read the old bytes; the new save needs a fresh read."""
     indexer = DummyIndexer()
     bg = worker_for(indexer)
@@ -152,7 +154,9 @@ def test_an_edit_during_a_commit_gets_its_own_transaction(worker_for, tmp_path: 
     assert indexer.calls == [normalize_file_identity(source)] * 2
 
 
-def test_a_create_modify_delete_burst_commits_the_delete(worker_for, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+def test_a_create_modify_delete_burst_commits_the_delete(
+    worker_for, tmp_path: Path
+) -> None:  # type: ignore[no-untyped-def]
     indexer = DummyIndexer()
     bg = worker_for(indexer)
     source = tmp_path / "m.py"
@@ -253,7 +257,9 @@ def test_stop_reports_the_work_it_could_not_drain(worker_for, tmp_path: Path) ->
     }
 
 
-def test_work_queued_after_stop_is_rejected_not_dropped(worker_for, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+def test_work_queued_after_stop_is_rejected_not_dropped(
+    worker_for, tmp_path: Path
+) -> None:  # type: ignore[no-untyped-def]
     bg = worker_for(DummyIndexer())
     bg.start()
     bg.stop(timeout=TIMEOUT)
@@ -314,7 +320,9 @@ class _RecordingSleep:
             self.on_sleep()
 
 
-def test_a_retryable_failure_is_retried_with_backoff(worker_for, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+def test_a_retryable_failure_is_retried_with_backoff(
+    worker_for, tmp_path: Path
+) -> None:  # type: ignore[no-untyped-def]
     indexer = DummyIndexer()
     source = tmp_path / "m.py"
     indexer.fail_on(source, OSError("file is still being written"), times=1)
@@ -331,7 +339,9 @@ def test_a_retryable_failure_is_retried_with_backoff(worker_for, tmp_path: Path)
     assert bg.failures() == ()
 
 
-def test_retries_are_bounded_and_the_exhausted_work_is_reported(worker_for, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+def test_retries_are_bounded_and_the_exhausted_work_is_reported(
+    worker_for, tmp_path: Path
+) -> None:  # type: ignore[no-untyped-def]
     indexer = DummyIndexer()
     source = tmp_path / "m.py"
     indexer.fail_on(source, OSError("device is offline"))
@@ -352,7 +362,9 @@ def test_retries_are_bounded_and_the_exhausted_work_is_reported(worker_for, tmp_
     assert "device is offline" in failure.reason
 
 
-def test_an_unrecognized_failure_is_terminal_and_reported(worker_for, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+def test_an_unrecognized_failure_is_terminal_and_reported(
+    worker_for, tmp_path: Path
+) -> None:  # type: ignore[no-untyped-def]
     """Fail closed: an unclassified error is surfaced, never retried blindly."""
     indexer = DummyIndexer()
     source = tmp_path / "m.py"
@@ -425,7 +437,9 @@ def test_no_configured_backoff_retries_immediately(worker_for, tmp_path: Path) -
     assert indexer.calls == [normalize_file_identity(source)]
 
 
-def test_a_drain_does_not_spend_its_budget_backing_off(worker_for, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+def test_a_drain_does_not_spend_its_budget_backing_off(
+    worker_for, tmp_path: Path
+) -> None:  # type: ignore[no-untyped-def]
     """Shutdown is bounded even when the work in flight is failing and retrying."""
     indexer = DummyIndexer()
     source = tmp_path / "m.py"
@@ -479,7 +493,9 @@ def test_the_worker_survives_a_failure_in_its_own_failure_handling(  # type: ign
     assert bg.is_running
 
 
-def test_an_idle_worker_keeps_consuming(worker_for, tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+def test_an_idle_worker_keeps_consuming(
+    worker_for, tmp_path: Path, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
     """The poll timeout is a liveness backstop, not an exit condition.
 
     The sleep only lets an idle poll cycle elapse; the assertion is on the
@@ -785,7 +801,9 @@ class PublishingIndexer(DummyIndexer):
             return tuple(self.staged)
 
 
-def test_the_worker_publishes_when_the_queue_goes_idle(worker_for, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+def test_the_worker_publishes_when_the_queue_goes_idle(
+    worker_for, tmp_path: Path
+) -> None:  # type: ignore[no-untyped-def]
     """A watched edit is only visible once its generation is published."""
     indexer = PublishingIndexer()
     bg = worker_for(indexer)
@@ -835,7 +853,9 @@ def test_stop_publishes_the_backlog_it_drained(worker_for, tmp_path: Path) -> No
     assert indexer.publications == [(normalize_file_identity(target),)]
 
 
-def test_work_that_could_not_be_published_is_reported(worker_for, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+def test_work_that_could_not_be_published_is_reported(
+    worker_for, tmp_path: Path
+) -> None:  # type: ignore[no-untyped-def]
     """A commit still in staging is stale, so it must never look durable."""
     indexer = PublishingIndexer()
     indexer.publish_error = RuntimeError("the pointer moved")
@@ -854,7 +874,9 @@ def test_work_that_could_not_be_published_is_reported(worker_for, tmp_path: Path
     assert not report.completed
 
 
-def test_a_writer_that_does_not_publish_is_driven_unchanged(worker_for, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+def test_a_writer_that_does_not_publish_is_driven_unchanged(
+    worker_for, tmp_path: Path
+) -> None:  # type: ignore[no-untyped-def]
     """A plain ``Indexer`` writes in place and has nothing to publish."""
     indexer = DummyIndexer()
     bg = worker_for(indexer)

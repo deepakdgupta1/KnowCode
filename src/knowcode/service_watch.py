@@ -228,8 +228,7 @@ class ServiceWatchWriter:
                 if attempt == _REBASE_ATTEMPTS - 1:
                     raise
                 logger.info(
-                    "Re-deriving %d watched update(s) on the current "
-                    "generation: %s",
+                    "Re-deriving %d watched update(s) on the current generation: %s",
                     len(self._operations),
                     exc,
                 )

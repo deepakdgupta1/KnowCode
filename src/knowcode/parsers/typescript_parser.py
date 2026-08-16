@@ -96,7 +96,9 @@ class TypeScriptParser(JavaScriptParser):
         )
         entities.append(entity)
         relationships.append(
-            Relationship(source_id=parent_id, target_id=ts_id, kind=RelationshipKind.CONTAINS)
+            Relationship(
+                source_id=parent_id, target_id=ts_id, kind=RelationshipKind.CONTAINS
+            )
         )
 
         body_node = node.child_by_field_name("body")

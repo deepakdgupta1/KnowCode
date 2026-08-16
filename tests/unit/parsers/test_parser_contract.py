@@ -23,49 +23,52 @@ PARSERS = [
     (TypeScriptParser, "let x: number = 1;\n", ".ts"),
 ]
 
+
 @pytest.mark.parametrize("parser_class, code, ext", PARSERS)
 def test_contract_missing_file(tmp_path, parser_class, code, ext):
     parser = parser_class()
     missing_file = tmp_path / f"missing_file{ext}"
     result = parser.parse_file(missing_file)
-    
+
     assert isinstance(result, ParseResult)
     assert result.file_path == str(missing_file)
     assert len(result.errors) > 0
     assert isinstance(result.entities, list)
     assert isinstance(result.relationships, list)
 
+
 @pytest.mark.parametrize("parser_class, code, ext", PARSERS)
 def test_contract_empty_file(tmp_path, parser_class, code, ext):
     parser = parser_class()
     empty_file = tmp_path / f"empty{ext}"
     empty_file.write_text("")
-    
+
     result = parser.parse_file(empty_file)
     assert isinstance(result, ParseResult)
     assert result.file_path == str(empty_file)
     assert isinstance(result.entities, list)
     assert isinstance(result.relationships, list)
     assert isinstance(result.errors, list)
-    
+
     for entity in result.entities:
         assert isinstance(entity, Entity)
     for rel in result.relationships:
         assert isinstance(rel, Relationship)
+
 
 @pytest.mark.parametrize("parser_class, code, ext", PARSERS)
 def test_contract_valid_file(tmp_path, parser_class, code, ext):
     parser = parser_class()
     valid_file = tmp_path / f"valid{ext}"
     valid_file.write_text(code)
-    
+
     result = parser.parse_file(valid_file)
     assert isinstance(result, ParseResult)
     assert result.file_path == str(valid_file)
     assert isinstance(result.entities, list)
     assert isinstance(result.relationships, list)
     assert isinstance(result.errors, list)
-    
+
     for entity in result.entities:
         assert isinstance(entity, Entity)
         assert isinstance(entity.id, str)

@@ -21,7 +21,7 @@ class TemporalAnalyzer:
 
     def __init__(self, root_dir: str | Path) -> None:
         """Initialize temporal analyzer.
-        
+
         Args:
             root_dir: Root directory of the git repo.
         """
@@ -56,17 +56,17 @@ class TemporalAnalyzer:
         try:
             # Iterating commits from HEAD
             commits = list(self.repo.iter_commits("HEAD", max_count=limit))
-            
+
             for commit in commits:
                 commit_hash = commit.hexsha
                 short_hash = commit_hash[:7]
                 commit_id = f"commit::{commit_hash}"
-                
+
                 # Author Entity
                 author_name = commit.author.name
                 author_email = commit.author.email
                 author_id = f"author::{author_email}"
-                
+
                 # Create Author entity if not exists (we rely on graph builder to dedupe)
                 author_entity = Entity(
                     id=author_id,
@@ -74,13 +74,15 @@ class TemporalAnalyzer:
                     name=author_name,  # type: ignore
                     qualified_name=author_email,  # type: ignore
                     location=Location("git", 0, 0),
-                    metadata={"email": author_email}
+                    metadata={"email": author_email},
                 )
                 entities.append(author_entity)
 
                 # Create Commit Entity
                 # Use commit message as description/docstring
-                committed_date = datetime.fromtimestamp(commit.committed_date, tz=timezone.utc)
+                committed_date = datetime.fromtimestamp(
+                    commit.committed_date, tz=timezone.utc
+                )
                 commit_entity = Entity(
                     id=commit_id,
                     kind=EntityKind.COMMIT,
@@ -90,8 +92,8 @@ class TemporalAnalyzer:
                     docstring=commit.message.strip(),  # type: ignore
                     metadata={
                         "date": committed_date.isoformat(),
-                        "timestamp": str(commit.committed_date)
-                    }
+                        "timestamp": str(commit.committed_date),
+                    },
                 )
                 entities.append(commit_entity)
 
@@ -100,7 +102,7 @@ class TemporalAnalyzer:
                     Relationship(
                         source_id=author_id,
                         target_id=commit_id,
-                        kind=RelationshipKind.AUTHORED
+                        kind=RelationshipKind.AUTHORED,
                     )
                 )
 
@@ -110,7 +112,7 @@ class TemporalAnalyzer:
                 for file_path, stats in commit.stats.files.items():
                     # stats is dict like {'insertions': 1, 'deletions': 0, 'lines': 1}
                     # file_path is relative to repo root
-                    
+
                     # Construct module ID for the file
                     # We assume standard module ID format: /abs/path/to/file::filename
                     # But we only have relative path here.
@@ -118,7 +120,7 @@ class TemporalAnalyzer:
                     abs_path = self.root_dir / file_path
                     module_name = Path(file_path).stem
                     target_module_id = f"{abs_path}::{module_name}"
-                    
+
                     relationships.append(
                         Relationship(
                             source_id=commit_id,
@@ -126,17 +128,17 @@ class TemporalAnalyzer:
                             kind=RelationshipKind.MODIFIED,
                             metadata={
                                 "insertions": str(stats.get("insertions", 0)),
-                                "deletions": str(stats.get("deletions", 0))
-                            }
+                                "deletions": str(stats.get("deletions", 0)),
+                            },
                         )
                     )
-                    
+
                     # Also Relationship: MODULE -> CHANGED_BY -> COMMIT
                     relationships.append(
                         Relationship(
                             source_id=target_module_id,
                             target_id=commit_id,
-                            kind=RelationshipKind.CHANGED_BY
+                            kind=RelationshipKind.CHANGED_BY,
                         )
                     )
 

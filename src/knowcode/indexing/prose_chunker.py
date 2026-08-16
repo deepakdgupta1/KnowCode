@@ -129,7 +129,9 @@ class ProseChunker:
 
     # -- public API ---------------------------------------------------------
 
-    def chunk_file(self, path: str | Path, doc_id: str | None = None) -> list[ProseChunk]:
+    def chunk_file(
+        self, path: str | Path, doc_id: str | None = None
+    ) -> list[ProseChunk]:
         """Chunk a prose file, picking the dialect from its extension."""
         p = Path(path)
         text = p.read_text(encoding="utf-8", errors="replace")
@@ -171,7 +173,9 @@ class ProseChunker:
     ) -> list[ProseChunk]:
         if section.body_end_line < section.body_start_line:
             return []  # heading with no body (pure parent) — exists only as a node
-        blocks = dialect.blocks_in_span(lines, section.body_start_line, section.body_end_line)
+        blocks = dialect.blocks_in_span(
+            lines, section.body_start_line, section.body_end_line
+        )
         if not blocks:
             return []
 
@@ -179,8 +183,17 @@ class ProseChunker:
         context_header = _context_header(title, section.heading_path)
         return [
             self._assemble(
-                content, start, end, section, doc_id, doc_type, title,
-                context_header, base_meta, idx, oversize,
+                content,
+                start,
+                end,
+                section,
+                doc_id,
+                doc_type,
+                title,
+                context_header,
+                base_meta,
+                idx,
+                oversize,
             )
             for idx, (content, start, end, oversize) in enumerate(raw)
         ]
@@ -237,7 +250,11 @@ class ProseChunker:
                     buf = []
                 out.extend(self._token_window(sentence, span, oversize=True))
                 continue
-            if buf and self._counter.count_tokens(" ".join([*buf, sentence])) > self.config.max_tokens:
+            if (
+                buf
+                and self._counter.count_tokens(" ".join([*buf, sentence]))
+                > self.config.max_tokens
+            ):
                 out.append((" ".join(buf), span[0], span[1], False))
                 buf = []
             buf.append(sentence)
@@ -245,17 +262,26 @@ class ProseChunker:
             out.append((" ".join(buf), span[0], span[1], False))
         return out
 
-    def _token_window(self, text: str, span: tuple[int, int], *, oversize: bool) -> list[_RawChunk]:
+    def _token_window(
+        self, text: str, span: tuple[int, int], *, oversize: bool
+    ) -> list[_RawChunk]:
         ids = self._counter.encoding.encode(text)
         step = self.config.max_tokens
         return [
-            (self._counter.encoding.decode(ids[i:i + step]), span[0], span[1], oversize)
+            (
+                self._counter.encoding.decode(ids[i : i + step]),
+                span[0],
+                span[1],
+                oversize,
+            )
             for i in range(0, len(ids), step)
         ]
 
     # -- merge + assemble ---------------------------------------------------
 
-    def _merge_small(self, chunks: list[ProseChunk], lines: list[str]) -> list[ProseChunk]:
+    def _merge_small(
+        self, chunks: list[ProseChunk], lines: list[str]
+    ) -> list[ProseChunk]:
         """Merge an under-sized chunk into the next line-adjacent same-parent one."""
         if not chunks:
             return chunks
@@ -269,25 +295,39 @@ class ProseChunker:
             adjacent = 0 < cur.start_line - prev.end_line <= 3
             if (
                 prev.parent_id == cur.parent_id
-                and not prev.is_oversize and not cur.is_oversize
+                and not prev.is_oversize
+                and not cur.is_oversize
                 and prev.token_count < self.config.min_tokens
                 and adjacent
             ):
                 content = _span_text(lines, prev.start_line, cur.end_line)
                 if self._counter.count_tokens(content) <= self.config.max_tokens:
                     merged[-1] = replace(
-                        prev, end_line=cur.end_line, content=content,
+                        prev,
+                        end_line=cur.end_line,
+                        content=content,
                         token_count=self._counter.count_tokens(content),
-                        content_hash=hashlib.sha256(content.encode("utf-8")).hexdigest(),
+                        content_hash=hashlib.sha256(
+                            content.encode("utf-8")
+                        ).hexdigest(),
                     )
                     continue
             merged.append(cur)
         return merged
 
     def _assemble(
-        self, content: str, start_line: int, end_line: int, section: _Section,
-        doc_id: str, doc_type: str, title: str, context_header: str,
-        base_meta: dict[str, object], idx: int, oversize: bool,
+        self,
+        content: str,
+        start_line: int,
+        end_line: int,
+        section: _Section,
+        doc_id: str,
+        doc_type: str,
+        title: str,
+        context_header: str,
+        base_meta: dict[str, object],
+        idx: int,
+        oversize: bool,
     ) -> ProseChunk:
         return ProseChunk(
             id=f"{section.section_id}::c{idx}",
@@ -374,20 +414,23 @@ def _build_sections(
     # Normalize to (heading_start_line, level, title, body_start_line). Markdown
     # headings occupy one line (body starts the next); RST headings span 2-3
     # lines (title/underline +/- overline) and carry their own body start.
-    norm = [
-        h if len(h) == 4 else (h[0], h[1], h[2], h[0] + 1)
-        for h in headings
-    ]
+    norm = [h if len(h) == 4 else (h[0], h[1], h[2], h[0] + 1) for h in headings]
     root_id = f"{doc_id}::sec::_root"
     sections: list[_Section] = []
 
     first_heading_line = norm[0][0] if norm else last_line + 1
     if first_heading_line - 1 >= body_start:  # preamble before the first heading
-        sections.append(_Section(
-            level=0, title=title, heading_path=(), section_id=root_id,
-            parent_id=None, body_start_line=body_start,
-            body_end_line=first_heading_line - 1,
-        ))
+        sections.append(
+            _Section(
+                level=0,
+                title=title,
+                heading_path=(),
+                section_id=root_id,
+                parent_id=None,
+                body_start_line=body_start,
+                body_end_line=first_heading_line - 1,
+            )
+        )
 
     stack: list[tuple[int, str, str]] = []  # (level, title, section_id)
     for i, (line_no, level, htitle, body_start_line) in enumerate(norm):
@@ -397,11 +440,17 @@ def _build_sections(
         section_id = f"{doc_id}::sec::{_slug(heading_path)}::L{line_no}"
         parent_id = stack[-1][2] if stack else root_id
         next_line = norm[i + 1][0] if i + 1 < len(norm) else last_line + 1
-        sections.append(_Section(
-            level=level, title=htitle, heading_path=heading_path,
-            section_id=section_id, parent_id=parent_id,
-            body_start_line=body_start_line, body_end_line=next_line - 1,
-        ))
+        sections.append(
+            _Section(
+                level=level,
+                title=htitle,
+                heading_path=heading_path,
+                section_id=section_id,
+                parent_id=parent_id,
+                body_start_line=body_start_line,
+                body_end_line=next_line - 1,
+            )
+        )
         stack.append((level, htitle, section_id))
     return sections
 
@@ -443,7 +492,7 @@ def _blocks_in_span(lines: list[str], start_line: int, end_line: int) -> list[_B
 
 
 def _span_text(lines: list[str], start_line: int, end_line: int) -> str:
-    return "\n".join(lines[start_line - 1:end_line]).strip("\n")
+    return "\n".join(lines[start_line - 1 : end_line]).strip("\n")
 
 
 def _context_header(title: str, heading_path: tuple[str, ...]) -> str:
@@ -469,7 +518,16 @@ def _infer_doc_type(metadata: dict[str, object], doc_id: str) -> str:
 
 def _select_metadata(metadata: dict[str, object]) -> dict[str, object]:
     """Keep a small, retrieval-useful subset of frontmatter for filtering."""
-    keys = ("title", "type", "tags", "source", "author", "date", "date_added", "summary")
+    keys = (
+        "title",
+        "type",
+        "tags",
+        "source",
+        "author",
+        "date",
+        "date_added",
+        "summary",
+    )
     return {k: metadata[k] for k in keys if k in metadata}
 
 
@@ -490,16 +548,23 @@ class ProseDialect(Protocol):
         """Return ``(metadata, body_start_line)`` (1-indexed body start)."""
         ...
 
-    def scan_headings(self, lines: list[str], body_start: int) -> list[tuple[int, int, str]]:
+    def scan_headings(
+        self, lines: list[str], body_start: int
+    ) -> list[tuple[int, int, str]]:
         """Return ``(line_no, level, title)`` for each heading in the body."""
         ...
 
-    def blocks_in_span(self, lines: list[str], start_line: int, end_line: int) -> list[_Block]:
+    def blocks_in_span(
+        self, lines: list[str], start_line: int, end_line: int
+    ) -> list[_Block]:
         """Group a body span into atomic prose/code/table blocks."""
         ...
 
     def infer_title(
-        self, metadata: dict[str, object], doc_id: str, headings: list[tuple[int, int, str]]
+        self,
+        metadata: dict[str, object],
+        doc_id: str,
+        headings: list[tuple[int, int, str]],
     ) -> str:
         """Best-effort document title for the context header."""
         ...
@@ -511,14 +576,21 @@ class MarkdownDialect:
     def split_frontmatter(self, lines: list[str]) -> tuple[dict[str, object], int]:
         return _split_frontmatter(lines)
 
-    def scan_headings(self, lines: list[str], body_start: int) -> list[tuple[int, int, str]]:
+    def scan_headings(
+        self, lines: list[str], body_start: int
+    ) -> list[tuple[int, int, str]]:
         return _scan_headings(lines, body_start)
 
-    def blocks_in_span(self, lines: list[str], start_line: int, end_line: int) -> list[_Block]:
+    def blocks_in_span(
+        self, lines: list[str], start_line: int, end_line: int
+    ) -> list[_Block]:
         return _blocks_in_span(lines, start_line, end_line)
 
     def infer_title(
-        self, metadata: dict[str, object], doc_id: str, headings: list[tuple[int, int, str]]
+        self,
+        metadata: dict[str, object],
+        doc_id: str,
+        headings: list[tuple[int, int, str]],
     ) -> str:
         return str(metadata.get("title") or Path(doc_id).stem)
 
@@ -578,7 +650,9 @@ def _rst_indented_block_end(
     return last
 
 
-def _scan_rst_headings(lines: list[str], body_start: int) -> list[tuple[int, int, str, int]]:
+def _scan_rst_headings(
+    lines: list[str], body_start: int
+) -> list[tuple[int, int, str, int]]:
     """Return ``(heading_start, level, title, body_start)`` for RST sections.
 
     Levels follow reStructuredText's rule: each distinct adornment *style* —
@@ -606,8 +680,8 @@ def _scan_rst_headings(lines: list[str], body_start: int) -> list[tuple[int, int
         if _rst_is_adornment(raw):
             # Possible overline: adornment / title / matching underline.
             if i + 2 <= n:
-                title_line = lines[i]       # line i+1
-                under = lines[i + 1]        # line i+2
+                title_line = lines[i]  # line i+1
+                under = lines[i + 1]  # line i+2
                 ch = stripped[0]
                 title_text = title_line.strip()
                 if (
@@ -618,7 +692,9 @@ def _scan_rst_headings(lines: list[str], body_start: int) -> list[tuple[int, int
                     and len(stripped) >= len(title_text)
                     and len(under.strip()) >= len(title_text)
                 ):
-                    level = style_to_level.setdefault((ch, True), len(style_to_level) + 1)
+                    level = style_to_level.setdefault(
+                        (ch, True), len(style_to_level) + 1
+                    )
                     headings.append((i, level, title_text, i + 3))
                     i += 3
                     continue
@@ -645,7 +721,9 @@ def _scan_rst_headings(lines: list[str], body_start: int) -> list[tuple[int, int
     return headings
 
 
-def _rst_blocks_in_span(lines: list[str], start_line: int, end_line: int) -> list[_Block]:
+def _rst_blocks_in_span(
+    lines: list[str], start_line: int, end_line: int
+) -> list[_Block]:
     """Group an RST body span into atomic prose/code/table blocks."""
     blocks: list[_Block] = []
     i = start_line
@@ -659,7 +737,11 @@ def _rst_blocks_in_span(lines: list[str], start_line: int, end_line: int) -> lis
         directive = _RST_DIRECTIVE_RE.match(raw)
         if directive:
             end = _rst_indented_block_end(lines, i, end_line, indent)
-            kind = "code" if directive.group(1).lower() in _RST_CODE_DIRECTIVES else "prose"
+            kind = (
+                "code"
+                if directive.group(1).lower() in _RST_CODE_DIRECTIVES
+                else "prose"
+            )
             blocks.append(_Block(kind, i, end))
             i = end + 1
             continue
@@ -729,11 +811,16 @@ class RstDialect:
     ) -> list[tuple[int, int, str, int]]:
         return _scan_rst_headings(lines, body_start)
 
-    def blocks_in_span(self, lines: list[str], start_line: int, end_line: int) -> list[_Block]:
+    def blocks_in_span(
+        self, lines: list[str], start_line: int, end_line: int
+    ) -> list[_Block]:
         return _rst_blocks_in_span(lines, start_line, end_line)
 
     def infer_title(
-        self, metadata: dict[str, object], doc_id: str, headings: list[tuple[int, int, str]]
+        self,
+        metadata: dict[str, object],
+        doc_id: str,
+        headings: list[tuple[int, int, str]],
     ) -> str:
         explicit = metadata.get("title")
         if isinstance(explicit, str) and explicit.strip():

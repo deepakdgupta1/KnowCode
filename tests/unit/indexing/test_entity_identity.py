@@ -30,8 +30,7 @@ def _function_hash(builder: GraphBuilder, name: str) -> str:
 def test_graph_builder_populates_content_hash(tmp_path: Path) -> None:
     source = tmp_path / "sample.py"
     source.write_text(
-        "def foo(x: int) -> int:\n"
-        "    return x + 1\n",
+        "def foo(x: int) -> int:\n    return x + 1\n",
         encoding="utf-8",
     )
 
@@ -44,8 +43,7 @@ def test_graph_builder_populates_content_hash(tmp_path: Path) -> None:
 def test_content_hash_is_stable_across_file_rename(tmp_path: Path) -> None:
     source = tmp_path / "old_name.py"
     source.write_text(
-        "def foo(x: int) -> int:\n"
-        "    return x + 1\n",
+        "def foo(x: int) -> int:\n    return x + 1\n",
         encoding="utf-8",
     )
 

@@ -19,5 +19,5 @@ __all__ = [
     "JavaParser",
     "RustParser",
     "VueParser",
-    "TypeScriptParser"
+    "TypeScriptParser",
 ]

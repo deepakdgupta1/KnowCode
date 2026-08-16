@@ -42,7 +42,9 @@ def entity_named(result: ParseResult, name: str):
     return matches[0]
 
 
-def binding_targets(result: ParseResult, kind: RelationshipKind, binding_type: str) -> set[str]:
+def binding_targets(
+    result: ParseResult, kind: RelationshipKind, binding_type: str
+) -> set[str]:
     """Return the endpoints of every template or style edge of one binding type."""
     return {
         relationship.target_id
@@ -68,6 +70,7 @@ def assert_binds_to_entities(
 # CORE FUNCTIONALITY TESTS
 # ============================================================================
 
+
 def test_parse_simple_vue_component():
     """Test parsing a simple Vue component."""
     vue_code = """
@@ -87,7 +90,7 @@ div { color: blue; }
 """
     parser = VueParser()
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.vue', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".vue", delete=False) as f:
         f.write(vue_code)
         f.flush()
         temp_path = Path(f.name)
@@ -126,7 +129,7 @@ function handleClick() {
 """
     parser = VueParser()
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.vue', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".vue", delete=False) as f:
         f.write(vue_code)
         f.flush()
         temp_path = Path(f.name)
@@ -167,7 +170,7 @@ const props = defineProps({
 """
     parser = VueParser()
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.vue', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".vue", delete=False) as f:
         f.write(vue_code)
         f.flush()
         temp_path = Path(f.name)
@@ -193,7 +196,7 @@ const emit = defineEmits(['update', 'close'])
 """
     parser = VueParser()
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.vue', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".vue", delete=False) as f:
         f.write(vue_code)
         f.flush()
         temp_path = Path(f.name)
@@ -232,7 +235,7 @@ export default {
 """
     parser = VueParser()
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.vue', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".vue", delete=False) as f:
         f.write(vue_code)
         f.flush()
         temp_path = Path(f.name)
@@ -270,7 +273,7 @@ export default {
 """
     parser = VueParser()
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.vue', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".vue", delete=False) as f:
         f.write(vue_code)
         f.flush()
         temp_path = Path(f.name)
@@ -283,9 +286,7 @@ export default {
         assert {method.name for method in methods} == {"increment", "reset"}
         assert {method.kind for method in methods} == {EntityKind.METHOD}
 
-        assert_binds_to_entities(
-            result, RelationshipKind.CALLS, "event", {"increment"}
-        )
+        assert_binds_to_entities(result, RelationshipKind.CALLS, "event", {"increment"})
     finally:
         temp_path.unlink()
 
@@ -313,7 +314,7 @@ export default {
 """
     parser = VueParser()
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.vue', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".vue", delete=False) as f:
         f.write(vue_code)
         f.flush()
         temp_path = Path(f.name)
@@ -344,7 +345,7 @@ import UserCard from './components/UserCard.vue'
 """
     parser = VueParser()
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.vue', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".vue", delete=False) as f:
         f.write(vue_code)
         f.flush()
         temp_path = Path(f.name)
@@ -353,7 +354,9 @@ import UserCard from './components/UserCard.vue'
         result = parser.parse_file(temp_path)
 
         # Find import relationships
-        imports = [r for r in result.relationships if r.kind == RelationshipKind.IMPORTS]
+        imports = [
+            r for r in result.relationships if r.kind == RelationshipKind.IMPORTS
+        ]
         import_targets = {r.target_id for r in imports}
         assert any("MyButton" in target for target in import_targets)
         assert any("UserCard" in target for target in import_targets)
@@ -376,7 +379,7 @@ const { data } = useCustom()
 """
     parser = VueParser()
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.vue', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".vue", delete=False) as f:
         f.write(vue_code)
         f.flush()
         temp_path = Path(f.name)
@@ -385,7 +388,11 @@ const { data } = useCustom()
         result = parser.parse_file(temp_path)
 
         # Find composable call relationships
-        composable_calls = [r for r in result.relationships if r.kind == RelationshipKind.CALLS and "composable::" in r.target_id]
+        composable_calls = [
+            r
+            for r in result.relationships
+            if r.kind == RelationshipKind.CALLS and "composable::" in r.target_id
+        ]
         composable_names = {r.target_id.split("::")[-1] for r in composable_calls}
         assert "useRouter" in composable_names
         assert "useStore" in composable_names
@@ -412,7 +419,7 @@ const email = ref('')
 """
     parser = VueParser()
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.vue', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".vue", delete=False) as f:
         f.write(vue_code)
         f.flush()
         temp_path = Path(f.name)
@@ -449,7 +456,7 @@ const user = ref<User>({ name: 'John', age: 30 })
 """
     parser = VueParser()
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.vue', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".vue", delete=False) as f:
         f.write(vue_code)
         f.flush()
         temp_path = Path(f.name)
@@ -481,7 +488,9 @@ def test_parse_component_name_from_filename():
     parser = VueParser()
 
     # Create file with kebab-case name
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.vue', delete=False, prefix='my-custom-component-') as f:
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".vue", delete=False, prefix="my-custom-component-"
+    ) as f:
         f.write(vue_code)
         f.flush()
         temp_path = Path(f.name)
@@ -506,7 +515,7 @@ def test_parse_empty_vue_file():
     vue_code = ""
     parser = VueParser()
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.vue', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".vue", delete=False) as f:
         f.write(vue_code)
         f.flush()
         temp_path = Path(f.name)
@@ -577,7 +586,7 @@ function goBack() {
 """
     parser = VueParser()
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.vue', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".vue", delete=False) as f:
         f.write(vue_code)
         f.flush()
         temp_path = Path(f.name)
@@ -611,13 +620,11 @@ function goBack() {
         }
 
         # Check event handlers and v-model resolve to real entities
-        assert (
-            entity_named(result, "incrementAge").id
-            in binding_targets(result, RelationshipKind.CALLS, "event")
+        assert entity_named(result, "incrementAge").id in binding_targets(
+            result, RelationshipKind.CALLS, "event"
         )
-        assert (
-            entity_named(result, "nickname").id
-            in binding_targets(result, RelationshipKind.REFERENCES, "model")
+        assert entity_named(result, "nickname").id in binding_targets(
+            result, RelationshipKind.REFERENCES, "model"
         )
     finally:
         temp_path.unlink()
@@ -626,6 +633,7 @@ function goBack() {
 # ============================================================================
 # ENHANCEMENT TESTS
 # ============================================================================
+
 
 def test_comprehensive_script_setup_declarations():
     """Test that ALL top-level declarations in <script setup> are captured."""
@@ -665,7 +673,7 @@ const { x, y } = reactive({ x: 0, y: 0 })
 """
     parser = VueParser()
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.vue', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".vue", delete=False) as f:
         f.write(vue_code)
         f.flush()
         temp_path = Path(f.name)
@@ -722,7 +730,7 @@ import Modal from './Modal.vue'
 """
     parser = VueParser()
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.vue', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".vue", delete=False) as f:
         f.write(vue_code)
         f.flush()
         temp_path = Path(f.name)
@@ -731,7 +739,9 @@ import Modal from './Modal.vue'
         result = parser.parse_file(temp_path)
 
         # Check imports
-        import_rels = [r for r in result.relationships if r.kind == RelationshipKind.IMPORTS]
+        import_rels = [
+            r for r in result.relationships if r.kind == RelationshipKind.IMPORTS
+        ]
         imported_components = {r.target_id.split("::")[-1] for r in import_rels}
 
         assert "MyButton" in imported_components
@@ -770,7 +780,7 @@ const items = ['a', 'b', 'c']
 """
     parser = VueParser()
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.vue', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".vue", delete=False) as f:
         f.write(vue_code)
         f.flush()
         temp_path = Path(f.name)
@@ -822,7 +832,7 @@ function handleClick() {
 """
     parser = VueParser()
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.vue', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".vue", delete=False) as f:
         f.write(vue_code)
         f.flush()
         temp_path = Path(f.name)
@@ -832,7 +842,8 @@ function handleClick() {
 
         # Check component usage relationships
         usage_rels = [
-            r for r in result.relationships
+            r
+            for r in result.relationships
             if r.kind == RelationshipKind.REFERENCES
             and "vue_component" in r.target_id
             and r.metadata.get("usage_type") == "template"
@@ -870,7 +881,7 @@ const props = defineProps<{
 """
     parser = VueParser()
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.vue', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".vue", delete=False) as f:
         f.write(vue_code)
         f.flush()
         temp_path = Path(f.name)
@@ -903,7 +914,7 @@ const count = 0
 """
     parser = VueParser()
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.vue', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".vue", delete=False) as f:
         f.write(vue_code)
         f.flush()
         temp_path = Path(f.name)
@@ -958,7 +969,7 @@ export default {
 """
     parser = VueParser()
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.vue', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".vue", delete=False) as f:
         f.write(vue_code)
         f.flush()
         temp_path = Path(f.name)
@@ -1020,7 +1031,7 @@ function save() {
 """
     parser = VueParser()
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.vue', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".vue", delete=False) as f:
         f.write(vue_code)
         f.flush()
         temp_path = Path(f.name)
@@ -1029,12 +1040,15 @@ function save() {
         result = parser.parse_file(temp_path)
 
         # Check imports
-        import_rels = [r for r in result.relationships if r.kind == RelationshipKind.IMPORTS]
+        import_rels = [
+            r for r in result.relationships if r.kind == RelationshipKind.IMPORTS
+        ]
         assert len(import_rels) == 4
 
         # Check usage
         usage_rels = [
-            r for r in result.relationships
+            r
+            for r in result.relationships
             if r.kind == RelationshipKind.REFERENCES
             and "vue_component" in r.target_id
             and r.metadata.get("usage_type") == "template"
@@ -1056,6 +1070,7 @@ function save() {
 # ============================================================================
 # REFINEMENT TESTS
 # ============================================================================
+
 
 def test_expression_based_event_handlers_filtered():
     """Test that inline expressions in event handlers are filtered out."""
@@ -1091,7 +1106,7 @@ function doSomething(arg) {}
 """
     parser = VueParser()
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.vue', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".vue", delete=False) as f:
         f.write(vue_code)
         f.flush()
         temp_path = Path(f.name)
@@ -1137,7 +1152,7 @@ const primaryColor = ref('#409eff')
 """
     parser = VueParser()
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.vue', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".vue", delete=False) as f:
         f.write(vue_code)
         f.flush()
         temp_path = Path(f.name)
@@ -1178,7 +1193,7 @@ const borderWidth = ref('2px')
 """
     parser = VueParser()
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.vue', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".vue", delete=False) as f:
         f.write(vue_code)
         f.flush()
         temp_path = Path(f.name)
@@ -1224,7 +1239,7 @@ let isActive = true
 """
     parser = VueParser()
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.vue', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".vue", delete=False) as f:
         f.write(vue_code)
         f.flush()
         temp_path = Path(f.name)
@@ -1233,7 +1248,9 @@ let isActive = true
         result = parser.parse_file(temp_path)
 
         # Check function entities
-        function_entities = [e for e in result.entities if e.kind == EntityKind.FUNCTION]
+        function_entities = [
+            e for e in result.entities if e.kind == EntityKind.FUNCTION
+        ]
         func_names = {f.name for f in function_entities}
 
         # Regular functions
@@ -1252,7 +1269,9 @@ let isActive = true
         assert arrow_func.metadata["exposed_to_template"] == "true"
 
         # Check variable entities
-        variable_entities = [e for e in result.entities if e.kind == EntityKind.VARIABLE]
+        variable_entities = [
+            e for e in result.entities if e.kind == EntityKind.VARIABLE
+        ]
         var_names = {v.name for v in variable_entities}
 
         # These should be VARIABLE entities
@@ -1289,7 +1308,7 @@ const regularVar = 123
 """
     parser = VueParser()
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.vue', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".vue", delete=False) as f:
         f.write(vue_code)
         f.flush()
         temp_path = Path(f.name)
@@ -1339,7 +1358,7 @@ function increment() {}
 """
     parser = VueParser()
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.vue', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".vue", delete=False) as f:
         f.write(vue_code)
         f.flush()
         temp_path = Path(f.name)
@@ -1403,7 +1422,7 @@ function multiply(a, b) {
 """
     parser = VueParser()
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.vue', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".vue", delete=False) as f:
         f.write(vue_code)
         f.flush()
         temp_path = Path(f.name)
@@ -1412,7 +1431,9 @@ function multiply(a, b) {
         result = parser.parse_file(temp_path)
 
         # 1. Check arrow functions are FUNCTION entities
-        function_entities = [e for e in result.entities if e.kind == EntityKind.FUNCTION]
+        function_entities = [
+            e for e in result.entities if e.kind == EntityKind.FUNCTION
+        ]
         func_names = {f.name for f in function_entities}
         assert "increment" in func_names
         assert "handleReset" in func_names

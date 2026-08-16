@@ -64,7 +64,10 @@ class Indexer:
         self.vector_store: VectorStoreProtocol
         if vector_store is None:
             from knowcode.storage.vector_store import VectorStore
-            self.vector_store = VectorStore(dimension=embedding_provider.config.dimension)
+
+            self.vector_store = VectorStore(
+                dimension=embedding_provider.config.dimension
+            )
         else:
             self.vector_store = vector_store
         self.chunker = Chunker()
@@ -232,9 +235,7 @@ class Indexer:
         )
         return self.commit_file_update(update)
 
-    def move_file(
-        self, old_path: str | Path, new_path: str | Path
-    ) -> FileMoveCommit:
+    def move_file(self, old_path: str | Path, new_path: str | Path) -> FileMoveCommit:
         """Move one file's generation to a new canonical identity.
 
         The destination is prepared and committed *before* the source is
@@ -312,7 +313,10 @@ class Indexer:
             chunk.embedding = list(embedding)
 
     def _replace_or_report(
-        self, file_path: str | Path, *, parse_result: Optional[ParseResult] = None,
+        self,
+        file_path: str | Path,
+        *,
+        parse_result: Optional[ParseResult] = None,
         reuse_embeddings: bool = True,
     ) -> int:
         """Replace one file inside a bulk pipeline, keeping it on failure.
@@ -329,8 +333,11 @@ class Indexer:
                 reuse_embeddings=reuse_embeddings,
             )
         except FileUpdatePreparationError as exc:
-            logger.warning("Keeping the previous index generation for %s: %s",
-                           exc.file_path, "; ".join(exc.reasons))
+            logger.warning(
+                "Keeping the previous index generation for %s: %s",
+                exc.file_path,
+                "; ".join(exc.reasons),
+            )
             self.failed_updates.append((exc.file_path, "; ".join(exc.reasons)))
             return 0
         return commit.chunk_count
@@ -429,6 +436,7 @@ class Indexer:
         # Store current commit hash for future incremental indexing
         try:
             import git
+
             repo = git.Repo(str(root_path), search_parent_directories=True)
             self.manifest["last_indexed_commit"] = repo.head.commit.hexsha
         except Exception as e:
@@ -446,26 +454,33 @@ class Indexer:
             Number of new chunks added.
         """
         root_path = Path(root_dir).resolve()
-        
+
         # Determine last indexed commit
         last_commit = self.manifest.get("last_indexed_commit")
-        
+
         # Get current commit
         try:
             import git
+
             repo = git.Repo(str(root_path), search_parent_directories=True)
             current_commit = repo.head.commit.hexsha
         except Exception as e:
-            logger.warning(f"Failed to get current git commit: {e}. Incremental indexer falling back to full index.")
+            logger.warning(
+                f"Failed to get current git commit: {e}. Incremental indexer falling back to full index."
+            )
             return self.index_directory(root_dir)
 
         if not last_commit:
-            logger.info("No last_indexed_commit found in manifest. Falling back to full index.")
+            logger.info(
+                "No last_indexed_commit found in manifest. Falling back to full index."
+            )
             self.manifest["last_indexed_commit"] = current_commit
             return self.index_directory(root_dir)
 
         if current_commit == last_commit:
-            logger.info("Current commit matches last indexed commit. No changes to index.")
+            logger.info(
+                "Current commit matches last indexed commit. No changes to index."
+            )
             return 0
 
         # Get changed files
@@ -475,7 +490,7 @@ class Indexer:
             for d in diff:
                 if d.b_path:
                     changed_files_rel.append(d.b_path)
-            
+
             untracked = repo.untracked_files
             changed_files_rel.extend(untracked)
         except Exception as e:
@@ -484,7 +499,9 @@ class Indexer:
             return self.index_directory(root_dir)
 
         changed_files_rel = list(set(changed_files_rel))
-        changed_files = [str(root_path / f) for f in set(changed_files_rel) if f.strip()]
+        changed_files = [
+            str(root_path / f) for f in set(changed_files_rel) if f.strip()
+        ]
 
         if not changed_files:
             self.manifest["last_indexed_commit"] = current_commit
@@ -539,13 +556,15 @@ class Indexer:
         self.chunk_repo.save(path)
 
         # Save index manifest for compatibility checks at query time.
-        self.manifest.update({
-            "schema_version": self.SCHEMA_VERSION,
-            "version": 1,
-            "created_at": int(time.time()),
-            "embedding": asdict(self.embedding_provider.config),
-            "chunking": asdict(self.chunker.config),
-        })
+        self.manifest.update(
+            {
+                "schema_version": self.SCHEMA_VERSION,
+                "version": 1,
+                "created_at": int(time.time()),
+                "embedding": asdict(self.embedding_provider.config),
+                "chunking": asdict(self.chunker.config),
+            }
+        )
         # Manifest last, and atomically (Step 13): it describes the vectors and
         # chunks written above, so a crash may leave an older manifest beside
         # present data but never a manifest naming data that does not exist.
@@ -568,6 +587,7 @@ class Indexer:
 
         # Load manifest (optional, for compatibility checks).
         import json
+
         manifest_file = path / "index_manifest.json"
         if manifest_file.exists():
             try:
@@ -604,8 +624,6 @@ class Indexer:
             legacy_version_field="version",
             legacy_version=cls.LEGACY_MANIFEST_VERSION,
         )
-
-
 
     @classmethod
     def _validate_and_migrate_payload_schema(
@@ -659,7 +677,7 @@ class Indexer:
         if isinstance(value, str) and value.isdigit():
             return int(value)
         raise ValueError(f"Invalid index schema version value: {value!r}")
-                    
+
     def remove_file(self, file_path: str | Path) -> None:
         """Remove all chunks associated with a file path from both stores.
 

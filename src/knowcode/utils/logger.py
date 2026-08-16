@@ -14,7 +14,7 @@ def get_logger(name: str) -> logging.Logger:
         A logger configured with a stream handler if none exists.
     """
     logger = logging.getLogger(name)
-    
+
     if not logger.handlers:
         handler = logging.StreamHandler(sys.stdout)
         formatter = logging.Formatter(
@@ -23,5 +23,5 @@ def get_logger(name: str) -> logging.Logger:
         handler.setFormatter(formatter)
         logger.addHandler(handler)
         logger.setLevel(logging.INFO)
-        
+
     return logger

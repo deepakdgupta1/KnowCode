@@ -61,7 +61,9 @@ class DummyService:
 
 def _make_agent(service: DummyService) -> Agent:
     cfg = AppConfig(
-        models=[ModelConfig(name="test-model", provider="google", api_key_env="TEST_KEY")],
+        models=[
+            ModelConfig(name="test-model", provider="google", api_key_env="TEST_KEY")
+        ],
         local_answer_task_types=[TaskType.LOCATE.value, TaskType.EXPLAIN.value],
     )
     agent = Agent(service, cfg)  # type: ignore
@@ -578,7 +580,9 @@ def test_smart_answer_respects_custom_config_threshold(tmp_path: Path) -> None:
     # routing_quality_floor is zeroed to isolate the sufficiency_threshold knob
     # (otherwise the effective threshold is max(threshold, floor)).
     cfg = AppConfig(
-        models=[ModelConfig(name="test-model", provider="google", api_key_env="TEST_KEY")],
+        models=[
+            ModelConfig(name="test-model", provider="google", api_key_env="TEST_KEY")
+        ],
         sufficiency_threshold=0.9,
         routing_quality_floor=0.0,
         local_answer_task_types=[TaskType.EXPLAIN.value],
@@ -596,7 +600,9 @@ def test_smart_answer_respects_custom_config_threshold(tmp_path: Path) -> None:
 
     # Set threshold to 0.8. Since sufficiency_score 0.85 >= 0.8, it should return local.
     cfg_local = AppConfig(
-        models=[ModelConfig(name="test-model", provider="google", api_key_env="TEST_KEY")],
+        models=[
+            ModelConfig(name="test-model", provider="google", api_key_env="TEST_KEY")
+        ],
         sufficiency_threshold=0.8,
         routing_quality_floor=0.0,
         local_answer_task_types=[TaskType.EXPLAIN.value],
@@ -635,11 +641,12 @@ def test_smart_answer_emits_telemetry(tmp_path: Path) -> None:
 
     agent = _make_agent(service)
     agent.answer = MagicMock(return_value="LLM")  # type: ignore[method-assign]
-    
+
     _ = agent.smart_answer("Explain Foo")
-    
+
     # Wait for async logging to complete in a robust retry loop
     import time
+
     log_file = tmp_path / "knowcode_telemetry.jsonl"
     for _ in range(40):
         if log_file.exists():
@@ -650,13 +657,14 @@ def test_smart_answer_emits_telemetry(tmp_path: Path) -> None:
             except Exception:
                 pass
         time.sleep(0.05)
-        
+
     assert log_file.exists()
-    
+
     import json
+
     lines = log_file.read_text(encoding="utf-8").strip().split("\n")
     records = [json.loads(line) for line in lines]
-    
+
     agent_decisions = [r for r in records if r.get("event_type") == "agent_decision"]
     assert len(agent_decisions) == 1
     assert "Explain Foo" not in log_file.read_text(encoding="utf-8")

@@ -110,55 +110,56 @@ def test_parse_typescript_features(tmp_path: Path) -> None:
         const x = new MyClass();
     };
     """
-    
+
     file_path = tmp_path / "test.ts"
     file_path.write_text(source, encoding="utf-8")
-    
+
     parser = TypeScriptParser()
     result = parser.parse_file(file_path)
-    
+
     assert not result.errors
-    
+
     # Check entities
     entities = {e.qualified_name: e for e in result.entities}
-    
+
     # Ensure TS specific entities are mapped as CLASS
     assert "MyInterface" in entities
     assert entities["MyInterface"].kind == EntityKind.CLASS
-    
+
     assert "MyType" in entities
     assert entities["MyType"].kind == EntityKind.CLASS
-    
+
     assert "MyEnum" in entities
     assert entities["MyEnum"].kind == EntityKind.CLASS
-    
+
     # Normal JS parts
     assert "MyClass" in entities
     assert entities["MyClass"].kind == EntityKind.CLASS
-    
+
     assert "MyInterface.myMethod" in entities
     assert entities["MyInterface.myMethod"].kind == EntityKind.METHOD
-    
+
     assert "MyClass.myMethod" in entities
     assert entities["MyClass.myMethod"].kind == EntityKind.METHOD
-    
+
     assert "arrowFunc" in entities
     assert entities["arrowFunc"].kind == EntityKind.FUNCTION
-    
+
     # Check relationships
     rels = result.relationships
-    
+
     # Import
     imports = [r for r in rels if r.kind == RelationshipKind.IMPORTS]
     assert len(imports) == 1
-    assert imports[0].target_id == build_external_reference_id(
-        "npm", "external-module"
-    )
-    
+    assert imports[0].target_id == build_external_reference_id("npm", "external-module")
+
     # Calls
     calls = [r for r in rels if r.kind == RelationshipKind.CALLS]
     targets = {r.target_id for r in calls}
-    assert build_unresolved_reference_id(
-        "typescript", file_path, "MyClass.myMethod", "something"
-    ) in targets
+    assert (
+        build_unresolved_reference_id(
+            "typescript", file_path, "MyClass.myMethod", "something"
+        )
+        in targets
+    )
     assert build_internal_entity_id(file_path, "MyClass") in targets

@@ -177,13 +177,13 @@ class RetrievalOrchestrator:
 
         try:
             self._service._validate_index_compatibility(index_path)
-            
+
             if query.startswith('"') and query.endswith('"') and len(query) >= 2:
                 engine = self._service.get_exact_query_engine(index_path)
                 retrieval_mode = "exact"
             else:
                 engine = self._service.get_search_engine(index_path)
-                
+
             scored = engine.search_scored(
                 query,
                 limit=max(10, limit_entities * 5),

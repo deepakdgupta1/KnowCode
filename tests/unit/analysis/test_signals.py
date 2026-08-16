@@ -4,6 +4,7 @@ import pytest
 from knowcode.analysis.signals import CoverageProcessor
 from knowcode.data_models import EntityKind, RelationshipKind
 
+
 @pytest.fixture
 def coverage_xml(tmp_path):  # type: ignore
     """Create a sample coverage.xml."""
@@ -32,35 +33,40 @@ def coverage_xml(tmp_path):  # type: ignore
     path.write_text(content, encoding="utf-8")
     return path
 
+
 def test_process_cobertura(tmp_path, coverage_xml) -> None:  # type: ignore
     """Test Cobertura XML processing."""
     # Create dummy files so they resolve
     (tmp_path / "module_a.py").touch()
     (tmp_path / "module_b.py").touch()
-    
+
     processor = CoverageProcessor(tmp_path)
     result = processor.process_cobertura(coverage_xml)
-    
+
     assert not result.errors
-    
+
     # Check Report Entity
     reports = [e for e in result.entities if e.kind == EntityKind.COVERAGE_REPORT]
     assert len(reports) == 1
     report = reports[0]
     assert report.name == "Coverage Report (coverage.xml)"
     assert report.metadata["line-rate"] == "0.5"
-    
+
     # Check Relationships
     # Report -> COVERS -> Module A
     covers_rels = [r for r in result.relationships if r.kind == RelationshipKind.COVERS]
-    assert len(covers_rels) == 2 # module_a and module_b
-    
+    assert len(covers_rels) == 2  # module_a and module_b
+
     # Verify module IDs are correct (absolute path)
     targets = {r.target_id for r in covers_rels}
     assert any("module_a.py" in t for t in targets)
     assert any("module_b.py" in t for t in targets)
-    
+
     # Check metadata on relationships
-    rel_a = next(r for r in result.relationships if "module_a.py" in r.target_id and r.kind == RelationshipKind.COVERS)
+    rel_a = next(
+        r
+        for r in result.relationships
+        if "module_a.py" in r.target_id and r.kind == RelationshipKind.COVERS
+    )
     assert rel_a.metadata["line-rate"] == "1.0"
     assert rel_a.metadata["hits"] == "5/5"

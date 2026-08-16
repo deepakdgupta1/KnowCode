@@ -157,7 +157,9 @@ class JavaScriptParser(TreeSitterParser):
             for name in self._declared_names(declaration, fallback_name):
                 collected.setdefault(name, []).append(name)
 
-        return {name: tuple(qualified_names) for name, qualified_names in collected.items()}
+        return {
+            name: tuple(qualified_names) for name, qualified_names in collected.items()
+        }
 
     def _declared_names(
         self,
@@ -165,7 +167,12 @@ class JavaScriptParser(TreeSitterParser):
         fallback_name: str | None,
     ) -> list[str]:
         """Return qualified names introduced by one module declaration."""
-        if node.type in {"class", "class_declaration", "function", "function_declaration"}:
+        if node.type in {
+            "class",
+            "class_declaration",
+            "function",
+            "function_declaration",
+        }:
             name_node = node.child_by_field_name("name")
             if name_node is not None:
                 return [self._get_text(name_node)]
@@ -211,7 +218,9 @@ class JavaScriptParser(TreeSitterParser):
 
             var_name_node = decl.child_by_field_name("name")
             value_node = decl.child_by_field_name("value")
-            fallback_name = self._get_text(var_name_node) if var_name_node else "anonymous"
+            fallback_name = (
+                self._get_text(var_name_node) if var_name_node else "anonymous"
+            )
             if not value_node:
                 continue
 
@@ -261,7 +270,9 @@ class JavaScriptParser(TreeSitterParser):
         if name_node is None and fallback_name is None:
             return [], []
 
-        class_name = self._get_text(name_node) if name_node is not None else fallback_name
+        class_name = (
+            self._get_text(name_node) if name_node is not None else fallback_name
+        )
         assert class_name is not None
         qualified_name = class_name
         class_id = build_internal_entity_id(file_path, qualified_name)
@@ -286,7 +297,9 @@ class JavaScriptParser(TreeSitterParser):
         )
         entities.append(entity)
         relationships.append(
-            Relationship(source_id=parent_id, target_id=class_id, kind=RelationshipKind.CONTAINS)
+            Relationship(
+                source_id=parent_id, target_id=class_id, kind=RelationshipKind.CONTAINS
+            )
         )
 
         body_node = node.child_by_field_name("body")
@@ -320,7 +333,9 @@ class JavaScriptParser(TreeSitterParser):
         for child in heritage.named_children:
             if child.type == "extends_clause":
                 value = child.child_by_field_name("value")
-                return value or (child.named_children[0] if child.named_children else None)
+                return value or (
+                    child.named_children[0] if child.named_children else None
+                )
             if child.type != "implements_clause":
                 return child
         return None
@@ -381,7 +396,9 @@ class JavaScriptParser(TreeSitterParser):
         )
 
         relationships = [
-            Relationship(source_id=parent_id, target_id=func_id, kind=RelationshipKind.CONTAINS)
+            Relationship(
+                source_id=parent_id, target_id=func_id, kind=RelationshipKind.CONTAINS
+            )
         ]
 
         # Extract calls from body
@@ -409,7 +426,9 @@ class JavaScriptParser(TreeSitterParser):
         fallback_name: str | None = None,
         local_symbols: LocalSymbols | None = None,
     ) -> tuple[Entity, list[Relationship]]:
-        name = self._get_text(name_node) if name_node else (fallback_name or "anonymous")
+        name = (
+            self._get_text(name_node) if name_node else (fallback_name or "anonymous")
+        )
         func_id = build_internal_entity_id(file_path, name)
 
         entity = self._create_entity(
@@ -417,7 +436,9 @@ class JavaScriptParser(TreeSitterParser):
         )
 
         relationships = [
-            Relationship(source_id=parent_id, target_id=func_id, kind=RelationshipKind.CONTAINS)
+            Relationship(
+                source_id=parent_id, target_id=func_id, kind=RelationshipKind.CONTAINS
+            )
         ]
 
         body_node = node.child_by_field_name("body")

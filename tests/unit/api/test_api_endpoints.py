@@ -51,12 +51,20 @@ class DummySearchEngine:
         self._chunks = [CodeChunk(id="c1", entity_id="e1", content="hi", tokens=["hi"])]
         self.chunk_repo = DummyChunkRepo(self._chunks)
 
-    def search(self, query: Any, limit: Any=5, expand_deps: Any=True, **_kwargs: Any) -> Any:  # noqa: ANN001  # type: ignore
+    def search(
+        self, query: Any, limit: Any = 5, expand_deps: Any = True, **_kwargs: Any
+    ) -> Any:  # noqa: ANN001  # type: ignore
         return self._chunks
 
 
 class DummyStore:
-    def trace_calls(self, _entity_id: Any, direction: Any="callees", depth: Any=1, max_results: Any=50) -> Any:  # noqa: ANN001  # type: ignore
+    def trace_calls(
+        self,
+        _entity_id: Any,
+        direction: Any = "callees",
+        depth: Any = 1,
+        max_results: Any = 50,
+    ) -> Any:  # noqa: ANN001  # type: ignore
         return [
             {
                 "entity_id": "e2",
@@ -108,7 +116,9 @@ class DummyService:
             }
         ]
 
-    def get_context(self, _target: Any, max_tokens: Any=2000, task_type: Any=None) -> Any:  # noqa: ANN001  # type: ignore
+    def get_context(
+        self, _target: Any, max_tokens: Any = 2000, task_type: Any = None
+    ) -> Any:  # noqa: ANN001  # type: ignore
         return {
             "entity_id": "e1",
             "context_text": "ctx",
@@ -143,7 +153,13 @@ class DummyService:
         return {
             "task_type": task_name,
             "evidence": [
-                {"rank": 1, "chunk_id": "c1", "entity_id": "e1", "score": 0.91, "source": "retrieved"}
+                {
+                    "rank": 1,
+                    "chunk_id": "c1",
+                    "entity_id": "e1",
+                    "score": 0.91,
+                    "source": "retrieved",
+                }
             ],
         }
 
@@ -160,8 +176,8 @@ class DummyService:
         }
 
 
-
 # --- Original endpoint tests (updated for rate-limited signatures) ---
+
 
 def test_health_and_stats_endpoints() -> None:
     req = _mock_request()
@@ -193,7 +209,9 @@ def test_query_and_entity_endpoints() -> None:
     req = _mock_request()
     service = DummyService()
 
-    resp = api.query_context(request=req, payload=api.QueryRequest(query="hi", limit=1), service=service)  # type: ignore
+    resp = api.query_context(
+        request=req, payload=api.QueryRequest(query="hi", limit=1), service=service
+    )  # type: ignore
     assert resp.chunks[0].id == "c1"
     # Step 18: retrieval and the chunk resolution after it are one generation.
     assert service.leases == 1
@@ -212,7 +230,9 @@ def test_query_context_returns_412_for_missing_index() -> None:
     service.retrieve_context_for_query = _raise  # type: ignore[method-assign]
 
     with pytest.raises(api.HTTPException) as exc:
-        api.query_context(request=req, payload=api.QueryRequest(query="hi", limit=1), service=service)  # type: ignore
+        api.query_context(
+            request=req, payload=api.QueryRequest(query="hi", limit=1), service=service
+        )  # type: ignore
 
     assert exc.value.status_code == 412
 
@@ -244,6 +264,7 @@ def test_trace_calls_and_impact_endpoints() -> None:
 
 
 # --- New validation tests ---
+
 
 def test_query_limit_capped_at_20() -> None:
     """QueryRequest.limit should be capped at 20 via Pydantic validation."""
@@ -304,5 +325,3 @@ def test_freshness_endpoint() -> None:
     assert resp.is_stale is False
     # Correct assertion
     assert resp.last_index_rebuild == 200
-
-

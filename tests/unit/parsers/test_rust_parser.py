@@ -25,6 +25,7 @@ from tests.helpers.parser_assertions import (
 # CORE FUNCTIONALITY TESTS
 # ============================================================================
 
+
 def test_parse_simple_function():
     """Test parsing a simple Rust function."""
     rust_code = """
@@ -34,7 +35,7 @@ fn hello_world() {
 """
     parser = RustParser()
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.rs', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".rs", delete=False) as f:
         f.write(rust_code)
         f.flush()
         temp_path = Path(f.name)
@@ -64,7 +65,7 @@ struct Person {
 """
     parser = RustParser()
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.rs', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".rs", delete=False) as f:
         f.write(rust_code)
         f.flush()
         temp_path = Path(f.name)
@@ -73,20 +74,30 @@ struct Person {
         result = parser.parse_file(temp_path)
 
         # Find struct entity
-        structs = [e for e in result.entities if e.kind == EntityKind.CLASS and e.name == "Person"]
+        structs = [
+            e
+            for e in result.entities
+            if e.kind == EntityKind.CLASS and e.name == "Person"
+        ]
         assert len(structs) == 1
         struct = structs[0]
         assert struct.docstring == "A person with a name and age"
 
         # Find field entities
-        fields = [e for e in result.entities if e.kind == EntityKind.VARIABLE and "." in e.qualified_name]
+        fields = [
+            e
+            for e in result.entities
+            if e.kind == EntityKind.VARIABLE and "." in e.qualified_name
+        ]
         assert len(fields) == 2
         field_names = {f.name for f in fields}
         assert "name" in field_names
         assert "age" in field_names
 
         # Check CONTAINS relationships
-        contains_rels = [r for r in result.relationships if r.kind == RelationshipKind.CONTAINS]
+        contains_rels = [
+            r for r in result.relationships if r.kind == RelationshipKind.CONTAINS
+        ]
         assert len(contains_rels) >= 3  # module->struct, struct->field1, struct->field2
     finally:
         temp_path.unlink()
@@ -103,7 +114,7 @@ enum Color {
 """
     parser = RustParser()
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.rs', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".rs", delete=False) as f:
         f.write(rust_code)
         f.flush()
         temp_path = Path(f.name)
@@ -112,7 +123,11 @@ enum Color {
         result = parser.parse_file(temp_path)
 
         # Find enum entity
-        enums = [e for e in result.entities if e.kind == EntityKind.CLASS and e.name == "Color"]
+        enums = [
+            e
+            for e in result.entities
+            if e.kind == EntityKind.CLASS and e.name == "Color"
+        ]
         assert len(enums) == 1
     finally:
         temp_path.unlink()
@@ -128,7 +143,7 @@ trait Drawable {
 """
     parser = RustParser()
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.rs', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".rs", delete=False) as f:
         f.write(rust_code)
         f.flush()
         temp_path = Path(f.name)
@@ -165,7 +180,7 @@ impl Point {
 """
     parser = RustParser()
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.rs', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".rs", delete=False) as f:
         f.write(rust_code)
         f.flush()
         temp_path = Path(f.name)
@@ -174,18 +189,27 @@ impl Point {
         result = parser.parse_file(temp_path)
 
         # Find method entities
-        methods = [e for e in result.entities if e.kind == EntityKind.FUNCTION and "Point" in e.qualified_name]
+        methods = [
+            e
+            for e in result.entities
+            if e.kind == EntityKind.FUNCTION and "Point" in e.qualified_name
+        ]
         assert len(methods) == 2
         method_names = {m.name for m in methods}
         assert "new" in method_names
         assert "distance" in method_names
 
         # Methods must be contained by the real Point entity, not a pseudo type:: id
-        point = [e for e in result.entities if e.name == "Point" and e.kind == EntityKind.CLASS]
+        point = [
+            e
+            for e in result.entities
+            if e.name == "Point" and e.kind == EntityKind.CLASS
+        ]
         assert len(point) == 1
         method_ids = {m.id for m in methods}
         type_contains_rels = [
-            r for r in result.relationships
+            r
+            for r in result.relationships
             if r.kind == RelationshipKind.CONTAINS
             and r.source_id == point[0].id
             and r.target_id in method_ids
@@ -208,7 +232,7 @@ fn main() {
 """
     parser = RustParser()
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.rs', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".rs", delete=False) as f:
         f.write(rust_code)
         f.flush()
         temp_path = Path(f.name)
@@ -217,7 +241,9 @@ fn main() {
         result = parser.parse_file(temp_path)
 
         # Find import relationships
-        imports = [r for r in result.relationships if r.kind == RelationshipKind.IMPORTS]
+        imports = [
+            r for r in result.relationships if r.kind == RelationshipKind.IMPORTS
+        ]
         assert len(imports) >= 1
 
         # Check that imports point to external modules
@@ -240,7 +266,7 @@ fn main() {
 """
     parser = RustParser()
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.rs', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".rs", delete=False) as f:
         f.write(rust_code)
         f.flush()
         temp_path = Path(f.name)
@@ -267,7 +293,7 @@ static GLOBAL_COUNTER: i32 = 0;
 """
     parser = RustParser()
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.rs', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".rs", delete=False) as f:
         f.write(rust_code)
         f.flush()
         temp_path = Path(f.name)
@@ -291,7 +317,7 @@ type Result<T> = std::result::Result<T, Box<dyn Error>>;
 """
     parser = RustParser()
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.rs', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".rs", delete=False) as f:
         f.write(rust_code)
         f.flush()
         temp_path = Path(f.name)
@@ -300,7 +326,11 @@ type Result<T> = std::result::Result<T, Box<dyn Error>>;
         result = parser.parse_file(temp_path)
 
         # Find type alias (maps to CLASS)
-        type_aliases = [e for e in result.entities if e.kind == EntityKind.CLASS and e.name == "Result"]
+        type_aliases = [
+            e
+            for e in result.entities
+            if e.kind == EntityKind.CLASS and e.name == "Result"
+        ]
         assert len(type_aliases) == 1
     finally:
         temp_path.unlink()
@@ -315,7 +345,7 @@ mod utils {
 """
     parser = RustParser()
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.rs', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".rs", delete=False) as f:
         f.write(rust_code)
         f.flush()
         temp_path = Path(f.name)
@@ -324,7 +354,11 @@ mod utils {
         result = parser.parse_file(temp_path)
 
         # Find module entity
-        modules = [e for e in result.entities if e.kind == EntityKind.MODULE and e.name == "utils"]
+        modules = [
+            e
+            for e in result.entities
+            if e.kind == EntityKind.MODULE and e.name == "utils"
+        ]
         assert len(modules) == 1
     finally:
         temp_path.unlink()
@@ -341,7 +375,7 @@ fn documented_function() {
 """
     parser = RustParser()
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.rs', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".rs", delete=False) as f:
         f.write(rust_code)
         f.flush()
         temp_path = Path(f.name)
@@ -350,7 +384,11 @@ fn documented_function() {
         result = parser.parse_file(temp_path)
 
         # Find function and check docstring
-        functions = [e for e in result.entities if e.kind == EntityKind.FUNCTION and e.name == "documented_function"]
+        functions = [
+            e
+            for e in result.entities
+            if e.kind == EntityKind.FUNCTION and e.name == "documented_function"
+        ]
         assert len(functions) == 1
         assert functions[0].docstring is not None
         assert "documented function" in functions[0].docstring
@@ -364,7 +402,7 @@ def test_parse_empty_file():
     rust_code = ""
     parser = RustParser()
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.rs', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".rs", delete=False) as f:
         f.write(rust_code)
         f.flush()
         temp_path = Path(f.name)
@@ -415,7 +453,7 @@ fn main() {
 """
     parser = RustParser()
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.rs', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".rs", delete=False) as f:
         f.write(rust_code)
         f.flush()
         temp_path = Path(f.name)
@@ -427,7 +465,11 @@ fn main() {
         assert len(result.entities) > 5
 
         # Check struct
-        structs = [e for e in result.entities if e.kind == EntityKind.CLASS and e.name == "Point"]
+        structs = [
+            e
+            for e in result.entities
+            if e.kind == EntityKind.CLASS and e.name == "Point"
+        ]
         assert len(structs) == 1
         assert "point in 2d space" in structs[0].docstring.lower()
 
@@ -439,11 +481,15 @@ fn main() {
         assert "main" in method_names
 
         # Check import
-        imports = [r for r in result.relationships if r.kind == RelationshipKind.IMPORTS]
+        imports = [
+            r for r in result.relationships if r.kind == RelationshipKind.IMPORTS
+        ]
         assert len(imports) >= 1
 
         # Check impl relationship (Point implements fmt::Display)
-        impls = [r for r in result.relationships if r.kind == RelationshipKind.IMPLEMENTS]
+        impls = [
+            r for r in result.relationships if r.kind == RelationshipKind.IMPLEMENTS
+        ]
         assert len(impls) >= 1
     finally:
         temp_path.unlink()
@@ -452,6 +498,7 @@ fn main() {
 # ============================================================================
 # ENHANCEMENT TESTS
 # ============================================================================
+
 
 def test_visibility_modifiers():
     """Test that visibility modifiers are captured correctly."""
@@ -474,7 +521,7 @@ const PRIVATE_CONST: i32 = 42;
 """
     parser = RustParser()
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.rs', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".rs", delete=False) as f:
         f.write(rust_code)
         f.flush()
         temp_path = Path(f.name)
@@ -483,32 +530,56 @@ const PRIVATE_CONST: i32 = 42;
         result = parser.parse_file(temp_path)
 
         # Check public struct
-        public_structs = [e for e in result.entities if e.kind == EntityKind.CLASS and e.name == "PublicStruct"]
+        public_structs = [
+            e
+            for e in result.entities
+            if e.kind == EntityKind.CLASS and e.name == "PublicStruct"
+        ]
         assert len(public_structs) == 1
         assert public_structs[0].metadata["visibility"] == "public"
 
         # Check pub(crate) struct
-        crate_structs = [e for e in result.entities if e.kind == EntityKind.CLASS and e.name == "CrateStruct"]
+        crate_structs = [
+            e
+            for e in result.entities
+            if e.kind == EntityKind.CLASS and e.name == "CrateStruct"
+        ]
         assert len(crate_structs) == 1
         assert crate_structs[0].metadata["visibility"] == "pub(crate)"
 
         # Check public function
-        public_funcs = [e for e in result.entities if e.kind == EntityKind.FUNCTION and e.name == "public_function"]
+        public_funcs = [
+            e
+            for e in result.entities
+            if e.kind == EntityKind.FUNCTION and e.name == "public_function"
+        ]
         assert len(public_funcs) == 1
         assert public_funcs[0].metadata["visibility"] == "public"
 
         # Check private function
-        private_funcs = [e for e in result.entities if e.kind == EntityKind.FUNCTION and e.name == "private_function"]
+        private_funcs = [
+            e
+            for e in result.entities
+            if e.kind == EntityKind.FUNCTION and e.name == "private_function"
+        ]
         assert len(private_funcs) == 1
         assert private_funcs[0].metadata["visibility"] == "private"
 
         # Check pub(super) function
-        super_funcs = [e for e in result.entities if e.kind == EntityKind.FUNCTION and e.name == "super_function"]
+        super_funcs = [
+            e
+            for e in result.entities
+            if e.kind == EntityKind.FUNCTION and e.name == "super_function"
+        ]
         assert len(super_funcs) == 1
         assert super_funcs[0].metadata["visibility"] == "pub(super)"
 
         # Check public const
-        public_consts = [e for e in result.entities if e.kind == EntityKind.VARIABLE and e.name == "PUBLIC_CONST"]
+        public_consts = [
+            e
+            for e in result.entities
+            if e.kind == EntityKind.VARIABLE and e.name == "PUBLIC_CONST"
+        ]
         assert len(public_consts) == 1
         assert public_consts[0].metadata["visibility"] == "public"
 
@@ -528,7 +599,7 @@ mod inline_module {
 """
     parser = RustParser()
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.rs', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".rs", delete=False) as f:
         f.write(rust_code)
         f.flush()
         temp_path = Path(f.name)
@@ -537,7 +608,11 @@ mod inline_module {
         result = parser.parse_file(temp_path)
 
         # Check external module (utils)
-        utils_mods = [e for e in result.entities if e.kind == EntityKind.MODULE and e.name == "utils"]
+        utils_mods = [
+            e
+            for e in result.entities
+            if e.kind == EntityKind.MODULE and e.name == "utils"
+        ]
         assert len(utils_mods) == 1
         assert utils_mods[0].metadata["is_external"] == "true"
         assert "possible_file_paths" in utils_mods[0].metadata
@@ -546,7 +621,11 @@ mod inline_module {
         assert "utils.rs" in paths or "utils/mod.rs" in paths
 
         # Check inline module
-        inline_mods = [e for e in result.entities if e.kind == EntityKind.MODULE and e.name == "inline_module"]
+        inline_mods = [
+            e
+            for e in result.entities
+            if e.kind == EntityKind.MODULE and e.name == "inline_module"
+        ]
         assert len(inline_mods) == 1
         assert inline_mods[0].metadata["is_external"] == "false"
 
@@ -582,7 +661,7 @@ impl Display for Point {
 """
     parser = RustParser()
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.rs', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".rs", delete=False) as f:
         f.write(rust_code)
         f.flush()
         temp_path = Path(f.name)
@@ -609,9 +688,13 @@ impl Display for Point {
         # Should have TWO IMPLEMENTS relationships now:
         # 1. type::Point -> trait::Display (type-level)
         # 2. method -> trait::Display (method-level for "Where is Display implemented?")
-        impl_rels = [r for r in result.relationships if r.kind == RelationshipKind.IMPLEMENTS]
+        impl_rels = [
+            r for r in result.relationships if r.kind == RelationshipKind.IMPLEMENTS
+        ]
         assert len(impl_rels) >= 2
-        point_impl = [r for r in impl_rels if "Point" in r.source_id and "Display" in r.target_id]
+        point_impl = [
+            r for r in impl_rels if "Point" in r.source_id and "Display" in r.target_id
+        ]
         assert len(point_impl) >= 1
 
     finally:
@@ -635,7 +718,7 @@ impl Calculator {
 """
     parser = RustParser()
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.rs', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".rs", delete=False) as f:
         f.write(rust_code)
         f.flush()
         temp_path = Path(f.name)
@@ -650,9 +733,15 @@ impl Calculator {
         assert "subtract" in method_names
 
         # Verify BOTH methods have CONTAINS relationships from Calculator
-        contains_rels = [r for r in result.relationships if r.kind == RelationshipKind.CONTAINS and "Calculator" in r.source_id]
+        contains_rels = [
+            r
+            for r in result.relationships
+            if r.kind == RelationshipKind.CONTAINS and "Calculator" in r.source_id
+        ]
         # Should have at least 2 CONTAINS relationships (one for each method)
-        method_contains = [r for r in contains_rels if any(m.id == r.target_id for m in methods)]
+        method_contains = [
+            r for r in contains_rels if any(m.id == r.target_id for m in methods)
+        ]
         assert len(method_contains) == 2
 
         # Verify visibility metadata
@@ -678,7 +767,7 @@ pub type MyType = i32;
 """
     parser = RustParser()
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.rs', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".rs", delete=False) as f:
         f.write(rust_code)
         f.flush()
         temp_path = Path(f.name)
@@ -714,6 +803,7 @@ pub type MyType = i32;
 # EDGE CASE TESTS
 # ============================================================================
 
+
 def test_attribute_capture():
     """Test that attributes like #[derive], #[test], #[inline] are captured."""
     rust_code = """
@@ -740,7 +830,7 @@ fn fast_function() -> i32 {
 """
     parser = RustParser()
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.rs', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".rs", delete=False) as f:
         f.write(rust_code)
         f.flush()
         temp_path = Path(f.name)
@@ -749,26 +839,42 @@ fn fast_function() -> i32 {
         result = parser.parse_file(temp_path)
 
         # Check struct attributes
-        structs = [e for e in result.entities if e.kind == EntityKind.CLASS and e.name == "Point"]
+        structs = [
+            e
+            for e in result.entities
+            if e.kind == EntityKind.CLASS and e.name == "Point"
+        ]
         assert len(structs) == 1
         assert "attributes" in structs[0].metadata
         assert "#[derive(Debug, Clone)]" in structs[0].metadata["attributes"]
 
         # Check test function attributes and is_test flag
-        test_funcs = [e for e in result.entities if e.kind == EntityKind.FUNCTION and e.name == "test_addition"]
+        test_funcs = [
+            e
+            for e in result.entities
+            if e.kind == EntityKind.FUNCTION and e.name == "test_addition"
+        ]
         assert len(test_funcs) == 1
         assert "attributes" in test_funcs[0].metadata
         assert "#[test]" in test_funcs[0].metadata["attributes"]
         assert test_funcs[0].metadata.get("is_test") == "true"
 
         # Check async test
-        async_tests = [e for e in result.entities if e.kind == EntityKind.FUNCTION and e.name == "test_async"]
+        async_tests = [
+            e
+            for e in result.entities
+            if e.kind == EntityKind.FUNCTION and e.name == "test_async"
+        ]
         assert len(async_tests) == 1
         assert "is_test" in async_tests[0].metadata
         assert async_tests[0].metadata["is_test"] == "true"
 
         # Check inline function
-        inline_funcs = [e for e in result.entities if e.kind == EntityKind.FUNCTION and e.name == "fast_function"]
+        inline_funcs = [
+            e
+            for e in result.entities
+            if e.kind == EntityKind.FUNCTION and e.name == "fast_function"
+        ]
         assert len(inline_funcs) == 1
         assert "attributes" in inline_funcs[0].metadata
         assert "#[inline]" in inline_funcs[0].metadata["attributes"]
@@ -790,7 +896,7 @@ struct Container {
 """
     parser = RustParser()
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.rs', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".rs", delete=False) as f:
         f.write(rust_code)
         f.flush()
         temp_path = Path(f.name)
@@ -799,7 +905,9 @@ struct Container {
         result = parser.parse_file(temp_path)
 
         # Check type relationships - should link to base types without generics
-        type_rels = [r for r in result.relationships if r.kind == RelationshipKind.USES_TYPE]
+        type_rels = [
+            r for r in result.relationships if r.kind == RelationshipKind.USES_TYPE
+        ]
 
         # Should have relationships to HashMap, Vec, Option (not HashMap<String, i32>)
         target_types = {r.target_id.split("::")[-1] for r in type_rels}
@@ -835,7 +943,7 @@ impl Display for Point {
 """
     parser = RustParser()
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.rs', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".rs", delete=False) as f:
         f.write(rust_code)
         f.flush()
         temp_path = Path(f.name)
@@ -844,7 +952,11 @@ impl Display for Point {
         result = parser.parse_file(temp_path)
 
         # Find the display method
-        display_methods = [e for e in result.entities if e.kind == EntityKind.FUNCTION and e.name == "display"]
+        display_methods = [
+            e
+            for e in result.entities
+            if e.kind == EntityKind.FUNCTION and e.name == "display"
+        ]
         assert len(display_methods) == 1
         display_method = display_methods[0]
 
@@ -855,7 +967,8 @@ impl Display for Point {
 
         # Check that method implements the trait (direct link for queries like "Where is Display implemented?")
         method_impl_rels = [
-            r for r in result.relationships
+            r
+            for r in result.relationships
             if r.kind == RelationshipKind.IMPLEMENTS
             and r.source_id == display_method.id
             and "Display" in r.target_id
@@ -867,7 +980,8 @@ impl Display for Point {
         # 1. type::Point -> trait::Display
         # 2. method display -> trait::Display
         type_impl_rels = [
-            r for r in result.relationships
+            r
+            for r in result.relationships
             if r.kind == RelationshipKind.IMPLEMENTS
             and "Point" in r.source_id
             and "Display" in r.target_id
@@ -895,7 +1009,7 @@ impl<T: fmt::Display> fmt::Display for Wrapper<T> {
 """
     parser = RustParser()
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.rs', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".rs", delete=False) as f:
         f.write(rust_code)
         f.flush()
         temp_path = Path(f.name)
@@ -904,13 +1018,19 @@ impl<T: fmt::Display> fmt::Display for Wrapper<T> {
         result = parser.parse_file(temp_path)
 
         # Check that impl relationship strips generics from trait name
-        impl_rels = [r for r in result.relationships if r.kind == RelationshipKind.IMPLEMENTS]
+        impl_rels = [
+            r for r in result.relationships if r.kind == RelationshipKind.IMPLEMENTS
+        ]
 
         # Should have at least one IMPLEMENTS relationship
         assert len(impl_rels) >= 1
 
         # The trait target should be fmt::Display, not fmt::Display<something>
-        trait_impl = [r for r in impl_rels if "Display" in r.target_id and "Wrapper" in r.source_id]
+        trait_impl = [
+            r
+            for r in impl_rels
+            if "Display" in r.target_id and "Wrapper" in r.source_id
+        ]
         assert len(trait_impl) >= 1
         # Ensure no generics in trait target
         assert "<" not in trait_impl[0].target_id
@@ -952,7 +1072,7 @@ mod tests {
 """
     parser = RustParser()
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.rs', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".rs", delete=False) as f:
         f.write(rust_code)
         f.flush()
         temp_path = Path(f.name)
@@ -979,7 +1099,10 @@ mod tests {
         # Helper should not have is_test metadata
         helpers = [f for f in functions if f.name == "helper"]
         assert len(helpers) == 1
-        assert "is_test" not in helpers[0].metadata or helpers[0].metadata["is_test"] != "true"
+        assert (
+            "is_test" not in helpers[0].metadata
+            or helpers[0].metadata["is_test"] != "true"
+        )
 
     finally:
         temp_path.unlink()
@@ -999,7 +1122,9 @@ def _write_rust(tmp_path: Path, source: str, name: str = "sample.rs") -> Path:
     return path
 
 
-def _parse(tmp_path: Path, source: str, name: str = "sample.rs") -> tuple[ParseResult, Path]:
+def _parse(
+    tmp_path: Path, source: str, name: str = "sample.rs"
+) -> tuple[ParseResult, Path]:
     """Parse an inline Rust source fixture."""
     path = _write_rust(tmp_path, source, name)
     return RustParser().parse_file(path), path
@@ -1076,7 +1201,9 @@ def test_local_trait_impl_resolves_to_the_trait_entity(tmp_path: Path) -> None:
     assert_relationship_endpoints_classified(result)
 
 
-def test_qualified_trait_path_becomes_a_scoped_unresolved_reference(tmp_path: Path) -> None:
+def test_qualified_trait_path_becomes_a_scoped_unresolved_reference(
+    tmp_path: Path,
+) -> None:
     """A trait reached through a path is unresolved, never a fabricated trait:: id."""
     result, path = _parse(
         tmp_path,
@@ -1234,7 +1361,9 @@ def test_inline_module_impls_resolve_within_their_own_scope(tmp_path: Path) -> N
     assert_relationship_endpoints_classified(result)
 
 
-def test_impl_for_nonlocal_type_does_not_fabricate_a_type_endpoint(tmp_path: Path) -> None:
+def test_impl_for_nonlocal_type_does_not_fabricate_a_type_endpoint(
+    tmp_path: Path,
+) -> None:
     """A foreign implementing type is recorded as metadata, never as an edge source."""
     result, path = _parse(
         tmp_path,
@@ -1306,7 +1435,9 @@ fn main() {
 """
 
 
-def test_calls_resolve_locally_or_become_scoped_unresolved_references(tmp_path: Path) -> None:
+def test_calls_resolve_locally_or_become_scoped_unresolved_references(
+    tmp_path: Path,
+) -> None:
     """Unambiguous local callees resolve; unknown callees stay explicitly unresolved."""
     result, path = _parse(tmp_path, CALL_RESOLUTION)
 
@@ -1365,7 +1496,9 @@ impl Shape {
 """
 
 
-def test_ambiguous_type_declaration_is_never_resolved_by_first_match(tmp_path: Path) -> None:
+def test_ambiguous_type_declaration_is_never_resolved_by_first_match(
+    tmp_path: Path,
+) -> None:
     """A name declared twice in one scope cannot silently claim impl methods."""
     result, path = _parse(tmp_path, AMBIGUOUS_TYPE_DECLARATIONS)
 
@@ -1473,7 +1606,9 @@ def test_rust_parsing_is_deterministic(tmp_path: Path, source: str) -> None:
     )
 
 
-def test_module_level_macro_invocation_is_an_unresolved_reference(tmp_path: Path) -> None:
+def test_module_level_macro_invocation_is_an_unresolved_reference(
+    tmp_path: Path,
+) -> None:
     """A macro call is explicit unresolved data, not a fabricated macro:: id."""
     result, path = _parse(
         tmp_path,

@@ -170,7 +170,8 @@ def test_a_failed_incremental_build_leaves_the_previous_generation_searchable(
 
     restarted = _service(tmp_path, backend)
     assert [
-        chunk.entity_id for chunk in restarted.get_search_engine().search("alpha", limit=5)
+        chunk.entity_id
+        for chunk in restarted.get_search_engine().search("alpha", limit=5)
     ] == before
 
 
@@ -297,7 +298,9 @@ def test_an_unrecoverable_vector_commit_failure_publishes_nothing(
     assert current.generation_id == first.generation_id
     assert [
         chunk.entity_id
-        for chunk in _service(tmp_path, backend).get_search_engine().search("alpha", limit=5)
+        for chunk in _service(tmp_path, backend)
+        .get_search_engine()
+        .search("alpha", limit=5)
     ]
 
 

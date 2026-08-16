@@ -109,9 +109,9 @@ class TreeSitterParser:
 
         # Handle errors from tree-sitter
         if tree.root_node.has_error:
-             # We might want to be more specific here, but for now just flag it
-             # Don't fail completely, as partial AST is often useful
-             errors.append("Tree-sitter reported syntax errors in file")
+            # We might want to be more specific here, but for now just flag it
+            # Don't fail completely, as partial AST is often useful
+            errors.append("Tree-sitter reported syntax errors in file")
 
         return ParseResult(
             file_path=str(file_path),
@@ -147,23 +147,22 @@ class TreeSitterParser:
         source_lines: list[str],
     ) -> tuple[list[Entity], list[Relationship]]:
         """Extract entities from the AST. Must be implemented by subclasses.
-        
+
         Args:
             node: Current AST node to process.
             file_path: Path to the file being parsed.
             parent_id: ID of the parent entity (for containment).
             source_code: Full source code text.
             source_lines: Source code split by lines.
-            
+
         Returns:
             Tuple of (entities list, relationships list).
         """
         raise NotImplementedError
 
-
     def _get_text(self, node: Any) -> str:
         """Get text content of a node."""
-        return str(node.text.decode("utf8"))  
+        return str(node.text.decode("utf8"))
 
     def _get_location(self, node: Any, file_path: Path) -> Location:
         """Get location object for a node."""

@@ -1,0 +1,67 @@
+name: AI Docs Enforcer
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  enforce-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # needed for changed-files
+
+      - name: Get changed files
+        id: changed-files
+        uses: tj-actions/changed-files@v44
+        with:
+          files: |
+            **.py
+
+      - name: Set up uv
+        if: steps.changed-files.outputs.any_changed == 'true'
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Install dependencies
+        if: steps.changed-files.outputs.any_changed == 'true'
+        run: uv sync --all-extras --dev
+
+      - name: Run AI Enforcer
+        if: steps.changed-files.outputs.any_changed == 'true'
+        env:
+          # The direct LLM provider API key needs to be provided in repository secrets
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          # The direct LLM provider OpenAI-compatible completions endpoint
+          LLM_API_URL: ${{ secrets.LLM_API_URL }}
+          # The specific model to use for the provider
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+        run: |
+          # Read space-separated changed files
+          CHANGED_FILES="${{ steps.changed-files.outputs.all_changed_files }}"
+          
+          # Only run if there are actual python files and we have the secret
+          if [ -n "$LLM_API_KEY" ] && [ -n "$CHANGED_FILES" ]; then
+            uv run python scripts/ai_enforcer.py --no-git-add $CHANGED_FILES
+          else
+            echo "Skipping AI generation. Missing LLM key or no files to process."
+          fi
+
+      - name: Commit Generated Docstrings
+        if: steps.changed-files.outputs.any_changed == 'true'
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "docs: auto-generate missing docstrings via AI Enforcer"
+          commit_user_name: "github-actions[bot]"
+          commit_user_email: "github-actions[bot]@users.noreply.github.com"
+          commit_author: "github-actions[bot] <github-actions[bot]@users.noreply.github.com>"

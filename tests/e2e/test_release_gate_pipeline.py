@@ -138,10 +138,16 @@ def test_every_reviewed_c2_construct_extracts_exactly(tmp_path: Path) -> None:
 
     # C2 Python nesting + scope confinement: place owns its own calls, and the
     # nested normalize()'s calls are never attributed to place.
-    assert {"OrderService", "OrderService.place", "OrderService.place.normalize"} <= qnames
+    assert {
+        "OrderService",
+        "OrderService.place",
+        "OrderService.place.normalize",
+    } <= qnames
     assert ("OrderService.place", "calls", "validate") in edges
     assert ("OrderService.place", "calls", "OrderService.place.normalize") in edges
-    place_call_targets = {t for s, k, t in edges if s == "OrderService.place" and k == "calls"}
+    place_call_targets = {
+        t for s, k, t in edges if s == "OrderService.place" and k == "calls"
+    }
     assert "strip" not in place_call_targets and "lower" not in place_call_targets, (
         "a nested function's calls leaked into the enclosing scope"
     )
@@ -317,8 +323,12 @@ def test_watch_lifecycle_add_modify_duplicate_delete_move(
         restarted.close()
 
     assert any("shipping.py" in path for path in files), "the added file is missing"
-    assert any("orders_renamed.py" in path for path in files), "the move destination is missing"
-    assert not any(path.endswith("app/orders.py") for path in files), "the move source survived"
+    assert any("orders_renamed.py" in path for path in files), (
+        "the move destination is missing"
+    )
+    assert not any(path.endswith("app/orders.py") for path in files), (
+        "the move source survived"
+    )
     assert not any("svc.ts" in path for path in files), "the deleted file survived"
     assert chunks == vectors, "chunk/vector membership split after the watch session"
 
@@ -365,7 +375,10 @@ def test_a_failed_rebuild_preserves_the_adversarial_generation(
     repo = build_adversarial_repo(tmp_path)
     service = _service(repo, backend)
     service.analyze(directory=repo.source, output=repo.output)
-    before = {chunk.entity_id for chunk in service.get_search_engine().search("place an order", limit=5)}
+    before = {
+        chunk.entity_id
+        for chunk in service.get_search_engine().search("place an order", limit=5)
+    }
     assert before, "precondition: the adversarial generation is searchable"
     first = resolve_current_generation(repo.output / "knowcode_index")
 
@@ -388,7 +401,10 @@ def test_a_failed_rebuild_preserves_the_adversarial_generation(
     assert current.generation_id == first.generation_id
 
     restarted = _service(repo, backend)
-    after = {chunk.entity_id for chunk in restarted.get_search_engine().search("place an order", limit=5)}
+    after = {
+        chunk.entity_id
+        for chunk in restarted.get_search_engine().search("place an order", limit=5)
+    }
     assert after == before, "the previous generation was disturbed by a failed rebuild"
     restarted.close()
 

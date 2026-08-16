@@ -22,9 +22,7 @@ from knowcode.indexing.file_updates import (
 
 
 def _chunk(chunk_id: str, embedding: list[float] | None) -> CodeChunk:
-    return CodeChunk(
-        id=chunk_id, entity_id="e", content="c", embedding=embedding
-    )
+    return CodeChunk(id=chunk_id, entity_id="e", content="c", embedding=embedding)
 
 
 def test_a_valid_batch_passes() -> None:

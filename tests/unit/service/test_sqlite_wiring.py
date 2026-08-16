@@ -3,7 +3,13 @@
 from pathlib import Path
 
 from knowcode.config import AppConfig
-from knowcode.data_models import Entity, EntityKind, Location, Relationship, RelationshipKind
+from knowcode.data_models import (
+    Entity,
+    EntityKind,
+    Location,
+    Relationship,
+    RelationshipKind,
+)
 from knowcode.service import KnowCodeService
 from knowcode.storage.sqlite_chunk_repository import SqliteChunkRepository
 from knowcode.storage.sqlite_knowledge_store import SqliteKnowledgeStore

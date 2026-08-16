@@ -32,7 +32,9 @@ def _negative_sources() -> list[Path]:
     return sorted(path for path in NEGATIVE_ROOT.iterdir() if path.is_file())
 
 
-def _parse_snapshot(path: Path) -> tuple[tuple[str, ...], tuple[tuple[str, str, str], ...], int]:
+def _parse_snapshot(
+    path: Path,
+) -> tuple[tuple[str, ...], tuple[tuple[str, str, str], ...], int]:
     parser = PARSER_BY_EXTENSION[path.suffix]()
     result = parser.parse_file(path)
     entities = tuple(entity.id for entity in result.entities)
@@ -70,9 +72,9 @@ def test_malformed_source_leaves_no_invalid_endpoints(source: Path) -> None:
     result = parser.parse_file(source)
 
     for relationship in result.relationships:
-        assert classify_endpoint_id(relationship.source_id) is not EndpointKind.INVALID, (
-            f"{source.name}: invalid source endpoint {relationship.source_id!r}"
-        )
-        assert classify_endpoint_id(relationship.target_id) is not EndpointKind.INVALID, (
-            f"{source.name}: invalid target endpoint {relationship.target_id!r}"
-        )
+        assert (
+            classify_endpoint_id(relationship.source_id) is not EndpointKind.INVALID
+        ), f"{source.name}: invalid source endpoint {relationship.source_id!r}"
+        assert (
+            classify_endpoint_id(relationship.target_id) is not EndpointKind.INVALID
+        ), f"{source.name}: invalid target endpoint {relationship.target_id!r}"

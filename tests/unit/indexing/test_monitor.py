@@ -36,7 +36,9 @@ class MockBackgroundIndexer:
 
 
 class FakeEvent:
-    def __init__(self, src_path: str, dest_path: str = "", is_directory: bool = False) -> None:
+    def __init__(
+        self, src_path: str, dest_path: str = "", is_directory: bool = False
+    ) -> None:
         self.src_path = src_path
         self.dest_path = dest_path
         self.is_directory = is_directory
@@ -118,7 +120,9 @@ def test_monitor_on_moved_queues_move(watched) -> None:  # type: ignore[no-untyp
 
 def test_directory_events_are_ignored(watched) -> None:  # type: ignore[no-untyped-def]
     bg, handler, root = watched
-    directory = FakeEvent(str(root / "pkg"), dest_path=str(root / "pkg2"), is_directory=True)
+    directory = FakeEvent(
+        str(root / "pkg"), dest_path=str(root / "pkg2"), is_directory=True
+    )
 
     handler.on_created(directory)
     handler.on_modified(directory)
@@ -172,7 +176,10 @@ def test_ignored_paths_are_never_queued_matches_a_real_scan(tmp_path: Path) -> N
     scanned = {info.path for info in Scanner(tmp_path).scan_all()}
     bg = MockBackgroundIndexer()
     handler = IndexingHandler(bg, tmp_path)
-    for candidate in (tmp_path / "node_modules" / "dep.js", tmp_path / "src" / "app.py"):
+    for candidate in (
+        tmp_path / "node_modules" / "dep.js",
+        tmp_path / "src" / "app.py",
+    ):
         handler.on_modified(FakeEvent(str(candidate)))
 
     assert set(bg.queued_files) == scanned
@@ -277,14 +284,18 @@ def test_a_move_between_unindexed_paths_is_ignored(tmp_path: Path) -> None:
     assert not bg.queued_files and not bg.removed_files and not bg.moved_files
 
 
-def test_events_during_shutdown_do_not_break_the_observer_thread(tmp_path: Path) -> None:
+def test_events_during_shutdown_do_not_break_the_observer_thread(
+    tmp_path: Path,
+) -> None:
     """A rejected event is logged; raising here would kill the whole watcher."""
     bg = MockBackgroundIndexer(closed=True)
     handler = IndexingHandler(bg, tmp_path)
 
     handler.on_modified(FakeEvent(str(tmp_path / "a.py")))
     handler.on_deleted(FakeEvent(str(tmp_path / "a.py")))
-    handler.on_moved(FakeEvent(str(tmp_path / "a.py"), dest_path=str(tmp_path / "b.py")))
+    handler.on_moved(
+        FakeEvent(str(tmp_path / "a.py"), dest_path=str(tmp_path / "b.py"))
+    )
 
     assert bg.queued_files == [] and bg.removed_files == [] and bg.moved_files == []
 
@@ -295,7 +306,9 @@ def test_a_handler_without_a_worker_raises_nothing(tmp_path: Path) -> None:
 
     handler.on_modified(FakeEvent(str(tmp_path / "a.py")))
     handler.on_deleted(FakeEvent(str(tmp_path / "a.py")))
-    handler.on_moved(FakeEvent(str(tmp_path / "a.py"), dest_path=str(tmp_path / "b.py")))
+    handler.on_moved(
+        FakeEvent(str(tmp_path / "a.py"), dest_path=str(tmp_path / "b.py"))
+    )
 
     assert handler.background_indexer is None
 

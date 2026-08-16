@@ -71,7 +71,9 @@ def _write_sqlite_store(path: Path) -> None:
     store.close()
 
 
-def _write_index(path: Path, *, dimension: int = 1024, backend: str | None = None) -> None:
+def _write_index(
+    path: Path, *, dimension: int = 1024, backend: str | None = None
+) -> None:
     path.mkdir(parents=True, exist_ok=True)
     (path / "index_manifest.json").write_text(
         json.dumps(
@@ -170,12 +172,13 @@ def test_doctor_passes_with_valid_store_index_and_config(tmp_path: Path) -> None
     # Write rule file first so it is older than store/index rebuilds
     rules_dir = tmp_path / ".agent" / "rules"
     rules_dir.mkdir(parents=True, exist_ok=True)
-    (rules_dir / "context.md").write_text("refer to docs/mcp-contract.md", encoding="utf-8")
+    (rules_dir / "context.md").write_text(
+        "refer to docs/mcp-contract.md", encoding="utf-8"
+    )
 
     _publish_generation(tmp_path / "knowcode_index")
 
     result = CliRunner().invoke(
-
         cli_module.cli,
         ["doctor", "--store", str(tmp_path), "--config", str(config), "--json"],
     )
@@ -305,7 +308,6 @@ def test_doctor_uses_current_sqlite_store_built_by_cli(tmp_path: Path) -> None:
     assert "SQLite schema v1" in store_check["message"]
 
 
-
 def test_doctor_reports_missing_store_and_index(tmp_path: Path) -> None:
     config = tmp_path / "aimodels.yaml"
     _write_config(config)
@@ -317,7 +319,9 @@ def test_doctor_reports_missing_store_and_index(tmp_path: Path) -> None:
 
     assert result.exit_code == 1
     payload = json.loads(result.output)
-    failed = {check["name"]: check for check in payload["checks"] if check["status"] == "fail"}
+    failed = {
+        check["name"]: check for check in payload["checks"] if check["status"] == "fail"
+    }
     assert "Knowledge store" in failed
     assert "Semantic index" in failed
     assert "knowcode build" in failed["Knowledge store"]["hint"]
@@ -434,7 +438,9 @@ def test_doctor_accepts_lancedb_vector_artifact(tmp_path: Path) -> None:
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
-    semantic = next(check for check in payload["checks"] if check["name"] == "Semantic index")
+    semantic = next(
+        check for check in payload["checks"] if check["name"] == "Semantic index"
+    )
     assert semantic["status"] == "pass"
 
 
@@ -457,7 +463,9 @@ def test_doctor_fails_closed_on_legacy_lancedb_vector_metadata(tmp_path: Path) -
 
     assert result.exit_code == 1
     payload = json.loads(result.output)
-    semantic = next(check for check in payload["checks"] if check["name"] == "Semantic index")
+    semantic = next(
+        check for check in payload["checks"] if check["name"] == "Semantic index"
+    )
     assert semantic["status"] == "fail"
     assert "knowcode build" in semantic["hint"]
 
@@ -475,12 +483,16 @@ def test_doctor_fails_on_index_dimension_mismatch(tmp_path: Path) -> None:
 
     assert result.exit_code == 1
     payload = json.loads(result.output)
-    semantic = next(check for check in payload["checks"] if check["name"] == "Semantic index")
+    semantic = next(
+        check for check in payload["checks"] if check["name"] == "Semantic index"
+    )
     assert semantic["status"] == "fail"
     assert "dimension mismatch" in semantic["message"]
 
 
-def test_doctor_checks_rules_freshness_and_unsupported_extensions(tmp_path: Path) -> None:
+def test_doctor_checks_rules_freshness_and_unsupported_extensions(
+    tmp_path: Path,
+) -> None:
     """Test that doctor command checks agent rules, freshness, and unsupported extensions."""
     config = tmp_path / "aimodels.yaml"
     _write_config(config)
@@ -494,7 +506,7 @@ def test_doctor_checks_rules_freshness_and_unsupported_extensions(tmp_path: Path
     )
     assert result.exit_code == 0
     payload = json.loads(result.output)
-    
+
     # Verify the checks are present and report correct warning statuses
     checks = {check["name"]: check for check in payload["checks"]}
     assert "Agent rules" in checks
@@ -509,7 +521,9 @@ def test_doctor_checks_rules_freshness_and_unsupported_extensions(tmp_path: Path
     # Now create rule file and an unsupported Go file
     rules_dir = tmp_path / ".agent" / "rules"
     rules_dir.mkdir(parents=True)
-    (rules_dir / "context.md").write_text("refer to docs/mcp-contract.md", encoding="utf-8")
+    (rules_dir / "context.md").write_text(
+        "refer to docs/mcp-contract.md", encoding="utf-8"
+    )
     (tmp_path / "main.go").write_text("package main", encoding="utf-8")
 
     result2 = CliRunner().invoke(

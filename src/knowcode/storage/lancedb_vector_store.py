@@ -118,7 +118,7 @@ class LanceDBVectorStore:
         self._live_keys: dict[str, str] = {}
 
         self._table: Any = None
-        if self.TABLE_NAME in self.db.table_names():
+        if self._table_exists(self.db):
             table = self.db.open_table(self.TABLE_NAME)
             self._require_table_schema(table, self.dimension, str(self.path))
             self._adopt_table(table)
@@ -283,7 +283,9 @@ class LanceDBVectorStore:
             ]
             if self._table is None:
                 self._table = self.db.create_table(
-                    self.TABLE_NAME, data=rows, schema=self._arrow_schema(self.dimension)
+                    self.TABLE_NAME,
+                    data=rows,
+                    schema=self._arrow_schema(self.dimension),
                 )
             else:
                 self._table.add(rows)
@@ -316,7 +318,9 @@ class LanceDBVectorStore:
 
     # --- reads ------------------------------------------------------------
 
-    def search(self, embedding: list[float], limit: int = 10) -> list[tuple[str, float]]:
+    def search(
+        self, embedding: list[float], limit: int = 10
+    ) -> list[tuple[str, float]]:
         """Search for similar embeddings.
 
         Returns:
@@ -328,8 +332,12 @@ class LanceDBVectorStore:
                 return []
 
             # LanceDB cosine distance is 1 - cosine similarity.
-            results = self._table.search(embedding).metric("cosine").limit(limit).to_list()
-            return [(str(row[self.ID_COLUMN]), 1.0 - row["_distance"]) for row in results]
+            results = (
+                self._table.search(embedding).metric("cosine").limit(limit).to_list()
+            )
+            return [
+                (str(row[self.ID_COLUMN]), 1.0 - row["_distance"]) for row in results
+            ]
 
     def get_embedding(self, chunk_id: str) -> list[float] | None:
         """Fetch the embedding for a chunk ID, or None when it is absent."""
@@ -492,7 +500,7 @@ class LanceDBVectorStore:
             # Prepare the whole candidate generation before touching live state:
             # a rejected artifact must leave this store exactly as it was.
             db = lancedb.connect(str(target))
-            if self.TABLE_NAME not in db.table_names():
+            if not self._table_exists(db):
                 raise self._artifact_error(
                     f"vector artifact {target.name} has no {self.TABLE_NAME!r} table"
                 )
@@ -513,7 +521,14 @@ class LanceDBVectorStore:
         """Whether ``target`` is a database that actually holds the table."""
         if not target.is_dir():
             return False
-        return self.TABLE_NAME in lancedb.connect(str(target)).table_names()
+        return self._table_exists(lancedb.connect(str(target)))
+
+    def _table_exists(self, db: Any) -> bool:
+        if hasattr(db, "list_tables"):
+            res = db.list_tables()
+            if hasattr(res, "tables"):
+                return self.TABLE_NAME in res.tables
+        return self.TABLE_NAME in db.table_names()
 
     def _adopt_table(
         self, table: Any, *, live_keys: dict[str, str] | None = None

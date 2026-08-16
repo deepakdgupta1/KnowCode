@@ -369,7 +369,9 @@ def test_a_retrieval_holds_one_generation_across_a_rebuild(
                 result = service.retrieve_context_for_query(
                     "how does placing an order work", max_tokens=1500
                 )
-                observed.append((before, str(service.current_generation().generation_id)))
+                observed.append(
+                    (before, str(service.current_generation().generation_id))
+                )
                 assert result["context_text"]
         except BaseException as exc:  # noqa: BLE001 - reported to the test
             errors.append(exc)

@@ -96,9 +96,9 @@ def test_duplicate_declarations_never_produce_duplicate_entity_ids(
     assert len(entity_ids) == len(set(entity_ids)), (
         f"duplicate entity IDs emitted by {parser_class.__name__}: {entity_ids}"
     )
-    assert any(
-        "duplicate" in message.lower() for message in result.errors
-    ), f"{parser_class.__name__} must report the dropped duplicate; errors={result.errors}"
+    assert any("duplicate" in message.lower() for message in result.errors), (
+        f"{parser_class.__name__} must report the dropped duplicate; errors={result.errors}"
+    )
 
 
 # ---------------------------------------------------------------------------

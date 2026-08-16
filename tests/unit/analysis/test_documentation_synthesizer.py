@@ -97,7 +97,9 @@ def test_generate_multi_level_docs_with_manifest() -> None:
         "modules/pkg__service.py.md",
     }
     assert "# Codebase Documentation" in bundle.documents["index.md"]
-    assert "[pkg/service.py](modules/pkg__service.py.md)" in bundle.documents["index.md"]
+    assert (
+        "[pkg/service.py](modules/pkg__service.py.md)" in bundle.documents["index.md"]
+    )
     assert "# Architecture Overview" in bundle.documents["architecture.md"]
     assert "- function: 2" in bundle.documents["architecture.md"]
 

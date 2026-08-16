@@ -14,7 +14,7 @@ class MockEmbeddingProvider(EmbeddingProvider):
     def embed(self, texts: list[str]) -> list[list[float]]:
         # Return dummy vectors of correct dimension
         return [[0.1] * self.config.dimension for _ in texts]
-        
+
     def embed_single(self, text: str) -> list[float]:
         return [0.1] * self.config.dimension
 
@@ -24,17 +24,17 @@ def test_indexer_flow(tmp_path) -> None:  # type: ignore
     provider = MockEmbeddingProvider(config)
     repo = SqliteChunkRepository(":memory:")
     vs = VectorStore(dimension=8)
-    
+
     indexer = Indexer(provider, chunk_repo=repo, vector_store=vs)
-    
+
     # Mock a file content or create one
     test_file = tmp_path / "test.py"
     test_file.write_text("def my_func():\n    pass")
-    
+
     # We need to mock GraphBuilder._parse_file or use real one
     # For integration test, we use the real one if possible, but it depends on scanner.
     # Let's mock index_file's internal parsing call if needed, but here we'll just test the orchestration
-    
+
     count = indexer.index_file(test_file)
     assert count > 0
     assert repo.count() > 0
@@ -46,20 +46,21 @@ def test_search_engine_orchestration() -> None:
     provider = MockEmbeddingProvider(config)
     repo = SqliteChunkRepository(":memory:")
     vs = VectorStore(dimension=8)
-    
+
     # Add a chunk
     from knowcode.models import CodeChunk  # type: ignore
+
     chunk = CodeChunk(id="c1", entity_id="e1", content="find me", tokens=["find", "me"])
     repo.add(chunk)
-    vs.add("c1", [0.1]*8)
-    
+    vs.add("c1", [0.1] * 8)
+
     hybrid = HybridIndex(repo, vs)
     # Generic KnowledgeStore mock
     ks = MagicMock()
     ks.get_callees.return_value = []
-    
+
     engine = SearchEngine(repo, provider, hybrid, ks)
     results = engine.search("find me", limit=1, expand_deps=False)
-    
+
     assert len(results) == 1
     assert results[0].id == "c1"

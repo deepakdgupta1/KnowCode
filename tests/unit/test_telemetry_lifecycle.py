@@ -32,7 +32,9 @@ def _restore_executor():  # type: ignore[no-untyped-def]
     telemetry.shutdown_telemetry(timeout=TIMEOUT)
 
 
-def test_shutdown_drains_a_queued_write(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_shutdown_drains_a_queued_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A write accepted before shutdown must be on disk after it."""
     monkeypatch.delenv("KNOWCODE_TESTING", raising=False)
     telemetry.shutdown_telemetry(timeout=TIMEOUT)
@@ -52,7 +54,9 @@ def test_shutdown_drains_a_queued_write(tmp_path: Path, monkeypatch: pytest.Monk
 
     log_file = telemetry_files.telemetry_path(tmp_path)
     assert log_file.exists()
-    assert json.loads(log_file.read_text(encoding="utf-8").strip())["method"] == "queued"
+    assert (
+        json.loads(log_file.read_text(encoding="utf-8").strip())["method"] == "queued"
+    )
 
 
 def test_shutdown_is_idempotent() -> None:
@@ -61,7 +65,9 @@ def test_shutdown_is_idempotent() -> None:
     assert telemetry.shutdown_telemetry(timeout=TIMEOUT)
 
 
-def test_logging_after_shutdown_still_works(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_logging_after_shutdown_still_works(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A second server in the same process must not inherit a dead pool.
 
     Without this, one API shutdown would make every later ``log_event`` raise

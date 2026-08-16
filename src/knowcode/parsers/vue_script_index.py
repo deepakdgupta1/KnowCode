@@ -83,7 +83,9 @@ class VueScriptIndex:
 
     # -- lookup ------------------------------------------------------------
 
-    def lookup(self, name: str, *, prefer_member: bool = False) -> DeclarationSpan | None:
+    def lookup(
+        self, name: str, *, prefer_member: bool = False
+    ) -> DeclarationSpan | None:
         """Return the best span for ``name``.
 
         Options API members and Composition API declarations can share a name,

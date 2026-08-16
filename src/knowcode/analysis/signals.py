@@ -55,7 +55,7 @@ class CoverageProcessor:
             report_id = f"coverage::{xml_path.name}"
             # Extract timestamp if available available in root attributes usually 'timestamp'
             timestamp = root.get("timestamp", str(xml_path.stat().st_mtime))
-            
+
             report_entity = Entity(
                 id=report_id,
                 kind=EntityKind.COVERAGE_REPORT,
@@ -72,24 +72,24 @@ class CoverageProcessor:
 
             # Traverse packages -> classes -> lines
             # Structure: coverage -> packages -> package -> classes -> class -> lines -> line
-            
+
             # We want to map files/classes to the report.
             # <class name="knowcode.models" filename="src/knowcode/models.py" line-rate="1.0" ...>
-            
+
             for cls in root.findall(".//class"):
                 filename = cls.get("filename")
                 if not filename:
                     continue
-                
+
                 # Resolve file path to simple module ID
                 # We assume standard module ID: /abs/path/to/file::filename_stem
                 # filename in coverage.xml is usually relative to root
                 abs_file_path = (self.root_dir / filename).resolve()
                 module_name = abs_file_path.stem
                 module_id = f"{abs_file_path}::{module_name}"
-                
+
                 line_rate = cls.get("line-rate", "0")
-                
+
                 # Relationship: REPORT -> COVERS -> MODULE
                 relationships.append(
                     Relationship(
@@ -98,23 +98,25 @@ class CoverageProcessor:
                         kind=RelationshipKind.COVERS,
                         metadata={
                             "line-rate": line_rate,
-                            "hits": cls.get("lines-covered", "0") + "/" + cls.get("lines-valid", "0")
-                        }
+                            "hits": cls.get("lines-covered", "0")
+                            + "/"
+                            + cls.get("lines-valid", "0"),
+                        },
                     )
                 )
-                
+
                 # We could map specific lines to entities if we had line ranges of entities loaded.
-                # Since CoverageProcessor runs independently or after graph build, 
+                # Since CoverageProcessor runs independently or after graph build,
                 # we usually just link to the File/Module level for MVP.
                 # Detailed line mapping requires access to the full graph to find which entity covers line X.
                 # For v1.4 MVP, linking to Module is sufficient.
-                
+
                 # Note: We can also add "EXECUTED_BY" from Module to Report
                 relationships.append(
                     Relationship(
                         source_id=module_id,
                         target_id=report_id,
-                        kind=RelationshipKind.EXECUTED_BY
+                        kind=RelationshipKind.EXECUTED_BY,
                     )
                 )
 

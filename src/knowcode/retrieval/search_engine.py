@@ -75,9 +75,13 @@ class SearchEngine:
             Ranked list of ScoredChunk objects.
         """
         query_embedding = self.embedding_provider.embed_single(query)
-        results = self.hybrid_index.search(query, query_embedding, limit=limit * self.multiplier)
+        results = self.hybrid_index.search(
+            query, query_embedding, limit=limit * self.multiplier
+        )
         reranked = self.reranker.rerank(query, results, top_k=limit)
-        primary = [ScoredChunk(chunk=c, score=s, source="retrieved") for c, s in reranked]
+        primary = [
+            ScoredChunk(chunk=c, score=s, source="retrieved") for c, s in reranked
+        ]
 
         if not expand_deps:
             return primary
@@ -100,17 +104,16 @@ class SearchEngine:
                     ScoredChunk(
                         chunk=dep,
                         score=scored.score if dep.id == scored.chunk.id else 0.0,
-                        source="retrieved" if dep.id == scored.chunk.id else "dependency",
+                        source="retrieved"
+                        if dep.id == scored.chunk.id
+                        else "dependency",
                     )
                 )
 
         return expanded
 
     def search(
-        self,
-        query: str,
-        limit: int = 10,
-        expand_deps: bool = True
+        self, query: str, limit: int = 10, expand_deps: bool = True
     ) -> list[CodeChunk]:
         """Execute the full search pipeline.
 

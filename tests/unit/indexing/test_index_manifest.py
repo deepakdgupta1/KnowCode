@@ -23,7 +23,9 @@ class DummyEmbeddingProvider(EmbeddingProvider):
 
 
 def test_indexer_writes_and_loads_manifest(tmp_path: Path) -> None:
-    provider = DummyEmbeddingProvider(EmbeddingConfig(provider="openai", model_name="x", dimension=8))
+    provider = DummyEmbeddingProvider(
+        EmbeddingConfig(provider="openai", model_name="x", dimension=8)
+    )
     indexer = Indexer(provider)
 
     out_dir = tmp_path / "idx"
@@ -45,7 +47,9 @@ def test_indexer_writes_and_loads_manifest(tmp_path: Path) -> None:
 
 def test_indexer_load_migrates_legacy_manifest(tmp_path: Path) -> None:
     """Legacy manifests without schema_version should load via migration shim."""
-    provider = DummyEmbeddingProvider(EmbeddingConfig(provider="openai", model_name="x", dimension=8))
+    provider = DummyEmbeddingProvider(
+        EmbeddingConfig(provider="openai", model_name="x", dimension=8)
+    )
     out_dir = tmp_path / "idx"
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "chunks.json").write_text(json.dumps({"chunks": []}), encoding="utf-8")
@@ -67,7 +71,9 @@ def test_indexer_load_migrates_legacy_manifest(tmp_path: Path) -> None:
 
 def test_indexer_load_rejects_unsupported_manifest_schema(tmp_path: Path) -> None:
     """Unsupported schema versions should fail with actionable messaging."""
-    provider = DummyEmbeddingProvider(EmbeddingConfig(provider="openai", model_name="x", dimension=8))
+    provider = DummyEmbeddingProvider(
+        EmbeddingConfig(provider="openai", model_name="x", dimension=8)
+    )
     out_dir = tmp_path / "idx"
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "chunks.json").write_text(json.dumps({"chunks": []}), encoding="utf-8")
@@ -81,16 +87,10 @@ def test_indexer_load_rejects_unsupported_manifest_schema(tmp_path: Path) -> Non
         indexer.load(out_dir)
 
 
-
-
-
 def test_indexer_manifest_migrates_schema_version_one() -> None:
     """Explicit schema_version=1 should migrate to current schema."""
     migrated = Indexer._validate_and_migrate_manifest({"schema_version": 1})
     assert migrated["schema_version"] == Indexer.SCHEMA_VERSION
-
-
-
 
 
 # --- Step 13: crash-safe manifest replacement ------------------------------
@@ -115,9 +115,7 @@ def test_manifest_write_failure_preserves_the_previous_manifest(
     out_dir = tmp_path / "idx"
     indexer = _indexer()
     indexer.save(out_dir)
-    previous = json.loads(
-        (out_dir / "index_manifest.json").read_text(encoding="utf-8")
-    )
+    previous = json.loads((out_dir / "index_manifest.json").read_text(encoding="utf-8"))
 
     real_replace = atomic_write._replace
 
@@ -132,9 +130,10 @@ def test_manifest_write_failure_preserves_the_previous_manifest(
         indexer.save(out_dir)
     monkeypatch.undo()
 
-    assert json.loads(
-        (out_dir / "index_manifest.json").read_text(encoding="utf-8")
-    ) == previous
+    assert (
+        json.loads((out_dir / "index_manifest.json").read_text(encoding="utf-8"))
+        == previous
+    )
 
 
 def test_save_publishes_data_before_the_manifest(

@@ -146,7 +146,9 @@ class DocumentationSynthesizer:
         entities = self._source_entities(by_file)
         kind_counts = Counter(entity.kind.value for entity in entities)
         language_counts = Counter(self._language_for(entity) for entity in entities)
-        relationship_counts = Counter(rel.kind.value for rel in self.store.relationships)
+        relationship_counts = Counter(
+            rel.kind.value for rel in self.store.relationships
+        )
 
         lines = [
             "# Architecture Overview",
@@ -205,8 +207,7 @@ class DocumentationSynthesizer:
         for entity in entities:
             location = self._format_location(entity)
             lines.append(
-                f"- {entity.kind.value} `{entity.qualified_name}` "
-                f"({location})"
+                f"- {entity.kind.value} `{entity.qualified_name}` ({location})"
             )
 
         lines.append("")
@@ -338,9 +339,7 @@ class DocumentationSynthesizer:
             "documents": sorted(documents),
             "stats": {
                 "source_files": len(by_file),
-                "tracked_entities": sum(
-                    len(entities) for entities in by_file.values()
-                ),
+                "tracked_entities": sum(len(entities) for entities in by_file.values()),
                 "relationships": len(self.store.relationships),
             },
             "source_files": source_files,

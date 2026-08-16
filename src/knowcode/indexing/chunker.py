@@ -4,7 +4,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from knowcode.data_models import ChunkingConfig, CodeChunk, ParseResult, Entity, EntityKind
+from knowcode.data_models import (
+    ChunkingConfig,
+    CodeChunk,
+    ParseResult,
+    Entity,
+    EntityKind,
+)
 from knowcode.utils.tokenizer import tokenize_code
 from knowcode.utils.logger import get_logger
 import hashlib
@@ -29,31 +35,33 @@ class Chunker:
             List of generated CodeChunk objects in priority order.
         """
         self.chunks = []  # Single initialization at start of process
-        
+
         file_path = result.file_path
         source_code = ""
-        
+
         # Try to find module source code if available
-        module_entity = next((e for e in result.entities if e.kind == EntityKind.MODULE), None)
+        module_entity = next(
+            (e for e in result.entities if e.kind == EntityKind.MODULE), None
+        )
         if module_entity and module_entity.source_code:
             source_code = module_entity.source_code
         elif Path(file_path).exists():
             source_code = Path(file_path).read_text(encoding="utf-8")
-        
+
         last_modified = None
         if Path(file_path).exists():
-             last_modified = str(Path(file_path).stat().st_mtime)
-            
+            last_modified = str(Path(file_path).stat().st_mtime)
+
         # 1. Module and Import Chunks
         if source_code:
             self._emit_module_chunks(file_path, source_code)
-            
+
         # 2. Entity Chunks (Classes, Functions, Methods)
         for entity in result.entities:
             if entity.kind == EntityKind.MODULE:
                 continue
             self._chunk_entity(entity, last_modified)
-            
+
         return self.chunks
 
     def _emit_module_chunks(self, file_path: str, source: str) -> None:
@@ -73,11 +81,11 @@ class Chunker:
                 tokens=tokenize_code(header),
                 metadata={
                     "type": "module_header",
-                    "content_hash": hashlib.md5(header.encode("utf-8")).hexdigest()
-                }
+                    "content_hash": hashlib.md5(header.encode("utf-8")).hexdigest(),
+                },
             )
             self.chunks.append(module_chunk)
-            
+
         # Imports
         imports = self._extract_imports(source)
         if imports:
@@ -88,8 +96,8 @@ class Chunker:
                 tokens=tokenize_code(imports),
                 metadata={
                     "type": "imports",
-                    "content_hash": hashlib.md5(imports.encode("utf-8")).hexdigest()
-                }
+                    "content_hash": hashlib.md5(imports.encode("utf-8")).hexdigest(),
+                },
             )
             self.chunks.append(import_chunk)
 
@@ -99,12 +107,12 @@ class Chunker:
         header_lines = []
         in_docstring = False
         quote_type = None
-        
+
         for line in lines:
             stripped = line.strip()
             if not stripped and not in_docstring:
                 continue
-            
+
             # Simple docstring detection
             if '"""' in stripped or "'''" in stripped:
                 if not in_docstring:
@@ -125,7 +133,7 @@ class Chunker:
                 break
             else:
                 header_lines.append(line)
-                
+
         return "\n".join(header_lines).strip()
 
     def _extract_imports(self, source: str) -> str:
@@ -137,7 +145,9 @@ class Chunker:
                 lines.append(line)
         return "\n".join(lines).strip()
 
-    def _chunk_entity(self, entity: Entity, last_modified: Optional[str] = None) -> None:
+    def _chunk_entity(
+        self, entity: Entity, last_modified: Optional[str] = None
+    ) -> None:
         """Create chunks for an entity and append them to the in-memory list.
 
         Args:
@@ -145,18 +155,18 @@ class Chunker:
             last_modified: Optional timestamp used for ranking signals.
         """
         content = ""
-        
+
         if self.config.include_signatures and entity.signature:
             content += entity.signature + "\n"
-            
+
         if self.config.include_docstrings and entity.docstring:
             content += f'"""{entity.docstring}"""\n'
-            
+
         if entity.source_code:
             content += entity.source_code
         else:
             content += entity.name
-            
+
         # Sliding window chunking
         has_docstring = "true" if entity.docstring else "false"
 
@@ -164,7 +174,7 @@ class Chunker:
             metadata = {
                 "kind": entity.kind.value,
                 "has_docstring": has_docstring,
-                "content_hash": hashlib.md5(content.encode("utf-8")).hexdigest()
+                "content_hash": hashlib.md5(content.encode("utf-8")).hexdigest(),
             }
             if last_modified:
                 metadata["last_modified"] = last_modified
@@ -174,7 +184,7 @@ class Chunker:
                 entity_id=entity.id,
                 content=content,
                 tokens=tokenize_code(content),
-                metadata=metadata
+                metadata=metadata,
             )
             self.chunks.append(chunk)
         else:
@@ -184,27 +194,29 @@ class Chunker:
             while start < len(content):
                 end = min(start + self.config.max_chunk_size, len(content))
                 chunk_content = content[start:end]
-                
+
                 metadata = {
                     "kind": entity.kind.value,
                     "chunk_index": str(chunk_index),
                     "has_docstring": has_docstring,
-                    "content_hash": hashlib.md5(chunk_content.encode("utf-8")).hexdigest()
+                    "content_hash": hashlib.md5(
+                        chunk_content.encode("utf-8")
+                    ).hexdigest(),
                 }
                 if last_modified:
                     metadata["last_modified"] = last_modified
-                
+
                 chunk = CodeChunk(
                     id=f"{entity.id}::{chunk_index}",
                     entity_id=entity.id,
                     content=chunk_content,
                     tokens=tokenize_code(chunk_content),
-                    metadata=metadata
+                    metadata=metadata,
                 )
                 self.chunks.append(chunk)
-                
+
                 if end == len(content):
                     break
-                    
-                start += (self.config.max_chunk_size - self.config.overlap)
+
+                start += self.config.max_chunk_size - self.config.overlap
                 chunk_index += 1

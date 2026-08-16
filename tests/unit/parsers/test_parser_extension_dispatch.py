@@ -58,7 +58,7 @@ def test_vue_setup_lang_ts_block_is_extracted(tmp_path: Path) -> None:
     source = tmp_path / "widget.vue"
     source.write_text(
         "<template><button>{{ label }}</button></template>\n"
-        "<script setup lang=\"ts\">\n"
+        '<script setup lang="ts">\n'
         "import { ref } from 'vue'\n"
         "const label = ref('hi')\n"
         "function onClick() { label.value = 'bye' }\n"

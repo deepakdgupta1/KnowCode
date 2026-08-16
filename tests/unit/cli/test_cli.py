@@ -28,16 +28,21 @@ def test_cli_analyze_query_stats_context(tmp_path) -> None:  # type: ignore
     (tmp_path / "sample.py").write_text("def foo():\n    return 1\n", encoding="utf-8")
 
     runner = CliRunner()
-    analyze = runner.invoke(cli_module.cli, ["analyze", str(tmp_path), "--output", str(tmp_path)])
+    analyze = runner.invoke(
+        cli_module.cli, ["analyze", str(tmp_path), "--output", str(tmp_path)]
+    )
     assert analyze.exit_code == 0
 
     store_path = _published_store(tmp_path)
     import sqlite3
+
     conn = sqlite3.connect(store_path)
     entity_id = conn.execute("SELECT entity_id FROM entities LIMIT 1").fetchone()[0]
     conn.close()
 
-    query = runner.invoke(cli_module.cli, ["query", "search", "foo", "--store", str(tmp_path)])
+    query = runner.invoke(
+        cli_module.cli, ["query", "search", "foo", "--store", str(tmp_path)]
+    )
     assert query.exit_code == 0
     assert "foo" in query.output
 
@@ -46,7 +51,8 @@ def test_cli_analyze_query_stats_context(tmp_path) -> None:  # type: ignore
     assert "Total Entities" in stats.output
 
     context = runner.invoke(
-        cli_module.cli, ["context", entity_id, "--store", str(tmp_path), "--max-tokens", "200"]
+        cli_module.cli,
+        ["context", entity_id, "--store", str(tmp_path), "--max-tokens", "200"],
     )
     assert context.exit_code == 0
 
@@ -80,6 +86,7 @@ def test_cli_build_defaults_to_current_directory(tmp_path, monkeypatch) -> None:
     store_path = _published_store(tmp_path)
     assert store_path.exists()
     import sqlite3
+
     conn = sqlite3.connect(store_path)
     count = conn.execute("SELECT COUNT(*) FROM entities").fetchone()[0]
     assert count > 0
@@ -139,7 +146,9 @@ def test_cli_install_runs_pip_for_ideal_dependency_set(monkeypatch) -> None:  # 
         (["ask", "hello"], "Install knowcode[llm] to use 'knowcode ask'."),
     ],
 )
-def test_optional_dependency_guards(monkeypatch, args: list[str], expected_message: str) -> None:  # type: ignore
+def test_optional_dependency_guards(
+    monkeypatch, args: list[str], expected_message: str
+) -> None:  # type: ignore
     runner = CliRunner()
 
     def _raise(extra: str, command: str, modules):  # type: ignore

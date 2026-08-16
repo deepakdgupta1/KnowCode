@@ -14,4 +14,3 @@ from knowcode.data_models import (  # noqa: F401
     Relationship,
     RelationshipKind,
 )
-

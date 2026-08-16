@@ -264,11 +264,19 @@ def test_shutdown_follows_the_documented_close_order(resources_for, call_log) ->
 
     report = resources.shutdown(timeout=TIMEOUT)
 
-    assert call_log == ["monitor.stop", "service.flush", "vector.flush", "service.close", "repo.close"]
+    assert call_log == [
+        "monitor.stop",
+        "service.flush",
+        "vector.flush",
+        "service.close",
+        "repo.close",
+    ]
     assert tuple(stage.name for stage in report.stages) == SHUTDOWN_ORDER
 
 
-def test_buffered_vectors_are_flushed_before_stores_close(resources_for, call_log) -> None:  # type: ignore[no-untyped-def]
+def test_buffered_vectors_are_flushed_before_stores_close(
+    resources_for, call_log
+) -> None:  # type: ignore[no-untyped-def]
     """A buffered vector write must reach the table before its store closes."""
     resources, service = resources_for()
     resources.startup()
@@ -404,7 +412,9 @@ def test_startup_is_idempotent(resources_for) -> None:  # type: ignore[no-untype
     assert service.indexer is service.watch_writer()
 
 
-def test_shutdown_after_a_failed_startup_closes_what_exists(resources_for, call_log) -> None:  # type: ignore[no-untyped-def]
+def test_shutdown_after_a_failed_startup_closes_what_exists(
+    resources_for, call_log
+) -> None:  # type: ignore[no-untyped-def]
     """A half-built server still releases everything it did build."""
     monitor = FakeMonitor(call_log)
     monitor.start_error = RuntimeError("watchdog could not schedule")

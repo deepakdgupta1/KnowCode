@@ -219,7 +219,9 @@ def test_service_flush_persists_watched_vector_updates(tmp_path: Path) -> None:
     service = _service(tmp_path, backend="faiss")
     indexer = service.get_indexer()
     indexer.replace_file(tmp_path / "m.py")
-    assert indexer.vector_store.count() == 1, "precondition: the commit landed in memory"
+    assert indexer.vector_store.count() == 1, (
+        "precondition: the commit landed in memory"
+    )
 
     service.flush()
 
@@ -243,12 +245,18 @@ def test_service_flush_never_edits_a_published_generation(tmp_path: Path) -> Non
     assert generation is not None and generation.has_semantic_index
 
     indexer = service.get_indexer()
-    assert indexer.chunk_repo.count() > 0, "precondition: the reader is on the generation"
-    before = {p.name: p.stat().st_mtime_ns for p in generation.path.iterdir() if p.is_file()}
+    assert indexer.chunk_repo.count() > 0, (
+        "precondition: the reader is on the generation"
+    )
+    before = {
+        p.name: p.stat().st_mtime_ns for p in generation.path.iterdir() if p.is_file()
+    }
 
     service.flush()
 
-    after = {p.name: p.stat().st_mtime_ns for p in generation.path.iterdir() if p.is_file()}
+    after = {
+        p.name: p.stat().st_mtime_ns for p in generation.path.iterdir() if p.is_file()
+    }
     assert after == before
     assert generations.validate_generation(generation.path, verify_digests=True) == []
 

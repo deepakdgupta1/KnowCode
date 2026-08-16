@@ -14,12 +14,39 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ModelConfig:
     """Configuration for a single LLM model."""
+
     name: str
     provider: str = "google"
     api_key_env: str = "GOOGLE_API_KEY"
     rpm_free_tier_limit: int = 10
     rpd_free_tier_limit: int = 1000
     tokens_free_tier_limit: int = 0  # For embedding/reranking models
+
+
+# Default dimension weights for pre-flight assessment (must sum to ~1.0).
+_DEFAULT_PREFLIGHT_WEIGHTS: dict[str, float] = {
+    "parse_success_rate": 0.20,
+    "language_coverage": 0.10,
+    "documentation_density": 0.20,
+    "naming_quality": 0.10,
+    "structural_depth": 0.05,
+    "relationship_density": 0.15,
+    "type_annotation_coverage": 0.05,
+    "complexity_distribution": 0.05,
+    "behavior_analyzability": 0.05,
+    "unresolved_references": 0.05,
+}
+
+
+@dataclass
+class PreflightConfig:
+    """Configuration for pre-flight codebase quality assessment."""
+
+    enabled: bool = True
+    min_score: float = 0.0  # Warn threshold; 0.0 = no warning
+    weights: dict[str, float] = field(
+        default_factory=lambda: dict(_DEFAULT_PREFLIGHT_WEIGHTS)
+    )
 
 
 @dataclass
@@ -34,6 +61,7 @@ class AppConfig:
         "reranking_models",
         "eval_models",
         "config",
+        "preflight",
     }
     KNOWN_CONFIG_KEYS = {
         "sufficiency_threshold",
@@ -63,11 +91,14 @@ class AppConfig:
     hybrid_alpha: float = 0.2
     reranker_top_k_multiplier: int = 5
     vector_backend: str = "lancedb"
+    preflight: PreflightConfig = field(default_factory=PreflightConfig)
 
     @classmethod
-    def load(cls, config_path: Optional[str] = None, strict: bool = False) -> "AppConfig":
+    def load(
+        cls, config_path: Optional[str] = None, strict: bool = False
+    ) -> "AppConfig":
         """Load configuration from file or use defaults.
-        
+
         Priority:
         1. Explicit config_path
         2. ./aimodels.yaml
@@ -83,15 +114,15 @@ class AppConfig:
             path = Path(config_path)
             if path.exists():
                 return cls._fail_closed(cls._load_from_yaml(path, strict=strict))
-        
+
         local_config = Path("aimodels.yaml")
         if local_config.exists():
             return cls._fail_closed(cls._load_from_yaml(local_config, strict=strict))
-            
+
         home_config = Path.home() / ".aimodels.yaml"
         if home_config.exists():
             return cls._fail_closed(cls._load_from_yaml(home_config, strict=strict))
-            
+
         return cls._fail_closed(cls.default())
 
     @classmethod
@@ -176,8 +207,8 @@ class AppConfig:
     @classmethod
     def _load_from_yaml(cls, path: Path, strict: bool = False) -> "AppConfig":
         """Parse YAML file into AppConfig.
-        
-        Supports both old format (models: [...]) and new format 
+
+        Supports both old format (models: [...]) and new format
         (natural_language_models, embedding_models, reranking_models, config).
         """
         try:
@@ -188,59 +219,67 @@ class AppConfig:
                 raise ValueError("Config root must be a YAML mapping/object.")
 
             cls._validate_keys(data, path=path, strict=strict)
-            
+
             # Load LLM models (natural language)
             models: list[ModelConfig] = []
             model_list = data.get("natural_language_models", data.get("models", []))
-            for m in (model_list or []):
+            for m in model_list or []:
                 if not isinstance(m, dict):
                     raise ValueError("Each model entry must be an object.")
-                models.append(ModelConfig(
-                    name=m["name"],
-                    provider=m.get("provider", "google"),
-                    api_key_env=m.get("api_key_env", "GOOGLE_API_KEY"),
-                    rpm_free_tier_limit=m.get("rpm_free_tier_limit", 10),
-                    rpd_free_tier_limit=m.get("rpd_free_tier_limit", 1000),
-                ))
-            
+                models.append(
+                    ModelConfig(
+                        name=m["name"],
+                        provider=m.get("provider", "google"),
+                        api_key_env=m.get("api_key_env", "GOOGLE_API_KEY"),
+                        rpm_free_tier_limit=m.get("rpm_free_tier_limit", 10),
+                        rpd_free_tier_limit=m.get("rpd_free_tier_limit", 1000),
+                    )
+                )
+
             # Load embedding models
             embedding_models: list[ModelConfig] = []
-            for m in (data.get("embedding_models") or []):
+            for m in data.get("embedding_models") or []:
                 if not isinstance(m, dict):
                     raise ValueError("Each embedding model entry must be an object.")
-                embedding_models.append(ModelConfig(
-                    name=m["name"],
-                    provider=m.get("provider", "voyageai"),
-                    api_key_env=m.get("api_key_env", "VOYAGE_API_KEY_1"),
-                    tokens_free_tier_limit=m.get("tokens_free_tier_limit", 0),
-                ))
+                embedding_models.append(
+                    ModelConfig(
+                        name=m["name"],
+                        provider=m.get("provider", "voyageai"),
+                        api_key_env=m.get("api_key_env", "VOYAGE_API_KEY_1"),
+                        tokens_free_tier_limit=m.get("tokens_free_tier_limit", 0),
+                    )
+                )
 
             # Load prose embedding models (SDLC documentation collateral)
             prose_embedding_models: list[ModelConfig] = []
-            for m in (data.get("prose_embedding_models") or []):
+            for m in data.get("prose_embedding_models") or []:
                 if not isinstance(m, dict):
                     raise ValueError(
                         "Each prose embedding model entry must be an object."
                     )
-                prose_embedding_models.append(ModelConfig(
-                    name=m["name"],
-                    provider=m.get("provider", "voyageai"),
-                    api_key_env=m.get("api_key_env", "VOYAGE_API_KEY_1"),
-                    tokens_free_tier_limit=m.get("tokens_free_tier_limit", 0),
-                ))
-            
+                prose_embedding_models.append(
+                    ModelConfig(
+                        name=m["name"],
+                        provider=m.get("provider", "voyageai"),
+                        api_key_env=m.get("api_key_env", "VOYAGE_API_KEY_1"),
+                        tokens_free_tier_limit=m.get("tokens_free_tier_limit", 0),
+                    )
+                )
+
             # Load reranking models
             reranking_models: list[ModelConfig] = []
-            for m in (data.get("reranking_models") or []):
+            for m in data.get("reranking_models") or []:
                 if not isinstance(m, dict):
                     raise ValueError("Each reranking model entry must be an object.")
-                reranking_models.append(ModelConfig(
-                    name=m["name"],
-                    provider=m.get("provider", "voyageai"),
-                    api_key_env=m.get("api_key_env", "VOYAGE_API_KEY_1"),
-                    tokens_free_tier_limit=m.get("tokens_free_tier_limit", 0),
-                ))
-            
+                reranking_models.append(
+                    ModelConfig(
+                        name=m["name"],
+                        provider=m.get("provider", "voyageai"),
+                        api_key_env=m.get("api_key_env", "VOYAGE_API_KEY_1"),
+                        tokens_free_tier_limit=m.get("tokens_free_tier_limit", 0),
+                    )
+                )
+
             # Load config section
             config_section = data.get("config", {})
             if config_section is None:
@@ -255,13 +294,9 @@ class AppConfig:
                     "'config.sufficiency_threshold' must be between 0 and 1."
                 )
 
-            local_answer_task_types = config_section.get(
-                "local_answer_task_types", []
-            )
+            local_answer_task_types = config_section.get("local_answer_task_types", [])
             if not isinstance(local_answer_task_types, list):
-                raise ValueError(
-                    "'config.local_answer_task_types' must be a list."
-                )
+                raise ValueError("'config.local_answer_task_types' must be a list.")
             if not all(isinstance(item, str) for item in local_answer_task_types):
                 raise ValueError(
                     "'config.local_answer_task_types' entries must be strings."
@@ -283,34 +318,44 @@ class AppConfig:
                 raise ValueError(
                     "'config.routing_quality_floor' must be between 0 and 1."
                 )
-            
+
             hybrid_alpha = config_section.get("hybrid_alpha", 0.2)
-            if (
-                not isinstance(hybrid_alpha, (int, float))
-                or isinstance(hybrid_alpha, bool)
+            if not isinstance(hybrid_alpha, (int, float)) or isinstance(
+                hybrid_alpha, bool
             ):
                 raise ValueError("'config.hybrid_alpha' must be a number.")
             if not 0.0 <= float(hybrid_alpha) <= 1.0:
                 raise ValueError("'config.hybrid_alpha' must be between 0 and 1.")
 
-            reranker_top_k_multiplier = config_section.get("reranker_top_k_multiplier", 5)
-            if (
-                not isinstance(reranker_top_k_multiplier, int)
-                or isinstance(reranker_top_k_multiplier, bool)
+            reranker_top_k_multiplier = config_section.get(
+                "reranker_top_k_multiplier", 5
+            )
+            if not isinstance(reranker_top_k_multiplier, int) or isinstance(
+                reranker_top_k_multiplier, bool
             ):
-                raise ValueError("'config.reranker_top_k_multiplier' must be an integer.")
+                raise ValueError(
+                    "'config.reranker_top_k_multiplier' must be an integer."
+                )
             if not 1 <= reranker_top_k_multiplier <= 100:
                 raise ValueError(
                     "'config.reranker_top_k_multiplier' must be between 1 and 100."
                 )
-            
+
             vector_backend = config_section.get("vector_backend", "lancedb")
-            if not isinstance(vector_backend, str) or vector_backend not in ("faiss", "lancedb"):
-                raise ValueError("'config.vector_backend' must be 'faiss' or 'lancedb'.")
-            
+            if not isinstance(vector_backend, str) or vector_backend not in (
+                "faiss",
+                "lancedb",
+            ):
+                raise ValueError(
+                    "'config.vector_backend' must be 'faiss' or 'lancedb'."
+                )
+
+            # Pre-flight assessment configuration
+            preflight_config = cls._parse_preflight_section(data.get("preflight"))
+
             if not models:
                 models = cls.default().models
-                
+
             return cls(
                 models=models,
                 embedding_models=embedding_models,
@@ -322,10 +367,11 @@ class AppConfig:
                 hybrid_alpha=hybrid_alpha,
                 reranker_top_k_multiplier=reranker_top_k_multiplier,
                 vector_backend=vector_backend,
+                preflight=preflight_config,
             )
         except Exception as e:
             message = f"Failed to load config from {path}: {e}"
-            # RF-001-D004: NEVER swallow errors silently. 
+            # RF-001-D004: NEVER swallow errors silently.
             # If a config file is present but malformed, fail explicitly.
             raise ValueError(message) from e
 
@@ -355,6 +401,48 @@ class AppConfig:
                 f"Unknown config keys in {path} config section: {', '.join(unknown_config_keys)}",
                 strict=strict,
             )
+
+    @classmethod
+    def _parse_preflight_section(
+        cls,
+        raw: Any,
+    ) -> PreflightConfig:
+        """Parse the optional ``preflight:`` YAML section."""
+        if raw is None:
+            return PreflightConfig()
+        if not isinstance(raw, dict):
+            raise ValueError("'preflight' section must be an object.")
+
+        enabled = raw.get("enabled", True)
+        if not isinstance(enabled, bool):
+            raise ValueError("'preflight.enabled' must be a boolean.")
+
+        min_score = raw.get("min_score", 0.0)
+        if not isinstance(min_score, (int, float)):
+            raise ValueError("'preflight.min_score' must be a number.")
+        if not 0.0 <= float(min_score) <= 1.0:
+            raise ValueError("'preflight.min_score' must be between 0 and 1.")
+
+        weights = dict(_DEFAULT_PREFLIGHT_WEIGHTS)
+        raw_weights = raw.get("weights")
+        if raw_weights is not None:
+            if not isinstance(raw_weights, dict):
+                raise ValueError("'preflight.weights' must be an object.")
+            for key, value in raw_weights.items():
+                if key not in _DEFAULT_PREFLIGHT_WEIGHTS:
+                    raise ValueError(
+                        f"Unknown preflight weight key: '{key}'. "
+                        f"Valid keys: {', '.join(sorted(_DEFAULT_PREFLIGHT_WEIGHTS))}"
+                    )
+                if not isinstance(value, (int, float)):
+                    raise ValueError(f"'preflight.weights.{key}' must be a number.")
+                weights[key] = float(value)
+
+        return PreflightConfig(
+            enabled=enabled,
+            min_score=float(min_score),
+            weights=weights,
+        )
 
     @staticmethod
     def _handle_validation_issue(message: str, *, strict: bool) -> None:

@@ -14,7 +14,7 @@ from knowcode.config import AppConfig
 
 class Reranker:
     """Reranks search results using cross-encoder or signal-based scoring."""
-    
+
     def __init__(
         self,
         use_voyageai: bool = True,
@@ -22,7 +22,7 @@ class Reranker:
         config: Optional[AppConfig] = None,
     ) -> None:
         """Initialize reranker.
-        
+
         Args:
             use_voyageai: Try to use VoyageAI if available.
             api_key_env: Environment variable for VoyageAI API key.
@@ -35,20 +35,21 @@ class Reranker:
             self.model = config.reranking_models[0].name
             if not api_key_env:
                 api_key_env = config.reranking_models[0].api_key_env
-        
+
         if use_voyageai:
             if not api_key_env:
                 api_key_env = "VOYAGE_API_KEY_1"
-            
+
             # Try to initialize VoyageAI client
             try:
                 from knowcode.llm.voyageai_client import get_voyageai_client
+
                 self.voyage_client = get_voyageai_client(api_key_env)
             except ImportError as e:
                 print(f"  ⚠️ VoyageAI client not available (missing package): {e}")
             except ValueError as e:
                 print(f"  ⚠️ VoyageAI client not available (configuration error): {e}")
-    
+
     def rerank(
         self,
         query: str,
@@ -58,23 +59,23 @@ class Reranker:
         top_k: Optional[int] = None,
     ) -> list[tuple[CodeChunk, float]]:
         """Rerank chunks based on semantic relevance.
-        
+
         Uses VoyageAI cross-encoder if available, otherwise falls back
         to signal-based scoring.
-        
+
         Args:
             query: Original search query.
             chunks: (chunk, score) tuples from initial retrieval.
             boost_recent: Boost recently modified chunks.
             boost_documented: Boost chunks with docstrings.
             top_k: Return only top K results.
-            
+
         Returns:
             Reranked (chunk, score) tuples.
         """
         if not chunks:
             return []
-        
+
         # Try VoyageAI cross-encoder reranking
         if self.voyage_client:
             start_time = time.time()
@@ -84,14 +85,21 @@ class Reranker:
                 self._log_telemetry("voyageai", latency, len(chunks))
                 return result
             except ValueError as e:
-                print(f"  ⚠️ VoyageAI reranking failed (invalid input): {e}. Using signal-based fallback.")
+                print(
+                    f"  ⚠️ VoyageAI reranking failed (invalid input): {e}. Using signal-based fallback."
+                )
             except ConnectionError as e:
-                print(f"  ⚠️ VoyageAI reranking failed (network error): {e}. Using signal-based fallback.")
+                print(
+                    f"  ⚠️ VoyageAI reranking failed (network error): {e}. Using signal-based fallback."
+                )
             except Exception as e:
                 import logging
+
                 logging.error(f"VoyageAI reranking API failed: {e}")
-                print(f"  ⚠️ VoyageAI reranking failed: {e}. Using signal-based fallback.")
-        
+                print(
+                    f"  ⚠️ VoyageAI reranking failed: {e}. Using signal-based fallback."
+                )
+
         # Fallback to signal-based reranking
         start_time = time.time()
         result = self._rerank_with_signals(
@@ -100,7 +108,7 @@ class Reranker:
         latency = time.time() - start_time
         self._log_telemetry("signal_based", latency, len(chunks))
         return result
-        
+
     def _log_telemetry(self, method: str, latency: float, num_chunks: int) -> None:
         """Log reranking latency telemetry.
 
@@ -110,6 +118,7 @@ class Reranker:
         and outside anything ``knowcode telemetry clear`` can find (Step 20).
         """
         from knowcode.telemetry import log_event
+
         try:
             log_event(
                 None,
@@ -118,12 +127,13 @@ class Reranker:
                     "method": method,
                     "latency_seconds": latency,
                     "num_chunks": num_chunks,
-                }
+                },
             )
         except Exception as e:
             import logging
+
             logging.getLogger(__name__).warning("Ignored exception: %s", e)
-    
+
     def _rerank_with_voyageai(
         self,
         query: str,
@@ -131,18 +141,18 @@ class Reranker:
         top_k: Optional[int] = None,
     ) -> list[tuple[CodeChunk, float]]:
         """Rerank using VoyageAI cross-encoder.
-        
+
         Args:
             query: Search query.
             chunks: (chunk, score) tuples.
             top_k: Maximum results.
-            
+
         Returns:
             Reranked chunks with cross-encoder scores.
         """
         # Prepare documents for reranking
         documents = [chunk.content for chunk, _ in chunks]
-        
+
         assert self.voyage_client is not None
         # Call VoyageAI rerank API
         results = self.voyage_client.rerank(
@@ -151,16 +161,16 @@ class Reranker:
             model=self.model,
             top_k=top_k,
         )
-        
+
         # Map back to chunks with new scores
         reranked = []
         for r in results:
             idx = r["index"]
             chunk, _ = chunks[idx]
             reranked.append((chunk, r["relevance_score"]))
-        
+
         return reranked
-    
+
     def _rerank_with_signals(
         self,
         query: str,
@@ -170,27 +180,30 @@ class Reranker:
         top_k: Optional[int] = None,
     ) -> list[tuple[CodeChunk, float]]:
         """Rerank using local heuristic signals.
-        
+
         Args:
             query: Search query.
             chunks: (chunk, score) tuples.
             boost_recent: Boost recent modifications.
             boost_documented: Boost documented code.
             top_k: Maximum results.
-            
+
         Returns:
             Reranked chunks with adjusted scores.
         """
         reranked = []
         current_time = time.time()
-        
+
         for chunk, score in chunks:
             adjusted_score = score
-            
+
             # Boost documented code
-            if boost_documented and str(chunk.metadata.get("has_docstring", "")).lower() == "true":
+            if (
+                boost_documented
+                and str(chunk.metadata.get("has_docstring", "")).lower() == "true"
+            ):
                 adjusted_score *= 1.2
-            
+
             # Boost recently modified chunks (within 7 days)
             if boost_recent and chunk.metadata.get("last_modified"):
                 try:
@@ -199,20 +212,20 @@ class Reranker:
                         adjusted_score *= 1.1
                 except (ValueError, TypeError):
                     pass
-            
+
             # Boost exact name matches in content
             if query.lower() in chunk.content.lower():
                 adjusted_score *= 1.5
-                
+
             # Boost matches in metadata kind
             if query.lower() == chunk.metadata.get("kind", "").lower():
                 adjusted_score *= 2.0
-            
+
             reranked.append((chunk, adjusted_score))
-        
+
         reranked.sort(key=lambda x: x[1], reverse=True)
-        
+
         if top_k:
             reranked = reranked[:top_k]
-            
+
         return reranked

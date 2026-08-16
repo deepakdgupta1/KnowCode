@@ -111,7 +111,9 @@ def missing_modules(modules: Sequence[str]) -> tuple[str, ...]:
     return tuple(missing)
 
 
-def missing_features(feature_keys: Iterable[str] | None = None) -> tuple[MissingFeature, ...]:
+def missing_features(
+    feature_keys: Iterable[str] | None = None,
+) -> tuple[MissingFeature, ...]:
     """Return missing optional features, deduped by feature key."""
     keys = tuple(feature_keys) if feature_keys is not None else tuple(FEATURE_SPECS)
     results: list[MissingFeature] = []

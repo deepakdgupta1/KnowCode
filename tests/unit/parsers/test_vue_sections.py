@@ -92,18 +92,18 @@ def test_close_tag_prefix_does_not_end_the_section() -> None:
 
 
 def test_nested_templates_are_depth_counted() -> None:
-    scan = scan_sfc_sections(
-        "<template><template #a><p /></template><b /></template>"
-    )
+    scan = scan_sfc_sections("<template><template #a><p /></template><b /></template>")
 
     assert scan.errors == ()
     assert scan.sections[0].content == "<template #a><p /></template><b />"
 
 
 def test_sections_are_scanned_in_document_order() -> None:
-    assert _tags(
-        "<template><p /></template><script>1</script><style>a{}</style>"
-    ) == ["template", "script", "style"]
+    assert _tags("<template><p /></template><script>1</script><style>a{}</style>") == [
+        "template",
+        "script",
+        "style",
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -172,7 +172,11 @@ def test_section_coordinates_are_one_based_and_exact() -> None:
 
     template = scan.first("template")
     assert template is not None
-    assert (template.tag_line_start, template.content_line_start, template.line_end) == (
+    assert (
+        template.tag_line_start,
+        template.content_line_start,
+        template.line_end,
+    ) == (
         1,
         1,
         3,

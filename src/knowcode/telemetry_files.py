@@ -261,7 +261,9 @@ def correlation_key(store_path: str | Path) -> bytes | None:
             else:
                 material = os.urandom(_KEY_BYTES)
                 root.mkdir(parents=True, exist_ok=True)
-                descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, FILE_MODE)
+                descriptor = os.open(
+                    path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, FILE_MODE
+                )
                 try:
                     os.write(descriptor, material)
                 finally:

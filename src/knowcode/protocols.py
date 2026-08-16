@@ -75,7 +75,9 @@ class VectorStoreProtocol(Protocol):
         :class:`~knowcode.errors.VectorDimensionError` on a dimension mismatch.
         """
 
-    def search(self, embedding: list[float], limit: int = 10) -> list[tuple[str, float]]:
+    def search(
+        self, embedding: list[float], limit: int = 10
+    ) -> list[tuple[str, float]]:
         """Search for similar chunk IDs and similarity scores.
 
         Snapshot-safe read: returns only IDs from one consistent generation,

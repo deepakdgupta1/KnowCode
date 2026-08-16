@@ -3,7 +3,13 @@
 from pathlib import Path
 
 from knowcode.indexing.chunker import Chunker
-from knowcode.data_models import ChunkingConfig, Entity, EntityKind, Location, ParseResult
+from knowcode.data_models import (
+    ChunkingConfig,
+    Entity,
+    EntityKind,
+    Location,
+    ParseResult,
+)
 
 
 def test_chunker_module_extraction() -> None:

@@ -22,7 +22,20 @@ class FileInfo:
 class Scanner:
     """Scans directories for source files with gitignore support."""
 
-    SUPPORTED_EXTENSIONS = {".py", ".md", ".rst", ".yaml", ".yml", ".js", ".ts", ".java", ".rs", ".vue", ".jsx", ".tsx"}
+    SUPPORTED_EXTENSIONS = {
+        ".py",
+        ".md",
+        ".rst",
+        ".yaml",
+        ".yml",
+        ".js",
+        ".ts",
+        ".java",
+        ".rs",
+        ".vue",
+        ".jsx",
+        ".tsx",
+    }
 
     def __init__(
         self,
@@ -48,16 +61,18 @@ class Scanner:
         patterns: list[str] = []
 
         # Always ignore common directories
-        patterns.extend([
-            ".git/",
-            "__pycache__/",
-            "*.pyc",
-            ".venv/",
-            "venv/",
-            "node_modules/",
-            ".eggs/",
-            "*.egg-info/",
-        ])
+        patterns.extend(
+            [
+                ".git/",
+                "__pycache__/",
+                "*.pyc",
+                ".venv/",
+                "venv/",
+                "node_modules/",
+                ".eggs/",
+                "*.egg-info/",
+            ]
+        )
 
         # Add additional ignores
         patterns.extend(self.additional_ignores)
@@ -98,7 +113,8 @@ class Scanner:
 
             # Filter directories in-place to skip ignored ones
             dirs[:] = [
-                d for d in dirs
+                d
+                for d in dirs
                 if not self._should_ignore(
                     str((root_path / d).relative_to(self.root_dir)) + "/"
                 )
@@ -109,7 +125,7 @@ class Scanner:
                 relative_path = str(file_path.relative_to(self.root_dir))
 
                 # Check if ignored
-                # We check relative_path to ensure ignore patterns match correctly 
+                # We check relative_path to ensure ignore patterns match correctly
                 # against the project root (e.g., "src/" vs "/abs/path/to/src/")
                 if self._should_ignore(relative_path):
                     continue

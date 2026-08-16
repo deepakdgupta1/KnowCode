@@ -120,7 +120,9 @@ def test_seeded_watch_read_soak_keeps_generations_coherent(
                 oplog.append(f"{index}:add:{path.name}")
             elif choice == "modify":
                 path = rng.choice(pool)
-                path.write_text(_module_source(rng.randint(1000, 9999)), encoding="utf-8")
+                path.write_text(
+                    _module_source(rng.randint(1000, 9999)), encoding="utf-8"
+                )
                 worker.queue_file(path)
                 oplog.append(f"{index}:modify:{path.name}")
             elif choice == "delete":
@@ -168,7 +170,9 @@ def test_seeded_watch_read_soak_keeps_generations_coherent(
 
     resolved = resolve_current_generation(repo.output / "knowcode_index")
     assert resolved is not None, diag
-    assert resolved.manifest.counts["chunks"] == resolved.manifest.counts["vectors"], diag
+    assert resolved.manifest.counts["chunks"] == resolved.manifest.counts["vectors"], (
+        diag
+    )
 
     restarted = _service(repo, backend)
     try:

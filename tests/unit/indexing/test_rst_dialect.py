@@ -123,7 +123,7 @@ def test_line_ranges_reconstruct_rst_chunk_content():
     src = text.splitlines()
     assert chunks
     for c in chunks:
-        assert "\n".join(src[c.start_line - 1:c.end_line]).strip("\n") == c.content
+        assert "\n".join(src[c.start_line - 1 : c.end_line]).strip("\n") == c.content
 
 
 def test_chunk_file_autodetects_rst(tmp_path):

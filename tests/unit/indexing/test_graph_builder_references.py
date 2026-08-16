@@ -6,7 +6,14 @@ import pytest
 
 from knowcode.indexing.graph_builder import GraphBuilder
 from knowcode.indexing.scanner import FileInfo
-from knowcode.data_models import Entity, EntityKind, Location, ParseResult, Relationship, RelationshipKind
+from knowcode.data_models import (
+    Entity,
+    EntityKind,
+    Location,
+    ParseResult,
+    Relationship,
+    RelationshipKind,
+)
 from knowcode.utils.entity_identity import EndpointKind, classify_endpoint_id
 from tests.helpers.parser_assertions import (
     assert_exact_parse_result,

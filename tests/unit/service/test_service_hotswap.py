@@ -765,9 +765,7 @@ def test_stats_report_the_leased_generation(tmp_path: Path, backend: str) -> Non
     service.close()
 
 
-def test_graph_edges_are_read_from_one_generation(
-    tmp_path: Path, backend: str
-) -> None:
+def test_graph_edges_are_read_from_one_generation(tmp_path: Path, backend: str) -> None:
     src = tmp_path / "src"
     src.mkdir(exist_ok=True)
     (src / "graph.py").write_text(

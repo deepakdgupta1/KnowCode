@@ -163,7 +163,9 @@ def _missing_artifacts(index_path: Path, backend: str) -> tuple[str, ...]:
             return ("missing vectors.lancedb",)
         return ()
 
-    if not ((index_path / "vectors.index").exists() or (index_path / "vectors.npy").exists()):
+    if not (
+        (index_path / "vectors.index").exists() or (index_path / "vectors.npy").exists()
+    ):
         return ("missing vectors.index or vectors.npy",)
     return ()
 

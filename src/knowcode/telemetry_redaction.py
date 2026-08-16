@@ -44,9 +44,17 @@ MAX_KEY_CHARS: Final = 64
 #: output, which is what makes a redacted record still readable.
 _RULES: Final[Sequence[tuple[Pattern[str], str]]] = (
     # PEM private key blocks, header and body alike.
-    (re.compile(r"-----BEGIN[A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END[A-Z ]*PRIVATE KEY-----)?"), REDACTED),
+    (
+        re.compile(
+            r"-----BEGIN[A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END[A-Z ]*PRIVATE KEY-----)?"
+        ),
+        REDACTED,
+    ),
     # scheme://user:password@host
-    (re.compile(r"\b([a-z][a-z0-9+.\-]*://)[^\s/:@]+:[^\s/@]+@"), r"\1" + REDACTED + "@"),
+    (
+        re.compile(r"\b([a-z][a-z0-9+.\-]*://)[^\s/:@]+:[^\s/@]+@"),
+        r"\1" + REDACTED + "@",
+    ),
     # Authorization schemes.
     (re.compile(r"\b(Bearer|Basic|Token)\s+[A-Za-z0-9._\-+/=]{8,}"), r"\1 " + REDACTED),
     # name = value assignments for credential-ish names.
@@ -59,7 +67,10 @@ _RULES: Final[Sequence[tuple[Pattern[str], str]]] = (
         r"\1\2" + REDACTED,
     ),
     # JSON Web Tokens.
-    (re.compile(r"\beyJ[A-Za-z0-9_\-]{5,}\.[A-Za-z0-9_\-]{5,}\.[A-Za-z0-9_\-]{5,}"), REDACTED),
+    (
+        re.compile(r"\beyJ[A-Za-z0-9_\-]{5,}\.[A-Za-z0-9_\-]{5,}\.[A-Za-z0-9_\-]{5,}"),
+        REDACTED,
+    ),
     # Vendor-prefixed keys.
     (re.compile(r"\bsk-[A-Za-z0-9_\-]{8,}"), REDACTED),
     (re.compile(r"\bAIza[0-9A-Za-z_\-]{10,}"), REDACTED),

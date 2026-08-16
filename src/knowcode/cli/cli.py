@@ -111,13 +111,15 @@ def install_command(upgrade: bool, user_install: bool, dry_run: bool) -> None:
 @cli.command()
 @click.argument("directory", type=click.Path(exists=True, file_okay=False))
 @click.option(
-    "--output", "-o",
+    "--output",
+    "-o",
     type=click.Path(),
     default=".",
     help="Output directory for knowledge store (default: current directory)",
 )
 @click.option(
-    "--ignore", "-i",
+    "--ignore",
+    "-i",
     multiple=True,
     help="Additional patterns to ignore",
 )
@@ -131,7 +133,13 @@ def install_command(upgrade: bool, user_install: bool, dry_run: bool) -> None:
     type=click.Path(exists=True, dir_okay=False),
     help="Path to Cobertura XML coverage report.",
 )
-def analyze(directory: str, output: str, ignore: tuple[str, ...], temporal: bool, coverage: Optional[str]) -> None:
+def analyze(
+    directory: str,
+    output: str,
+    ignore: tuple[str, ...],
+    temporal: bool,
+    coverage: Optional[str],
+) -> None:
     """Scan and analyze a codebase.
 
     DIRECTORY: Path to the codebase to analyze.
@@ -153,7 +161,7 @@ def analyze(directory: str, output: str, ignore: tuple[str, ...], temporal: bool
     click.echo("\n✓ Analysis complete!")
     click.echo(f"  Entities: {stats['total_entities']}")
     click.echo(f"  Relationships: {stats['total_relationships']}")
-    if stats.get('total_errors', 0) > 0:
+    if stats.get("total_errors", 0) > 0:
         click.echo(f"  Errors: {stats['total_errors']}")
     if stats.get("indexed_chunks") is not None:
         click.echo(f"  Indexed chunks: {stats['indexed_chunks']}")
@@ -169,7 +177,8 @@ def analyze(directory: str, output: str, ignore: tuple[str, ...], temporal: bool
     required=False,
 )
 @click.option(
-    "--ignore", "-i",
+    "--ignore",
+    "-i",
     multiple=True,
     help="Additional patterns to ignore",
 )
@@ -179,7 +188,8 @@ def analyze(directory: str, output: str, ignore: tuple[str, ...], temporal: bool
     help="Analyze git history and add temporal context.",
 )
 @click.option(
-    "--config", "-c",
+    "--config",
+    "-c",
     type=click.Path(exists=True, dir_okay=False),
     help="Path to configuration file (aimodels.yaml) for embedding models.",
 )
@@ -231,6 +241,10 @@ def build(
 
     _report_generation(stats)
 
+    # Show pre-flight quality report if available
+    if "preflight_report" in stats:
+        _display_preflight_report(stats["preflight_report"])
+
 
 @cli.command()
 @click.argument("directory", type=click.Path(exists=True, file_okay=False))
@@ -242,7 +256,8 @@ def build(
     help="Output directory for index (default: knowcode_index)",
 )
 @click.option(
-    "--config", "-c",
+    "--config",
+    "-c",
     type=click.Path(exists=True, dir_okay=False),
     help="Path to configuration file (aimodels.yaml) for embedding models.",
 )
@@ -251,7 +266,9 @@ def build(
     is_flag=True,
     help="Use incremental indexing to speed up subsequent builds.",
 )
-def index(directory: str, output: str, config: Optional[str], incremental: bool) -> None:
+def index(
+    directory: str, output: str, config: Optional[str], incremental: bool
+) -> None:
     """Build semantic search index for a codebase.
 
     DIRECTORY: Path to the codebase to index.
@@ -296,16 +313,20 @@ def index(directory: str, output: str, config: Optional[str], incremental: bool)
 
 
 @cli.command()
-@click.argument("query_type", type=click.Choice(["callers", "callees", "deps", "search"]))
+@click.argument(
+    "query_type", type=click.Choice(["callers", "callees", "deps", "search"])
+)
 @click.argument("target")
 @click.option(
-    "--store", "-s",
+    "--store",
+    "-s",
     type=click.Path(exists=True),
     default=".",
     help="Path to knowledge store file or directory",
 )
 @click.option(
-    "--json", "as_json",
+    "--json",
+    "as_json",
     is_flag=True,
     help="Output as JSON",
 )
@@ -318,7 +339,9 @@ def query(query_type: str, target: str, store: str, as_json: bool) -> None:
     try:
         service = KnowCodeService(store_path=store)
     except FileNotFoundError:
-        click.echo("Error: Knowledge store not found. Run 'knowcode build' first.", err=True)
+        click.echo(
+            "Error: Knowledge store not found. Run 'knowcode build' first.", err=True
+        )
         sys.exit(1)
 
     results: list[dict[str, Any]] = []
@@ -333,15 +356,19 @@ def query(query_type: str, target: str, store: str, as_json: bool) -> None:
         results = service.get_callees(target)
 
     elif query_type == "deps":
-        entity = service.store.get_entity(target) or next(iter(service.store.search(target)), None)
+        entity = service.store.get_entity(target) or next(
+            iter(service.store.search(target)), None
+        )
         if entity:
             deps = service.store.get_dependencies(entity.id)
             for d in deps:
-                results.append({
-                    "id": d.id,
-                    "kind": d.kind.value,
-                    "name": d.qualified_name,
-                })
+                results.append(
+                    {
+                        "id": d.id,
+                        "kind": d.kind.value,
+                        "name": d.qualified_name,
+                    }
+                )
 
     # Output results
     if as_json:
@@ -379,7 +406,8 @@ def query(query_type: str, target: str, store: str, as_json: bool) -> None:
     help="Path to knowledge store (directory or file)",
 )
 @click.option(
-    "--config", "-c",
+    "--config",
+    "-c",
     type=click.Path(exists=True, dir_okay=False),
     help="Path to configuration file (aimodels.yaml) for embedding/reranking models.",
 )
@@ -415,7 +443,7 @@ def semantic_search(
             click.echo("No relevant code found.")
         else:
             for i, chunk in enumerate(results):
-                click.echo(f"\n[{i+1}] {chunk.entity_id}")
+                click.echo(f"\n[{i + 1}] {chunk.entity_id}")
                 content = chunk.content
                 if len(content) > 300:
                     content = content[:300] + "..."
@@ -431,13 +459,15 @@ def semantic_search(
 @cli.command()
 @click.argument("target")
 @click.option(
-    "--store", "-s",
+    "--store",
+    "-s",
     type=click.Path(exists=True),
     default=".",
     help="Path to knowledge store file or directory",
 )
 @click.option(
-    "--max-tokens", "-m",
+    "--max-tokens",
+    "-m",
     type=int,
     default=2000,
     help="Maximum tokens in context (default: 2000)",
@@ -450,13 +480,18 @@ def context(target: str, store: str, max_tokens: int) -> None:
     try:
         service = KnowCodeService(store_path=store)
     except FileNotFoundError:
-        click.echo("Error: Knowledge store not found. Run 'knowcode build' first.", err=True)
+        click.echo(
+            "Error: Knowledge store not found. Run 'knowcode build' first.", err=True
+        )
         sys.exit(1)
 
     try:
         bundle_dict = service.get_context(target, max_tokens=max_tokens)
         click.echo(bundle_dict["context_text"])
-        click.echo(f"\n--- {len(bundle_dict['context_text'])} chars, {bundle_dict['total_tokens']} tokens, {len(bundle_dict['included_entities'])} entities ---", err=True)
+        click.echo(
+            f"\n--- {len(bundle_dict['context_text'])} chars, {bundle_dict['total_tokens']} tokens, {len(bundle_dict['included_entities'])} entities ---",
+            err=True,
+        )
         if bundle_dict["truncated"]:
             click.echo("(truncated)", err=True)
     except ValueError as e:
@@ -466,13 +501,15 @@ def context(target: str, store: str, max_tokens: int) -> None:
 
 @cli.command()
 @click.option(
-    "--store", "-s",
+    "--store",
+    "-s",
     type=click.Path(exists=True),
     default=".",
     help="Path to knowledge store file or directory",
 )
 @click.option(
-    "--output", "-o",
+    "--output",
+    "-o",
     type=click.Path(),
     default="docs",
     help="Output directory for documentation",
@@ -482,7 +519,9 @@ def export(store: str, output: str) -> None:
     try:
         service = KnowCodeService(store_path=store)
     except FileNotFoundError:
-        click.echo("Error: Knowledge store not found. Run 'knowcode build' first.", err=True)
+        click.echo(
+            "Error: Knowledge store not found. Run 'knowcode build' first.", err=True
+        )
         sys.exit(1)
 
     output_dir = Path(output)
@@ -498,7 +537,8 @@ def export(store: str, output: str) -> None:
 
 @cli.command()
 @click.option(
-    "--store", "-s",
+    "--store",
+    "-s",
     type=click.Path(exists=True),
     default=".",
     help="Path to knowledge store file or directory",
@@ -508,7 +548,9 @@ def stats(store: str) -> None:
     try:
         service = KnowCodeService(store_path=store)
     except FileNotFoundError:
-        click.echo("Error: Knowledge store not found. Run 'knowcode build' first.", err=True)
+        click.echo(
+            "Error: Knowledge store not found. Run 'knowcode build' first.", err=True
+        )
         sys.exit(1)
 
     s = service.get_stats()
@@ -516,11 +558,11 @@ def stats(store: str) -> None:
     click.echo("-" * 30)
 
     click.echo(f"\nTotal Entities: {s['total_entities']}")
-    for kind, count in sorted(s['entities_by_kind'].items()):
+    for kind, count in sorted(s["entities_by_kind"].items()):
         click.echo(f"  {kind}: {count}")
 
     click.echo(f"\nTotal Relationships: {s['total_relationships']}")
-    for kind, count in sorted(s['relationships_by_type'].items()):
+    for kind, count in sorted(s["relationships_by_type"].items()):
         click.echo(f"  {kind}: {count}")
 
 
@@ -535,7 +577,8 @@ def telemetry() -> None:
 
 @telemetry.command("show")
 @click.option(
-    "--store", "-s",
+    "--store",
+    "-s",
     type=click.Path(exists=True),
     default=".",
     help="Path to the store directory whose telemetry should be summarized",
@@ -572,7 +615,8 @@ def telemetry_show(store: str) -> None:
 
 @telemetry.command("clear")
 @click.option(
-    "--store", "-s",
+    "--store",
+    "-s",
     type=click.Path(exists=True),
     default=".",
     help="Path to the store directory whose telemetry should be deleted",
@@ -599,19 +643,22 @@ def telemetry_clear(store: str, yes: bool) -> None:
 
 @cli.command()
 @click.option(
-    "--store", "-s",
+    "--store",
+    "-s",
     type=click.Path(),
     default=".",
     help="Path to knowledge store file or directory",
 )
 @click.option(
-    "--index", "-i",
+    "--index",
+    "-i",
     "index_path",
     type=click.Path(),
     help="Path to semantic index directory (default: beside the store)",
 )
 @click.option(
-    "--config", "-c",
+    "--config",
+    "-c",
     type=click.Path(),
     help="Path to configuration file (aimodels.yaml)",
 )
@@ -628,7 +675,8 @@ def telemetry_clear(store: str, yes: bool) -> None:
     help="Spawn the MCP server and verify list_tools plus one tool call.",
 )
 @click.option(
-    "--json", "as_json",
+    "--json",
+    "as_json",
     is_flag=True,
     help="Output the doctor report as JSON.",
 )
@@ -665,9 +713,114 @@ def doctor(
         sys.exit(1)
 
 
+def _display_preflight_report(report: dict[str, Any]) -> None:
+    """Display a pre-flight quality report card in the terminal."""
+    overall = report.get("overall_score", 0.0)
+    grade = report.get("overall_grade", "?")
+    click.echo(f"\n  Pre-flight Quality Assessment: {grade} ({overall:.0%})")
+    click.echo("  " + "─" * 56)
+
+    dimensions = report.get("dimensions", [])
+    for dim in dimensions:
+        name = dim.get("dimension", "").replace("_", " ").title()
+        score = dim.get("score", 0.0)
+        dim_grade = dim.get("grade", "?")
+        detail = dim.get("detail", "")
+        # Grade-coloured indicator
+        indicator = "●" if score >= 0.75 else "◐" if score >= 0.5 else "○"
+        click.echo(f"  {indicator} [{dim_grade}] {name:.<35s} {score:.0%}")
+        if detail:
+            click.echo(f"        {detail}")
+
+    recommendations = report.get("recommendations", [])
+    if recommendations:
+        click.echo(f"\n  Recommendations ({len(recommendations)}):")
+        for i, rec in enumerate(recommendations, 1):
+            click.echo(f"    {i}. {rec}")
+
+    summary = report.get("summary", "")
+    if summary:
+        click.echo(f"\n  {summary}")
+
+
+@cli.command()
+@click.argument(
+    "directory",
+    type=click.Path(exists=True, file_okay=False),
+    default=".",
+    required=False,
+)
+@click.option(
+    "--ignore",
+    "-i",
+    multiple=True,
+    help="Additional patterns to ignore",
+)
+@click.option(
+    "--config",
+    "-c",
+    type=click.Path(exists=True, dir_okay=False),
+    help="Path to configuration file (aimodels.yaml) for custom weights.",
+)
+@click.option(
+    "--json",
+    "as_json",
+    is_flag=True,
+    help="Output the report as JSON.",
+)
+def preflight(
+    directory: str,
+    ignore: tuple[str, ...],
+    config: Optional[str],
+    as_json: bool,
+) -> None:
+    """Run a pre-flight quality assessment on a codebase.
+
+    Scans and parses DIRECTORY (defaults to current directory) to evaluate
+    how well KnowCode's surfaces will perform on this codebase. Produces a
+    report card with grades across 10 quality dimensions.
+
+    \b
+    This is a lightweight check that does NOT build a knowledge store or
+    semantic index — it only scans and parses.
+    """
+    target = Path(directory).resolve()
+    click.echo(f"Running pre-flight assessment on: {target}")
+
+    from knowcode.config import AppConfig
+
+    app_config = AppConfig.load(config)
+    service = KnowCodeService(app_config=app_config)
+
+    try:
+        report = service.preflight(
+            directory=str(target),
+            ignore=list(ignore),
+        )
+    except Exception as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
+    if as_json:
+        click.echo(json.dumps(report, indent=2))
+    else:
+        _display_preflight_report(report)
+
+    # Warn if below configured threshold
+    min_score = app_config.preflight.min_score
+    if min_score > 0.0 and report.get("overall_score", 0.0) < min_score:
+        click.echo(
+            f"\n  ⚠  Quality score ({report['overall_score']:.0%}) is below "
+            f"the configured threshold ({min_score:.0%}).",
+            err=True,
+        )
+        sys.exit(1)
+
+
 @cli.command()
 @click.option(
-    "--store", "-s",
+    "--store",
+    "-s",
     type=click.Path(exists=True),
     default=".",
     help="Path to knowledge store file or directory",
@@ -709,37 +862,43 @@ def server(store: str, host: str, port: int, watch: bool) -> None:
 @cli.command()
 @click.argument("target", required=False)
 @click.option(
-    "--store", "-s",
+    "--store",
+    "-s",
     type=click.Path(exists=True),
     default=".",
     help="Path to knowledge store file or directory",
 )
 @click.option(
-    "--limit", "-l",
+    "--limit",
+    "-l",
     type=int,
     default=10,
     help="Limit number of revisions",
 )
 def history(target: Optional[str], store: str, limit: int) -> None:
     """Show history of the codebase or a specific entity.
-    
+
     TARGET: Optional entity ID or search pattern. If omitted, shows commit log.
     """
     try:
         service = KnowCodeService(store_path=store)
     except FileNotFoundError:
-        click.echo("Error: Knowledge store not found. Run 'knowcode build' first.", err=True)
+        click.echo(
+            "Error: Knowledge store not found. Run 'knowcode build' first.", err=True
+        )
         sys.exit(1)
-        
+
     knowledge = service.store
-    
+
     if not target:
         # Show recent commits
         commits = knowledge.get_entities_by_kind("commit")
         # Sort by timestamp (metadata)
         commits.sort(key=lambda x: x.metadata.get("timestamp", "0"), reverse=True)
-        
-        click.echo(f"Recent History (showing {min(limit, len(commits))} of {len(commits)}):")
+
+        click.echo(
+            f"Recent History (showing {min(limit, len(commits))} of {len(commits)}):"
+        )
         for commit in commits[:limit]:
             date = commit.metadata.get("date", "Unknown date")
             author_rels = knowledge.get_incoming_relationships(commit.id)
@@ -749,26 +908,28 @@ def history(target: Optional[str], store: str, limit: int) -> None:
                     # rel.source_id is author
                     a_ent = knowledge.get_entity(rel.source_id)
                     if a_ent:
-                         author = a_ent.name
-            
+                        author = a_ent.name
+
             click.echo(f"[{date}] {commit.name} - {author}")
-            click.echo(f"  {commit.docstring.splitlines()[0] if commit.docstring else ''}")
-            
+            click.echo(
+                f"  {commit.docstring.splitlines()[0] if commit.docstring else ''}"
+            )
+
     else:
         # Show history for specific entity
         entity = knowledge.get_entity(target)
         if not entity:
-             matches = knowledge.search(target)
-             if matches:
-                 entity = matches[0]
-                 click.echo(f"Using: {entity.id}\n")
-        
+            matches = knowledge.search(target)
+            if matches:
+                entity = matches[0]
+                click.echo(f"Using: {entity.id}\n")
+
         if not entity:
-             click.echo(f"Entity not found: {target}")
-             return
+            click.echo(f"Entity not found: {target}")
+            return
 
         click.echo(f"History for {entity.qualified_name} ({entity.kind.value}):")
-        
+
         # Build history from relationships
         # Entity -> CHANGED_BY -> Commit
         rels = knowledge.get_outgoing_relationships(entity.id)
@@ -781,47 +942,53 @@ def history(target: Optional[str], store: str, limit: int) -> None:
                     stats = f"(+{rel.metadata.get('insertions', 0)}/-{rel.metadata.get('deletions', 0)})"
                     timestamp = commit.metadata.get("timestamp", "0")
                     changes.append((timestamp, commit, stats))
-        
+
         changes.sort(key=lambda x: x[0], reverse=True)
-        
+
         if not changes:
             click.echo("  No recorded history (scan with --temporal).")
             return
-            
+
         for _, commit, stats in changes[:limit]:
             date = commit.metadata.get("date", "")
-            click.echo(f"  {date} {commit.name} {stats}: {commit.docstring.splitlines()[0]}")
+            click.echo(
+                f"  {date} {commit.name} {stats}: {commit.docstring.splitlines()[0]}"
+            )
 
 
 @cli.command()
 @click.argument("query_text", nargs=-1, required=True)
 @click.option(
-    "--store", "-s",
+    "--store",
+    "-s",
     type=click.Path(exists=True),
     default=".",
     help="Path to knowledge store file or directory",
 )
 @click.option(
-    "--config", "-c",
+    "--config",
+    "-c",
     type=click.Path(exists=True, dir_okay=False),
     help="Path to configuration file for model priorities",
 )
 def ask(query_text: tuple[str], store: str, config: Optional[str]) -> None:
     """Ask a question about the codebase using AI.
-    
+
     QUERY_TEXT: The question to ask.
     """
     question = " ".join(query_text)
-    
+
     try:
-        require_extra("llm", "knowcode ask", ("openai", "google.genai", "google.api_core"))
+        require_extra(
+            "llm", "knowcode ask", ("openai", "google.genai", "google.api_core")
+        )
         from knowcode.llm.agent import Agent
         from knowcode.config import AppConfig
 
         app_config = AppConfig.load(config)
         service = KnowCodeService(store_path=store, app_config=app_config)
         agent = Agent(service, config=app_config)
-        
+
         click.echo(f"🤔 Asking KnowCode: '{question}'...")
         answer = agent.answer(question)
         click.echo("\n" + answer)
@@ -839,30 +1006,32 @@ def ask(query_text: tuple[str], store: str, config: Optional[str]) -> None:
 
 @cli.command("mcp-server")
 @click.option(
-    "--store", "-s",
+    "--store",
+    "-s",
     type=click.Path(exists=True),
     default=".",
     help="Path to knowledge store file or directory",
 )
 @click.option(
-    "--config", "-c",
+    "--config",
+    "-c",
     type=click.Path(exists=True, dir_okay=False),
     help="Path to configuration file for model priorities",
 )
 def mcp_server(store: str, config: Optional[str]) -> None:
     """Start MCP server for IDE integration.
-    
+
     Exposes KnowCode tools via the Model Context Protocol (MCP) using
     STDIO transport. Four tools are available:
-    
+
     \b
     - search_codebase: Search for code entities by name
-    - get_entity_context: Get detailed context for an entity  
+    - get_entity_context: Get detailed context for an entity
     - trace_calls: Trace call graph (callers/callees) with depth
     - retrieve_context_for_query: Unified query-to-context retrieval bundle
-    
+
     Example usage with Claude Desktop or other MCP clients:
-    
+
     \b
         # In your MCP client config, add:
         {
@@ -873,17 +1042,21 @@ def mcp_server(store: str, config: Optional[str]) -> None:
         }
     """
     store_path = Path(store)
-    store_file = store_path / KnowledgeStore.DEFAULT_FILENAME if store_path.is_dir() else store_path
+    store_file = (
+        store_path / KnowledgeStore.DEFAULT_FILENAME
+        if store_path.is_dir()
+        else store_path
+    )
     if not store_file.exists():
         click.echo(
             "Error: Knowledge store not found. Run `knowcode build <dir>` first.",
             err=True,
         )
         sys.exit(1)
-    
+
     try:
         from knowcode.mcp.server import run_server
-        
+
         click.echo("🔌 Starting MCP server...", err=True)
         click.echo(f"   Store: {store_path}", err=True)
         click.echo("   Transport: STDIO", err=True)
@@ -891,14 +1064,14 @@ def mcp_server(store: str, config: Optional[str]) -> None:
             "   Tools: search_codebase, get_entity_context, trace_calls, retrieve_context_for_query",
             err=True,
         )
-        
+
         # Run the server (blocking)
         run_server(store_path, config_path=config)
-        
+
     except ImportError as e:
         click.echo(
             f"Error: MCP package not installed. Install with: pip install mcp\n{e}",
-            err=True
+            err=True,
         )
         sys.exit(1)
     except Exception as e:

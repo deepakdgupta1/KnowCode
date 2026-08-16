@@ -1,6 +1,5 @@
 """Token counting utility using tiktoken."""
 
-
 import tiktoken
 
 
@@ -47,10 +46,10 @@ class TokenCounter:
         """
         if not text:
             return ""
-            
+
         tokens = self.encoding.encode(text)
         if len(tokens) <= max_tokens:
             return text
-            
+
         truncated_tokens = tokens[:max_tokens]
         return self.encoding.decode(truncated_tokens)

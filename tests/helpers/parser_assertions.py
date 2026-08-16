@@ -97,7 +97,9 @@ def load_parser_fixture_contract(source_path: Path) -> ParserFixtureContract:
     raw_entities = payload.get("entities")
     raw_relationships = payload.get("relationships")
     if not isinstance(raw_entities, list) or not isinstance(raw_relationships, list):
-        raise AssertionError(f"{expected_path} must contain entity and relationship lists")
+        raise AssertionError(
+            f"{expected_path} must contain entity and relationship lists"
+        )
 
     line_count = len(source_path.read_text(encoding="utf-8").splitlines())
     entities: list[ExpectedEntity] = []
@@ -111,7 +113,9 @@ def load_parser_fixture_contract(source_path: Path) -> ParserFixtureContract:
         if not 1 <= line_start <= line_end <= line_count:
             raise AssertionError(f"{label} has a location outside the source fixture")
         if qualified_name in qualified_names:
-            raise AssertionError(f"{label} duplicates qualified_name {qualified_name!r}")
+            raise AssertionError(
+                f"{label} duplicates qualified_name {qualified_name!r}"
+            )
         qualified_names.add(qualified_name)
         try:
             kind = EntityKind(_require_string(entity, "kind", label))
@@ -143,7 +147,9 @@ def load_parser_fixture_contract(source_path: Path) -> ParserFixtureContract:
                 _require_string(target, "classification", f"{label}.target")
             )
         except ValueError as exc:
-            raise AssertionError(f"{label} has an unsupported target classification") from exc
+            raise AssertionError(
+                f"{label} has an unsupported target classification"
+            ) from exc
 
         if classification is EndpointKind.INTERNAL:
             target_name = _require_string(target, "qualified_name", f"{label}.target")
@@ -170,9 +176,16 @@ def load_parser_fixture_contract(source_path: Path) -> ParserFixtureContract:
         try:
             kind = RelationshipKind(_require_string(relationship, "kind", label))
         except ValueError as exc:
-            raise AssertionError(f"{label} has an unsupported relationship kind") from exc
-        if kind is RelationshipKind.CONTAINS and classification is not EndpointKind.INTERNAL:
-            raise AssertionError(f"{label} contains edge must target an internal entity")
+            raise AssertionError(
+                f"{label} has an unsupported relationship kind"
+            ) from exc
+        if (
+            kind is RelationshipKind.CONTAINS
+            and classification is not EndpointKind.INTERNAL
+        ):
+            raise AssertionError(
+                f"{label} contains edge must target an internal entity"
+            )
         relationships.append(
             ExpectedRelationship(
                 source_id=source_id,

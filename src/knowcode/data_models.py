@@ -7,59 +7,60 @@ from typing import Any, Optional
 
 class EntityKind(str, Enum):
     """Types of code entities tracked by the system.
-    
+
     These correspond to semantic nodes in the knowledge graph.
     """
 
-    MODULE = "module"          # Python modules, Java packages
-    CLASS = "class"            # Classes, Interfaces, Enums
-    FUNCTION = "function"      # Top-level functions
-    METHOD = "method"          # Class methods
-    VARIABLE = "variable"      # (Future) Top-level variables/constants
+    MODULE = "module"  # Python modules, Java packages
+    CLASS = "class"  # Classes, Interfaces, Enums
+    FUNCTION = "function"  # Top-level functions
+    METHOD = "method"  # Class methods
+    VARIABLE = "variable"  # (Future) Top-level variables/constants
     # Documentation entities
-    DOCUMENT = "document"      # Markdown files
-    SECTION = "section"        # Headings within documents
+    DOCUMENT = "document"  # Markdown files
+    SECTION = "section"  # Headings within documents
     # Configuration entities
     CONFIG_KEY = "config_key"  # YAML/JSON keys
     # Temporal entities
-    COMMIT = "commit"          # Git commits
-    AUTHOR = "author"          # Git authors
+    COMMIT = "commit"  # Git commits
+    AUTHOR = "author"  # Git authors
     # Runtime entities
-    TEST_RUN = "test_run"      # Test execution result
+    TEST_RUN = "test_run"  # Test execution result
     COVERAGE_REPORT = "coverage_report"
 
 
 class RelationshipKind(str, Enum):
     """Types of relationships (edges) between entities."""
 
-    CALLS = "calls"            # Static function/method call
-    IMPORTS = "imports"        # Module import / dependency
-    CONTAINS = "contains"      # Structural containment (Class -> Method)
-    INHERITS = "inherits"      # Class inheritance / Interface implementation
+    CALLS = "calls"  # Static function/method call
+    IMPORTS = "imports"  # Module import / dependency
+    CONTAINS = "contains"  # Structural containment (Class -> Method)
+    INHERITS = "inherits"  # Class inheritance / Interface implementation
     IMPLEMENTS = "implements"  # Type implements Trait/Interface (Rust/Java)
-    USES_TYPE = "uses_type"    # Variable/Field uses a Type
+    USES_TYPE = "uses_type"  # Variable/Field uses a Type
     REFERENCES = "references"  # General reference (e.g., config usage)
     # Temporal relationships
     CHANGED_BY = "changed_by"  # Entity -> Commit
-    AUTHORED = "authored"      # Author -> Commit
-    MODIFIED = "modified"      # Commit -> Entity
+    AUTHORED = "authored"  # Author -> Commit
+    MODIFIED = "modified"  # Commit -> Entity
     # Runtime relationships
-    COVERS = "covers"           # Report/Test -> Entity
-    EXECUTED_BY = "executed_by" # Entity -> Report/Test
+    COVERS = "covers"  # Report/Test -> Entity
+    EXECUTED_BY = "executed_by"  # Entity -> Report/Test
 
 
 class TaskType(str, Enum):
     """Query/task types for context prioritization.
-    
+
     These correspond to task-specific templates in docs/architecture/reference_architecture.md (Layer 9).
     """
 
-    EXPLAIN = "explain"    # "How does X work?", "Explain the flow of Y"
-    DEBUG = "debug"        # "Why is X failing?", "What's causing bug in Y?"
-    EXTEND = "extend"      # "How do I add X?", "Where should I implement Y?"
-    REVIEW = "review"      # "What changed in X?", "Review this code"
-    LOCATE = "locate"      # "Where is X defined?", "Find usages of Y"
-    GENERAL = "general"    # Default fallback for unclassified queries
+    EXPLAIN = "explain"  # "How does X work?", "Explain the flow of Y"
+    DEBUG = "debug"  # "Why is X failing?", "What's causing bug in Y?"
+    EXTEND = "extend"  # "How do I add X?", "Where should I implement Y?"
+    REVIEW = "review"  # "What changed in X?", "Review this code"
+    LOCATE = "locate"  # "Where is X defined?", "Find usages of Y"
+    GENERAL = "general"  # Default fallback for unclassified queries
+
 
 @dataclass
 class Location:

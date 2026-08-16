@@ -91,7 +91,9 @@ def only_edge(result: ParseResult, kind: RelationshipKind, binding_type: str):
     "fixture_name",
     ["composition_relationships.vue", "options_relationships.vue", "sfc_sections.vue"],
 )
-def test_committed_vue_fixture_graph_is_exact(parser: VueParser, fixture_name: str) -> None:
+def test_committed_vue_fixture_graph_is_exact(
+    parser: VueParser, fixture_name: str
+) -> None:
     contract = load_parser_fixture_contract(FIXTURE_ROOT / fixture_name)
 
     assert_exact_parse_result(parser.parse_file(contract.source_path), contract)
@@ -156,7 +158,8 @@ def test_composition_css_bindings_resolve_to_computed_and_prop_entities(
     label = entity_by_qualified_name(result, "Counter.label")
     assert label.metadata["declaration_type"] == "prop"
     css_targets = {
-        edge.target_id for edge in edges(result, RelationshipKind.REFERENCES, "css_variable")
+        edge.target_id
+        for edge in edges(result, RelationshipKind.REFERENCES, "css_variable")
     }
     assert css_targets == {doubled.id, label.id}
 
@@ -516,9 +519,7 @@ function go() {}
                 (e.id, e.kind, e.qualified_name, e.location.line_start)
                 for e in result.entities
             ),
-            tuple(
-                (r.source_id, r.target_id, r.kind) for r in result.relationships
-            ),
+            tuple((r.source_id, r.target_id, r.kind) for r in result.relationships),
         )
 
     assert snapshot() == snapshot()

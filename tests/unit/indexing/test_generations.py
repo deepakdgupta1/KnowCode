@@ -372,7 +372,10 @@ def test_retention_keeps_the_last_known_good_generation(tmp_path: Path) -> None:
     remaining = set(list_generations(tmp_path))
 
     assert remaining == {published[-1].generation_id, published[-2].generation_id}
-    assert resolve_current_generation(tmp_path).generation_id == published[-1].generation_id
+    assert (
+        resolve_current_generation(tmp_path).generation_id
+        == published[-1].generation_id
+    )
 
 
 def test_retention_never_removes_the_current_generation(tmp_path: Path) -> None:
@@ -581,9 +584,7 @@ def test_retention_keeps_a_generation_a_reader_still_holds(tmp_path: Path) -> No
     removed = generations.retire_generations(tmp_path, keep=1, protect=[leased])
 
     assert [path.name for path in removed] == [published[1].generation_id]
-    assert list_generations(tmp_path) == sorted(
-        [leased, published[-1].generation_id]
-    )
+    assert list_generations(tmp_path) == sorted([leased, published[-1].generation_id])
 
 
 def test_a_protected_generation_is_removed_once_it_is_released(

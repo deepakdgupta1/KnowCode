@@ -190,7 +190,12 @@ def _write_event_sync(store_path: str | Path, event: Mapping[str, Any]) -> None:
 
 def raw_capture_enabled() -> bool:
     """Whether the operator has explicitly opted into raw-query capture."""
-    return os.environ.get(RAW_CAPTURE_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
+    return os.environ.get(RAW_CAPTURE_ENV, "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
 
 def reset_raw_capture_warning() -> None:
@@ -383,7 +388,9 @@ def get_telemetry_summary(store_path: str | Path) -> dict[str, Any]:
     misses = 0
     by_type: dict[str, int] = {}
     try:
-        for record in telemetry_files.iter_records(telemetry_files.telemetry_path(root)):
+        for record in telemetry_files.iter_records(
+            telemetry_files.telemetry_path(root)
+        ):
             event_type = str(record.get("event_type", "unknown"))
             by_type[event_type] = by_type.get(event_type, 0) + 1
             if telemetry_policy.is_counted_query_event(record):

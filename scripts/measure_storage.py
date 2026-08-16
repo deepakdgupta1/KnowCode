@@ -35,7 +35,9 @@ def measure_knowledge_store(store_path: Path) -> dict:
     source_chars = sum(len(e.get("source_code", "") or "") for e in entities.values())
     docstring_chars = sum(len(e.get("docstring", "") or "") for e in entities.values())
     sig_chars = sum(len(e.get("signature", "") or "") for e in entities.values())
-    location_chars = sum(len(json.dumps(e.get("location", {}))) for e in entities.values())
+    location_chars = sum(
+        len(json.dumps(e.get("location", {}))) for e in entities.values()
+    )
     id_chars = sum(len(e.get("id", "")) for e in entities.values())
     name_chars = sum(
         len(e.get("name", "")) + len(e.get("qualified_name", ""))
@@ -107,8 +109,7 @@ def measure_semantic_index(index_path: Path) -> dict:
         "vectors_json_bytes": _sizeof(vectors_json),
         "manifest_bytes": _sizeof(manifest_file),
         "total_bytes": sum(
-            _sizeof(f)
-            for f in [chunks_file, vectors_file, vectors_json, manifest_file]
+            _sizeof(f) for f in [chunks_file, vectors_file, vectors_json, manifest_file]
         ),
     }
 
@@ -117,9 +118,7 @@ def measure_semantic_index(index_path: Path) -> dict:
         chunks = data.get("chunks", [])
         result["total_chunks"] = len(chunks)
         result["chunk_content_chars"] = sum(len(c.get("content", "")) for c in chunks)
-        result["chunk_token_chars"] = sum(
-            len(str(c.get("tokens", []))) for c in chunks
-        )
+        result["chunk_token_chars"] = sum(len(str(c.get("tokens", []))) for c in chunks)
 
     return result
 
@@ -153,7 +152,11 @@ def simulate_payloads(store_path: Path) -> dict:
             f"**Lines**: {e['location']['line_start']}-{e['location']['line_end']}"
         )
         desc = f"## Description\n\n{e['docstring']}" if e.get("docstring") else ""
-        sig = f"## Signature\n\n```python\n{e['signature']}\n```" if e.get("signature") else ""
+        sig = (
+            f"## Signature\n\n```python\n{e['signature']}\n```"
+            if e.get("signature")
+            else ""
+        )
         src = (
             f"## Source Code\n\n```python\n{e['source_code']}\n```"
             if e.get("source_code")
@@ -200,17 +203,31 @@ def print_report(ks: dict, idx: dict, payloads: dict) -> None:
     print()
 
     print("1. KNOWLEDGE STORE (knowcode_knowledge.json)")
-    print(f"   File size:              {ks['file_bytes']:>10,} bytes ({ks['file_bytes']/1024:.1f} KB)")
+    print(
+        f"   File size:              {ks['file_bytes']:>10,} bytes ({ks['file_bytes'] / 1024:.1f} KB)"
+    )
     print(f"   Entities:               {ks['total_entities']:>10}")
     print(f"   Relationships:          {ks['total_relationships']:>10}")
     print()
     print("   Content breakdown (chars):")
-    print(f"     Source code:           {ks['source_code_chars']:>10,} ({ks['source_code_chars']/ks['file_chars']*100:.1f}%)")
-    print(f"     Relationships:        {ks['relationships_chars']:>10,} ({ks['relationships_chars']/ks['file_chars']*100:.1f}%)")
-    print(f"     Locations:            {ks['location_chars']:>10,} ({ks['location_chars']/ks['file_chars']*100:.1f}%)")
-    print(f"     IDs + names:          {ks['id_name_chars']:>10,} ({ks['id_name_chars']/ks['file_chars']*100:.1f}%)")
-    print(f"     Docstrings:           {ks['docstring_chars']:>10,} ({ks['docstring_chars']/ks['file_chars']*100:.1f}%)")
-    print(f"     Signatures:           {ks['signature_chars']:>10,} ({ks['signature_chars']/ks['file_chars']*100:.1f}%)")
+    print(
+        f"     Source code:           {ks['source_code_chars']:>10,} ({ks['source_code_chars'] / ks['file_chars'] * 100:.1f}%)"
+    )
+    print(
+        f"     Relationships:        {ks['relationships_chars']:>10,} ({ks['relationships_chars'] / ks['file_chars'] * 100:.1f}%)"
+    )
+    print(
+        f"     Locations:            {ks['location_chars']:>10,} ({ks['location_chars'] / ks['file_chars'] * 100:.1f}%)"
+    )
+    print(
+        f"     IDs + names:          {ks['id_name_chars']:>10,} ({ks['id_name_chars'] / ks['file_chars'] * 100:.1f}%)"
+    )
+    print(
+        f"     Docstrings:           {ks['docstring_chars']:>10,} ({ks['docstring_chars'] / ks['file_chars'] * 100:.1f}%)"
+    )
+    print(
+        f"     Signatures:           {ks['signature_chars']:>10,} ({ks['signature_chars'] / ks['file_chars'] * 100:.1f}%)"
+    )
     print()
     print("   Entities by kind:")
     for kind, count in sorted(ks["entities_by_kind"].items(), key=lambda x: -x[1]):
@@ -220,15 +237,27 @@ def print_report(ks: dict, idx: dict, payloads: dict) -> None:
     print("   Hypothetical variants:")
     pct1 = (1 - ks["hypothetical_no_source_chars"] / ks["file_chars"]) * 100
     pct2 = (1 - ks["hypothetical_skeleton_chars"] / ks["file_chars"]) * 100
-    print(f"     Without source_code:  {ks['hypothetical_no_source_chars']:>10,} chars ({pct1:.0f}% smaller)")
-    print(f"     Skeleton only:        {ks['hypothetical_skeleton_chars']:>10,} chars ({pct2:.0f}% smaller)")
+    print(
+        f"     Without source_code:  {ks['hypothetical_no_source_chars']:>10,} chars ({pct1:.0f}% smaller)"
+    )
+    print(
+        f"     Skeleton only:        {ks['hypothetical_skeleton_chars']:>10,} chars ({pct2:.0f}% smaller)"
+    )
     print()
 
     print("2. SEMANTIC INDEX (knowcode_index/)")
-    print(f"   chunks.json:            {idx.get('chunks_json_bytes', 0):>10,} bytes ({idx.get('chunks_json_bytes', 0)/1024:.1f} KB)")
-    print(f"   vectors.index:          {idx.get('vectors_index_bytes', 0):>10,} bytes ({idx.get('vectors_index_bytes', 0)/1024:.1f} KB)")
-    print(f"   vectors.json:           {idx.get('vectors_json_bytes', 0):>10,} bytes ({idx.get('vectors_json_bytes', 0)/1024:.1f} KB)")
-    print(f"   Total:                  {idx.get('total_bytes', 0):>10,} bytes ({idx.get('total_bytes', 0)/1024:.1f} KB)")
+    print(
+        f"   chunks.json:            {idx.get('chunks_json_bytes', 0):>10,} bytes ({idx.get('chunks_json_bytes', 0) / 1024:.1f} KB)"
+    )
+    print(
+        f"   vectors.index:          {idx.get('vectors_index_bytes', 0):>10,} bytes ({idx.get('vectors_index_bytes', 0) / 1024:.1f} KB)"
+    )
+    print(
+        f"   vectors.json:           {idx.get('vectors_json_bytes', 0):>10,} bytes ({idx.get('vectors_json_bytes', 0) / 1024:.1f} KB)"
+    )
+    print(
+        f"   Total:                  {idx.get('total_bytes', 0):>10,} bytes ({idx.get('total_bytes', 0) / 1024:.1f} KB)"
+    )
     print(f"   Chunks:                 {idx.get('total_chunks', 0):>10}")
     print(f"   Chunk content chars:    {idx.get('chunk_content_chars', 0):>10,}")
     print()
@@ -241,26 +270,41 @@ def print_report(ks: dict, idx: dict, payloads: dict) -> None:
 
     print("4. CONTEXT PAYLOAD SIMULATION (3 entities)")
     print("   Minimal (summarize=True, no source):")
-    print(f"     Total chars:          {payloads['total_minimal_chars']:>10,} (~{payloads['total_minimal_tokens']} tokens)")
+    print(
+        f"     Total chars:          {payloads['total_minimal_chars']:>10,} (~{payloads['total_minimal_tokens']} tokens)"
+    )
     print("   Standard (summarize=False, with source):")
-    print(f"     Total chars:          {payloads['total_standard_chars']:>10,} (~{payloads['total_standard_tokens']} tokens)")
-    print(f"   Source code as % of standard payload: {payloads['source_pct_of_standard']}%")
+    print(
+        f"     Total chars:          {payloads['total_standard_chars']:>10,} (~{payloads['total_standard_tokens']} tokens)"
+    )
+    print(
+        f"   Source code as % of standard payload: {payloads['source_pct_of_standard']}%"
+    )
     print()
     print("   Per-entity breakdown:")
     for em in payloads["entities_measured"]:
-        print(f"     {em['name']:30s}  minimal={em['minimal_chars']:5d}  standard={em['standard_chars']:5d}  source={em['source_chars']:5d}")
+        print(
+            f"     {em['name']:30s}  minimal={em['minimal_chars']:5d}  standard={em['standard_chars']:5d}  source={em['source_chars']:5d}"
+        )
     print()
 
     total_artifacts = ks["file_bytes"] + idx.get("total_bytes", 0)
     print("5. TOTAL ARTIFACT FOOTPRINT")
     print(f"   Knowledge store:        {ks['file_bytes']:>10,} bytes")
     print(f"   Semantic index:         {idx.get('total_bytes', 0):>10,} bytes")
-    print(f"   Total:                  {total_artifacts:>10,} bytes ({total_artifacts/1024/1024:.1f} MB)")
+    print(
+        f"   Total:                  {total_artifacts:>10,} bytes ({total_artifacts / 1024 / 1024:.1f} MB)"
+    )
     print()
     print("=" * 70)
 
 
 def main() -> None:
+    """Measures the storage size of KnowCode artifacts.
+
+    Parses command-line arguments to locate the knowledge store file and
+    calculates the resulting storage metrics.
+    """
     parser = argparse.ArgumentParser(description="Measure KnowCode storage artifacts")
     parser.add_argument(
         "--store",
@@ -283,7 +327,10 @@ def main() -> None:
     index_path = Path(args.index)
 
     if not store_path.exists():
-        print(f"Error: {store_path} not found. Run `knowcode analyze` first.", file=sys.stderr)
+        print(
+            f"Error: {store_path} not found. Run `knowcode analyze` first.",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     ks = measure_knowledge_store(store_path)
@@ -291,7 +338,12 @@ def main() -> None:
     payloads = simulate_payloads(store_path)
 
     if args.json:
-        print(json.dumps({"knowledge_store": ks, "semantic_index": idx, "payloads": payloads}, indent=2))
+        print(
+            json.dumps(
+                {"knowledge_store": ks, "semantic_index": idx, "payloads": payloads},
+                indent=2,
+            )
+        )
     else:
         print_report(ks, idx, payloads)
 
