@@ -363,7 +363,7 @@ KnowCode follows a layered architecture:
 6. **Context Synthesizer** - Generates token-efficient context bundles with priority ranking
 7. **CLI** - User interface for all operations
 
-See [reference_architecture.md](file:///Users/deepg/Desktop/KnowCode/docs/architecture/reference_architecture.md) for the complete reference architecture.
+See [reference_architecture.md](docs/architecture/reference_architecture.md) for the complete reference architecture.
 
 ## Configuration
 
@@ -468,7 +468,7 @@ ruff format src/
 
 ## Roadmap
 
-See [reference_architecture.md](file:///Users/deepg/Desktop/KnowCode/docs/architecture/reference_architecture.md) for the full vision and detailed architectural debt register.
+See [reference_architecture.md](docs/architecture/reference_architecture.md) for the full vision and detailed architectural debt register.
 
 **MVP (completed):**
 - ✅ Single monorepo support

@@ -92,9 +92,9 @@ You should NOT need to manually run `knowcode mcp-server` - Antigravity starts i
 
 ### If MCP Tool Not Available
 
-1. Check MCP server is running:
+1. Check MCP server readiness (includes a live handshake):
    ```bash
-   ./verify_mcp_connection.sh
+   knowcode doctor --mcp
    ```
 
 2. Verify configuration (path may vary by IDE; the example below is for Antigravity):
