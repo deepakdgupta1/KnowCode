@@ -71,7 +71,7 @@ All 16 commands with flags and defaults live in the
 | Audience | Start here |
 |---|---|
 | Users | [CLI reference](docs/user/cli-reference.md) · [Getting started](docs/user/getting-started.md) · [IDE agent setup](docs/user/ide-integration.md) · [REST API](docs/user/rest-api.md) |
-| Product managers | [Use-case narratives](docs/architecture/reference_architecture.md) (dedicated product docs in progress) |
+| Product managers | [Product overview](docs/product/overview.md) · [Personas & use-cases](docs/product/personas-use-cases.md) · [Business logic](docs/product/business-logic.md) |
 | Engineers | [Reference architecture](docs/architecture/reference_architecture.md) · [Hardening contracts (ADRs)](docs/architecture/hardening-contracts.md) · [Parser construct matrix](docs/architecture/parser-construct-matrix.md) · [Roadmap](docs/roadmap.md) |
 
 Supported languages: Python, JavaScript/JSX, TypeScript/TSX, Java, Rust,

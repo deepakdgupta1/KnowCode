@@ -19,7 +19,7 @@ for optional features (embeddings, reranking, Q&A).
 | I am a… | Start here |
 |---|---|
 | **User** — installing and using KnowCode on a codebase | [Getting started](user/getting-started.md) · [CLI reference](user/cli-reference.md) |
-| **Product manager** — use-cases, personas, business logic | [Use-case narratives](architecture/reference_architecture.md) (dedicated product docs in progress) |
+| **Product manager** — use-cases, personas, business logic | [Product overview](product/overview.md) · [Personas & use-cases](product/personas-use-cases.md) · [Business logic](product/business-logic.md) |
 | **Engineer** — maintaining or extending KnowCode itself | [Architecture](architecture/reference_architecture.md) · [Hardening contracts (ADRs)](architecture/hardening-contracts.md) · [Parser construct matrix](architecture/parser-construct-matrix.md) |
 
 ## Quick start

@@ -64,6 +64,10 @@ nav:
       - IDE & Agent Integration: user/ide-integration.md
       - REST API: user/rest-api.md
       - Telemetry & Privacy: user/telemetry.md
+  - Product:
+      - Overview: product/overview.md
+      - Personas & Use-Cases: product/personas-use-cases.md
+      - Business Logic: product/business-logic.md
   - Roadmap: roadmap.md
   - MCP Contract: mcp-contract.md
   - API Reference: api_reference.md
