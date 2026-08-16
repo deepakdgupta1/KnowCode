@@ -104,6 +104,18 @@ knowcode analyze <directory> [--output <path>] [--ignore <pattern>]
 knowcode analyze src/ --ignore "tests/*" --ignore "*.pyc"
 ```
 
+### `preflight`
+Run a codebase quality assessment to evaluate how well KnowCode will perform on the target directory. This produces a report card grading the codebase across 10 dimensions (documentation, naming, structure, etc.).
+
+```bash
+knowcode preflight <directory> [--ignore <pattern>] [--config <path>] [--json]
+```
+
+**Example:**
+```bash
+knowcode preflight .
+```
+
 ### `query`
 Query the knowledge store for relationships.
 

@@ -619,7 +619,9 @@ def test_a_graph_only_generation_discards_partial_vector_artifacts(
         for path in resolved.path.iterdir()
         if not path.name.startswith("knowledge.db-")
     }
-    assert published == {generations.MANIFEST_FILENAME, "knowledge.db"}
+    expected = {generations.MANIFEST_FILENAME, "knowledge.db"}
+    # Pre-flight report may be present when preflight is enabled (default).
+    assert published - {"preflight_report.json"} == expected
 
 
 def test_a_chunk_vector_membership_split_is_caught_before_publication(

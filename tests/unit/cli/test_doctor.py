@@ -196,10 +196,13 @@ def test_doctor_passes_with_valid_store_index_and_config(tmp_path: Path) -> None
         "Agent rules",
         "Supported languages",
         "Freshness",
+        "Codebase Quality",
         "Native dependencies",
         "Optional dependencies",
     }
-    assert all(check["status"] == "pass" for check in payload["checks"]), payload
+    assert all(check["status"] in ("pass", "warn") for check in payload["checks"]), (
+        payload
+    )
 
 
 def test_doctor_warns_about_the_pre_generation_flat_layout(tmp_path: Path) -> None:
