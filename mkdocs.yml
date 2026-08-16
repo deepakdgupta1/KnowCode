@@ -54,6 +54,8 @@ markdown_extensions:
 
 nav:
   - Home: index.md
+  - User Guide:
+      - CLI Reference: user/cli-reference.md
   - Roadmap: roadmap.md
   - Setup Guide: MCP_SETUP.md
   - MCP Contract: mcp-contract.md
