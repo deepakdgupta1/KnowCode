@@ -1,4 +1,4 @@
-# KnowCode Observability and Telemetry
+# Telemetry & Privacy
 
 KnowCode writes a small, local, aggregate-only telemetry log so you can tune
 retrieval thresholds with evidence instead of guesses. It is not analytics: it

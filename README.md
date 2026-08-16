@@ -70,7 +70,7 @@ All 16 commands with flags and defaults live in the
 
 | Audience | Start here |
 |---|---|
-| Users | [CLI reference](docs/user/cli-reference.md) · [IDE agent setup](docs/MCP_SETUP.md) · [REST API](docs/diagrams/README.md#fastapi-rest-api-8000-uvicorn) |
+| Users | [CLI reference](docs/user/cli-reference.md) · [Getting started](docs/user/getting-started.md) · [IDE agent setup](docs/user/ide-integration.md) · [REST API](docs/user/rest-api.md) |
 | Product managers | [Use-case narratives](docs/architecture/reference_architecture.md) (dedicated product docs in progress) |
 | Engineers | [Reference architecture](docs/architecture/reference_architecture.md) · [Hardening contracts (ADRs)](docs/architecture/hardening-contracts.md) · [Parser construct matrix](docs/architecture/parser-construct-matrix.md) · [Roadmap](docs/roadmap.md) |
 
@@ -103,7 +103,7 @@ watch mode.
 KnowCode logs local, non-blocking telemetry to trace query performance,
 routing decisions, and MCP tool-call patterns. Telemetry never leaves the
 machine and never contains questions or code — see
-[docs/observability.md](docs/observability.md) for the schema, privacy
+[docs/user/telemetry.md](docs/user/telemetry.md) for the schema, privacy
 trade-offs, and threshold tuning.
 
 ## Development

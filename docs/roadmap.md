@@ -2,10 +2,9 @@
 
 > **Status:** Active planning document
 >
-> The completed v1.1 operationalization work is preserved in the
-> [historical MCP operationalization plan](archive/MCP_operationalization.md).
-> This document defines the next priorities rather than reopening completed
-> foundation work.
+> The completed v1.1 operationalization work is preserved in the repository
+> at `docs/archive/MCP_operationalization.md`. This document defines the
+> next priorities rather than reopening completed foundation work.
 
 ## Current Position
 

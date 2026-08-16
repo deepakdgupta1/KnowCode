@@ -571,7 +571,7 @@ def telemetry() -> None:
     """Inspect or delete the local telemetry log.
 
     Telemetry never leaves this machine and never contains your questions or
-    your code — see docs/observability.md for the exact schema.
+    your code — see docs/user/telemetry.md for the exact schema.
     """
 
 

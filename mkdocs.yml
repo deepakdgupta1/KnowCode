@@ -4,6 +4,9 @@ repo_url: https://github.com/deepakdgupta1/KnowCode
 repo_name: deepakdgupta1/KnowCode
 edit_uri: edit/main/docs/
 
+# Superseded docs are kept for history but excluded from the built site.
+exclude_docs: archive/*
+
 theme:
   name: material
   features:
@@ -55,18 +58,20 @@ markdown_extensions:
 nav:
   - Home: index.md
   - User Guide:
+      - Getting Started: user/getting-started.md
       - CLI Reference: user/cli-reference.md
+      - Configuration: user/configuration.md
+      - IDE & Agent Integration: user/ide-integration.md
+      - REST API: user/rest-api.md
+      - Telemetry & Privacy: user/telemetry.md
   - Roadmap: roadmap.md
-  - Setup Guide: MCP_SETUP.md
   - MCP Contract: mcp-contract.md
   - API Reference: api_reference.md
-  - Function Calling: OPENAPI_FUNCTION_CALLING.md
   - Architecture & Roadmap: architecture/reference_architecture.md
   - Storage Analysis ADR: architecture/json-storage-analysis.md
   - Hardening Contracts: architecture/hardening-contracts.md
   - Parser Construct Matrix: architecture/parser-construct-matrix.md
   - Workflow Diagrams: diagrams/README.md
   - Retrieval Quality Evals: retrieval-evals.md
-  - Observability & Telemetry: observability.md
   - Research:
       - Prose Evaluation: research/knowcode_evaluation_report.md

@@ -11,17 +11,8 @@ KnowCode has **16 top-level commands**: `install`, `analyze`, `build`,
 
 Commands that require optional extras fail fast with an actionable hint
 (e.g., `Install knowcode[server] to use 'knowcode server'.`). The extras
-matrix:
-
-| Extra | Unlocks |
-|---|---|
-| `knowcode[server]` | `knowcode server` |
-| `knowcode[search]` | `knowcode index`, `knowcode semantic-search` |
-| `knowcode[llm]` | `knowcode ask` |
-| `knowcode[watch]` | `knowcode server --watch` |
-| `knowcode[mcp]` | `knowcode mcp-server` |
-| `knowcode[voyageai]` | VoyageAI embeddings + reranking |
-| `knowcode[all]` | Union of all of the above |
+matrix and `knowcode install` are covered in
+[Configuration](configuration.md#optional-extras).
 
 ---
 
@@ -243,7 +234,8 @@ knowcode server --port 8080 --watch
 ```
 
 With `--watch`, modified/created files are queued for incremental
-re-indexing and deleted/renamed files have their chunks invalidated.
+re-indexing and deleted/renamed files have their chunks invalidated. The
+endpoint reference is in [REST API](rest-api.md).
 
 ### `mcp-server`
 
@@ -256,9 +248,9 @@ knowcode mcp-server [--store <path>] [--config <path>]
 
 **Tools exposed:** `search_codebase`, `get_entity_context`, `trace_calls`,
 `retrieve_context_for_query`, `assess_codebase_quality`. Client setup for
-Claude Desktop, VS Code, and Antigravity is covered in the
-[setup guide](../MCP_SETUP.md); the canonical retrieval policy is the
-[MCP contract](../mcp-contract.md).
+Claude Desktop, VS Code, and Antigravity is covered in
+[IDE & Agent Integration](ide-integration.md); the canonical retrieval
+policy is the [MCP contract](../mcp-contract.md).
 
 ## Telemetry
 
@@ -266,7 +258,7 @@ Claude Desktop, VS Code, and Antigravity is covered in the
 
 Summarize or delete the local telemetry log. Telemetry never leaves your
 machine and never contains your questions or code — see
-[Observability & Telemetry](../observability.md).
+[Telemetry & Privacy](telemetry.md).
 
 ```bash
 knowcode telemetry show [--store <path>]
