@@ -30,9 +30,10 @@ knowcode install
 uvx --python 3.12 --from "/path/to/KnowCode[all,mcp,voyageai]" knowcode doctor
 
 # Set API keys (only needed for the features you use; see aimodels.yaml)
+export GLM_API_KEY="..."        # LLM (GLM, default provider) for `knowcode ask`
 export VOYAGE_API_KEY_1="..."   # embeddings + reranking (semantic search)
 export OPENAI_API_KEY="..."     # embeddings (alternative to VoyageAI)
-export GOOGLE_API_KEY="..."     # LLM (Gemini) for `knowcode ask`
+export GOOGLE_API_KEY="..."     # LLM (Gemini) for `knowcode ask` (alternative)
 ```
 
 KnowCode ships with a lightweight core plus feature extras — `server`,
@@ -75,8 +76,8 @@ All 16 commands with flags and defaults live in the
 | Engineers | [Architecture](docs/engineering/architecture.md) · [ADR index](docs/engineering/adr/index.md) · [Parser matrix](docs/engineering/parser-matrix.md) · [Roadmap](docs/roadmap.md) |
 
 Supported languages: Python, JavaScript/JSX, TypeScript/TSX, Java, Rust,
-Vue, Markdown, and YAML. Other extensions (`.go`, `.cpp`, `.swift`, …) are
-ignored during analysis — see the
+Vue, Markdown, reStructuredText, and YAML. Other extensions (`.go`, `.cpp`,
+`.swift`, …) are ignored during analysis — see the
 [language matrix](docs/user/cli-reference.md#supported-language-matrix) for
 details and per-parser coverage.
 
@@ -88,7 +89,7 @@ of hard-coding separate thresholds or token budgets in each client.
 
 KnowCode follows a layered pipeline: **Scanner** (file discovery with
 gitignore support) → **Parsers** (Python AST; tree-sitter for JS/TS/Java/
-Rust/Vue; custom Markdown/YAML) → **Graph Builder** (semantic graph) →
+Rust; custom Vue SFC, Markdown, RST, and YAML scanners) → **Graph Builder** (semantic graph) →
 **Knowledge Store** (in-memory + JSON/SQLite persistence) → **Indexer**
 (embeddings + hybrid BM25/vector retrieval) → **Context Synthesizer**
 (token-budgeted bundles with priority ranking) → **CLI / REST / MCP

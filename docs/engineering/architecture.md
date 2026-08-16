@@ -2,8 +2,9 @@
 
 The current-state architecture of KnowCode, as implemented. For the
 reasoning behind key structural choices, see the
-[ADR index](adr/index.md); for forward-looking designs, see
-[research](../research/); for the phased plan, see the
+[ADR index](adr/index.md); for forward-looking designs, see the
+[architecture synthesis study](../research/knowcode-architecture-synthesis.md);
+for the phased plan, see the
 [roadmap](../roadmap.md).
 
 ## Guiding principle
@@ -50,7 +51,7 @@ read the current generation through leases.
 | Context synthesizer | `analysis/context_synthesizer.py` | Task-typed, token-budgeted bundles with sufficiency scoring |
 | Service | `service.py` | The central `KnowCodeService` wiring everything; generation lifecycle; freshness |
 | Watch pipeline | `indexing/monitor.py`, `watch_queue.py`, `background_indexer.py`, `file_updates.py`, `service_watch.py` | File-event monitoring, debounced incremental re-indexing, prepare/commit transactions |
-| Surfaces | `cli/cli.py`, `api/`, `mcp/server.py` | CLI (16 commands), FastAPI server (11 endpoints, 2 rate-limit tiers), MCP stdio server (5 tools) |
+| Surfaces | `cli/cli.py`, `api/`, `mcp/server.py` | CLI (16 commands), FastAPI server (12 endpoints, 2 rate-limit tiers), MCP stdio server (5 tools) |
 | LLM layer | `llm/` | Provider clients (Google/OpenAI-compatible), failover + free-tier rate limiting, query classification, prompt contract |
 | Analysis extras | `analysis/` | Preflight assessment, documentation synthesis, temporal/behavior signals |
 | Doctor | `doctor.py`, `readiness.py` | Setup verification incl. live MCP handshake |

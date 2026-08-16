@@ -37,7 +37,7 @@ Three delivery surfaces, one engine:
 |---|---|
 | ~10x longer token budgets for agents | Agents retrieve compact, ranked context bundles instead of whole files; `verbosity=minimal` responses omit raw source when summarizing suffices |
 | Local-first, deterministic | Retrieval, graph queries, and call-tracing run entirely on-machine with no LLM in the loop; the same query returns the same result |
-| Correctness over cost | Local answering (no LLM at all) is **disabled by default** and only unlocks behind a machine-verified quality gate (see [Business Logic](business-logic.md#local-vs-llm-routing)) |
+| Correctness over cost | Local answering (no LLM at all) is **disabled by default** and only unlocks behind a machine-verified quality gate (see [Business Logic](business-logic.md#local-vs-llm-routing-fail-closed-by-design)) |
 | Trust signals built in | Every response carries freshness state; a 10-dimension preflight report card predicts how well KnowCode will work on a given repo |
 | Privacy by construction | Telemetry is local, aggregate-only, and structurally cannot contain questions or code |
 
@@ -60,7 +60,7 @@ From the [roadmap](../roadmap.md): hosted/multi-tenant service; the HTTP
 gateway as a primary path; auto-rewriting agent configurations;
 unverified consumer compatibility; and any cost optimization that bypasses
 quality gates. Language coverage is fixed at Python, JS/TS, Java, Rust,
-Vue, Markdown, YAML — other extensions are ignored.
+Vue, Markdown, reStructuredText, YAML — other extensions are ignored.
 
 ## Business model constraints worth knowing
 

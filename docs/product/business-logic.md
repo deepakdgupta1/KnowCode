@@ -13,8 +13,9 @@ verified against source; defaults live in `src/knowcode/config.py`,
 **What:** Each entity (function/class/method) becomes chunks of
 `signature + docstring + source_code`, capped at **1000 characters with
 100 characters of overlap** (`ChunkingConfig`, `data_models.py`). Modules
-additionally contribute a header chunk and an imports chunk. Markdown and
-YAML are parsed structurally (heading hierarchy / config keys).
+additionally contribute a header chunk and an imports chunk. Markdown,
+reStructuredText, and YAML are parsed structurally (heading hierarchy /
+config keys).
 
 **Why:** Retrieval quality depends on chunks mapping to things developers
 ask about; signature+docstring-first chunks make the most informative text
@@ -239,7 +240,7 @@ structure only — no runtime frequency or ownership data.
 ## Known product limitations
 
 - Local answering disabled pending blessed policy (above).
-- Language coverage fixed (8 extension families); others ignored.
+- Language coverage fixed (12 extensions across 9 language families); others ignored.
 - Freshness is mtime-based and advisory.
 - Unresolved dynamic references (`ref::` targets) degrade tracing and are
   surfaced as a preflight dimension rather than fixed.

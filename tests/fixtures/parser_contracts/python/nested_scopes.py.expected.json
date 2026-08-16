@@ -2,12 +2,12 @@
   "schema_version": 1,
   "language": "python",
   "entities": [
-    {"qualified_name": "nested_scopes", "kind": "module", "line_start": 1, "line_end": 10},
-    {"qualified_name": "outer", "kind": "function", "line_start": 1, "line_end": 4},
+    {"qualified_name": "nested_scopes", "kind": "module", "line_start": 1, "line_end": 13},
+    {"qualified_name": "outer", "kind": "function", "line_start": 1, "line_end": 5},
     {"qualified_name": "outer.duplicate", "kind": "function", "line_start": 2, "line_end": 3},
-    {"qualified_name": "Container", "kind": "class", "line_start": 6, "line_end": 10},
-    {"qualified_name": "Container.method", "kind": "method", "line_start": 7, "line_end": 10},
-    {"qualified_name": "Container.method.duplicate", "kind": "function", "line_start": 8, "line_end": 9}
+    {"qualified_name": "Container", "kind": "class", "line_start": 8, "line_end": 13},
+    {"qualified_name": "Container.method", "kind": "method", "line_start": 9, "line_end": 13},
+    {"qualified_name": "Container.method.duplicate", "kind": "function", "line_start": 10, "line_end": 11}
   ],
   "relationships": [
     {"source": "nested_scopes", "target": {"classification": "internal", "qualified_name": "outer"}, "kind": "contains"},

@@ -1,6 +1,6 @@
 # KnowCode MCP Retrieval Contract
 
-**Last Updated:** 2026-05-23
+**Last Updated:** 2026-08-16
 
 This is the canonical operating policy for agents that use the KnowCode MCP
 server. Keep agent rules, setup guides, and prompts pointed here instead of
@@ -97,6 +97,8 @@ other MCP tools only for focused follow-up:
 - `search_codebase`: find entities by known name or pattern.
 - `get_entity_context`: fetch context for a specific entity after its ID is known.
 - `trace_calls`: inspect callers or callees for a specific entity.
+- `assess_codebase_quality`: return the persisted pre-flight quality report
+  when you need to judge how much to trust local context on a repository.
 
 ## Agent Rule Snippet
 
@@ -123,7 +125,7 @@ The MCP approach can be token-expensive due to the following overhead sources:
 
 | Overhead Source                                                   | Est. Tokens/Call | Notes                                                                                |
 | ----------------------------------------------------------------- | ---------------- | ------------------------------------------------------------------------------------ |
-| **4 tool schemas** injected into every LLM prompt                 | ~600             | IDE injects ALL tool definitions into the system prompt on every turn                |
+| **5 tool schemas** injected into every LLM prompt                 | ~650             | IDE injects ALL tool definitions into the system prompt on every turn                |
 | **`context_text`** (up to 4000 tokens of source code)             | ~2000-4000       | Full source code for 3 entities with callers/callees                                 |
 | **`evidence` array** (up to 15 entries × 5 fields each)           | ~300-500         | `rank`, `chunk_id`, `entity_id`, `score`, `source` per chunk                         |
 | **`selected_entities` metadata** (per-entity duplication)         | ~150-300         | Re-echoes `entity_id`, `task_type`, `total_tokens`, `truncated`, `sufficiency_score` |
@@ -137,8 +139,8 @@ The MCP approach can be token-expensive due to the following overhead sources:
 
 ### 1. Consolidate to a Single Tool — *Proposed* (~60% tool-schema savings)
 
-Currently, 4 separate tool definitions (`search_codebase`, `get_entity_context`, `trace_calls`, `retrieve_context_for_query`) are exposed by the MCP server and injected into _every_ LLM request.
-**Recommendation:** Merge these into a single `knowcode` tool with an `action` parameter. This cuts the tool-schema overhead from ~600 tokens down to ~200 tokens per request.
+Currently, 5 separate tool definitions (`search_codebase`, `get_entity_context`, `trace_calls`, `retrieve_context_for_query`, `assess_codebase_quality`) are exposed by the MCP server and injected into _every_ LLM request.
+**Recommendation:** Merge these into a single `knowcode` tool with an `action` parameter. This cuts the tool-schema overhead from ~650 tokens down to ~200 tokens per request.
 
 ### 2. Strip the Response to Essentials — *Implemented* (~50% response savings)
 
@@ -161,13 +163,12 @@ The previous defaults in the MCP server were `max_tokens=6000` and `limit_entiti
 
 ### 4. Remove `indent=2` from `json.dumps` — *Implemented* (~20% whitespace savings)
 
-In `src/knowcode/mcp/server.py` (around line 347), the tool result is formatted with indentation:
+Tool results in `src/knowcode/mcp/server.py` were originally serialized with
+`json.dumps(result, indent=2)`, roughly doubling the character count of every
+response.
 
-```python
-return json.dumps(result, indent=2)
-```
-
-**Recommendation:** Change this to a condensed format to instantly remove hundreds of unnecessary whitespace tokens:
+**Change (shipped):** serialization now uses a condensed format, instantly
+removing hundreds of unnecessary whitespace tokens:
 
 ```python
 return json.dumps(result, separators=(',', ':'))
@@ -186,7 +187,7 @@ If all strategies are implemented, the token savings would be dramatic:
 
 | Strategy                      | Est. Token Savings                               |
 | ----------------------------- | ------------------------------------------------ |
-| Single tool (vs 4 schemas)    | ~400 tokens saved per turn                       |
+| Single tool (vs 5 schemas)    | ~400 tokens saved per turn                       |
 | Stripped response metadata    | ~800 tokens saved per call                       |
 | Lower default token limits    | ~3000 tokens saved per call                      |
 | Compact JSON formatting       | ~300 tokens saved per call                       |

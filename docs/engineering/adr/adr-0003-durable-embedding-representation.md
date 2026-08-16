@@ -14,7 +14,7 @@
 SQLite chunks persist embeddings as little-endian float32 BLOBs accompanied by
 an explicit dimension. Insert and load validate byte length, configured
 dimension, and finite values. The generation manifest records provider, model,
-dimension, normalization, and embedding-format version.
+dimension, normalization, and batch size.
 
 An embedding may be null only for a generation explicitly configured without
 dense retrieval. A dense generation cannot be published if any searchable

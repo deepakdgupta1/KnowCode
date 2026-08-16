@@ -4,6 +4,15 @@
 **Date**: 2026-03-07
 **Decision drivers**: Minimize frontier LLM token consumption by AI agents using KnowCode
 
+> **Update (2026-08-16):** the measurements below predate several shipped
+> changes. Chunk persistence moved from the flat `chunks.json` file to the
+> SQLite `chunks.db` repository (a legacy `chunks.json` is now a migration
+> source only); the service resolves artifacts through atomic index
+> generations (`GenerationBundle`, ADR 4) rather than caching a store
+> attribute; and the local-answer gate additionally requires a
+> machine-verified routing policy (fail-closed). Text below is annotated
+> where it described the pre-generation layout.
+
 ---
 
 ## Context
@@ -92,12 +101,12 @@ Step   Component                        Action                                  
  5     MCP Server                       _ensure_service() — creates KnowCodeService      🟢
                                          (cached after first call; NOT per-query)
  6     MCP Server                       KnowledgeStore.load() via service.store property  🟢
-                                         (cached in self._store after first load)
+                                         (cached in the service's generation bundle)
  7     MCP Server                       classify_query() — regex task detection           🟢
  8     MCP Server → VoyageAI            embed_single(query) — query embedding            🟡
  9     MCP Server                       HybridIndex.search() — BM25 + FAISS              🟢
 10     MCP Server → VoyageAI            Reranker.rerank() — cross-encoder on chunk       🟡
-                                         content from chunks.json (NOT knowledge JSON)
+                                         content from the chunk repository (NOT knowledge JSON)
 11     MCP Server                       expand_dependencies() — graph walk                🟢
 12     MCP Server                       ContextSynthesizer.synthesize_with_task()         🟢
                                          with summarize=True (minimal verbosity)
@@ -141,8 +150,8 @@ This is the stage where storage format directly affects cost.
 
 **At `verbosity="minimal"` (default MCP path):**
 
-The orchestrator calls `get_context(..., summarize=True)` ([orchestrator.py](https://github.com/deepakdgupta1/KnowCode/blob/main/src/knowcode/retrieval/orchestrator.py#L176)).
-The synthesizer **skips source code** when `summarize=True` ([context_synthesizer.py](https://github.com/deepakdgupta1/KnowCode/blob/main/src/knowcode/analysis/context_synthesizer.py#L142), [context_synthesizer.py](https://github.com/deepakdgupta1/KnowCode/blob/main/src/knowcode/analysis/context_synthesizer.py#L359)).
+The orchestrator calls `get_context(..., summarize=(verbosity == "minimal"))` ([orchestrator.py](https://github.com/deepakdgupta1/KnowCode/blob/main/src/knowcode/retrieval/orchestrator.py)).
+The synthesizer **skips source code** when `summarize=True` ([context_synthesizer.py](https://github.com/deepakdgupta1/KnowCode/blob/main/src/knowcode/analysis/context_synthesizer.py)).
 
 | Payload Component        | Per Entity | 3 Entities | Notes                    |
 |--------------------------|------------|------------|--------------------------|
@@ -199,10 +208,11 @@ Measured simulation (3 representative entities): **~1,236 tokens**.
 | Sub-step         | Tokens       | Notes                                       |
 |------------------|--------------|---------------------------------------------|
 | Query embedding  | ~5–10        | Single query string                         |
-| Chunk reranking  | ~3,000–15,000 | 30 chunk contents from **chunks.json** (semantic index), NOT from the knowledge store JSON |
+| Chunk reranking  | ~3,000–15,000 | 30 chunk contents from **chunks.db** (semantic index), NOT from the knowledge store JSON |
 
 > Changing the knowledge store JSON will NOT reduce reranking costs. The reranker
-> operates on chunk content from `knowcode_index/chunks.json`, which is a separate
+> operates on chunk content from the chunk repository (`knowcode_index/…/chunks.db`;
+> `chunks.json` at the time of the original measurement), which is a separate
 > artifact produced by the indexer pipeline.
 
 ### 2.6 Local-First Answering: The Biggest Token Saver
@@ -211,12 +221,16 @@ The architecture already implements a **local-first answering** policy that can
 skip the frontier LLM entirely:
 
 ```
-agent.py:194
-    if not force_llm and avg_sufficiency >= threshold and context_str:
-        # Local-first: sufficient context found → zero frontier tokens
+agent.py
+    if (not force_llm and routing_policy_allowed
+            and avg_sufficiency >= threshold and context_str):
+        # Local-first: sufficient, policy-allowed context found → zero frontier tokens
 ```
 
-When the `sufficiency_score` ≥ 0.8 (configurable), the agent formats a local answer
+When the `sufficiency_score` ≥ 0.8 (configurable, floored by
+`routing_quality_floor`), **and** the task type is allowed by a
+machine-verified routing policy (`local_answer_task_types` is force-cleared
+on every load otherwise), the agent formats a local answer
 from the context bundle without calling any external LLM. This saves the **entire
 frontier LLM cost** for that query — both the tool result injection (Step 14) AND
 the answer generation (Step 15).
@@ -254,8 +268,8 @@ on the default path. Source IS used when:
 ### 3.2 Startup Load Latency
 
 The full JSON is deserialized once on first access via `KnowledgeStore.load()`. The
-service caches the result in `self._store` ([service.py](https://github.com/deepakdgupta1/KnowCode/blob/main/src/knowcode/service.py#L48-L54)),
-and the MCP server caches the service in `self._service` ([server.py](https://github.com/deepakdgupta1/KnowCode/blob/main/src/knowcode/mcp/server.py#L165-L182)).
+service caches the resolved generation bundle ([service.py](https://github.com/deepakdgupta1/KnowCode/blob/main/src/knowcode/service.py)),
+and the MCP server caches the service in `self._service` ([server.py](https://github.com/deepakdgupta1/KnowCode/blob/main/src/knowcode/mcp/server.py)).
 
 **This is a startup cost, not a per-query cost.** For a long-lived MCP server, the
 1.5 MB deserialization happens once. It becomes a problem when:
@@ -312,7 +326,7 @@ synthesis needs source, resolve it lazily:
 
 1. **Primary**: Read from the original source files using `Entity.location`
    (file_path + line_start + line_end)
-2. **Fallback**: Read from `chunks.json` content (already indexed)
+2. **Fallback**: Read from the chunk repository (`chunks.db`) content (already indexed)
 
 Requires:
 - A `SourceResolver` component that reads source from disk on demand
@@ -435,9 +449,9 @@ Actions:
 | Prior Claim | Correction |
 |-------------|------------|
 | "Source code dominates minimal-verbosity payload" | Minimal verbosity sets `summarize=True`, which **excludes** source code. Source is 0% of minimal payload, 80% of standard. |
-| "Every query loads the full JSON" | The store is cached in `service._store` and the service is cached in `server._service`. Load happens once at startup, not per-query. |
+| "Every query loads the full JSON" | The store is cached in the service's generation bundle (`service._bundle`) and the service is cached in `server._service`. Load happens once at startup, not per-query. |
 | "Removing source_code saves 85% of file" | Measured reduction is **40%** (1.5 MB → 0.9 MB). Relationships (37.6%) and JSON structure (13.1%) are the other major contributors. |
-| "Reranking cost is downstream of JSON" | Reranking operates on chunk content from `knowcode_index/chunks.json`, a separate artifact. Changing the knowledge JSON does not reduce reranking cost. |
+| "Reranking cost is downstream of JSON" | Reranking operates on chunk content from the chunk repository (now `chunks.db`; `chunks.json` at measurement time), a separate artifact. Changing the knowledge JSON does not reduce reranking cost. |
 | "Remove source_code is a one-line change" | Requires a `SourceResolver`, schema migration, and updates to `ContextSynthesizer`, `get_entity_details()`, and non-minimal synthesis paths. |
 | "Agent needs a Read tool to access source" | The MCP server reads files locally; no host-side tool exposure is needed. The resolver operates within the KnowCode process. |
 

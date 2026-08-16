@@ -60,8 +60,10 @@ counts and the preflight report card; a failed build leaves the previous
 generation in place.
 
 ```bash
-knowcode build <directory> [--ignore <pattern>] [--config <path>] [--temporal] [--incremental]
+knowcode build [<directory>] [--ignore <pattern>] [--config <path>] [--temporal] [--incremental]
 ```
+
+`<directory>` is optional and defaults to the current directory.
 
 **Example:**
 ```bash
@@ -85,8 +87,10 @@ recommendations. Cheap: it reuses the parsed graph, never re-reads sources.
 Also run automatically as part of `build`.
 
 ```bash
-knowcode preflight <directory> [--ignore <pattern>] [--config <path>] [--json]
+knowcode preflight [<directory>] [--ignore <pattern>] [--config <path>] [--json]
 ```
+
+`<directory>` is optional and defaults to the current directory.
 
 ### `doctor`
 
@@ -272,12 +276,13 @@ knowcode telemetry clear [--store <path>] [--yes]
 | Extension | Language | Parser mechanism | Notes |
 |---|---|---|---|
 | `.py` | Python | Python AST | Full semantic parsing (Python 3.10–3.12) |
-| `.js`, `.jsx` | JavaScript | Tree-sitter | Classes, functions, imports, JSX tags |
-| `.ts`, `.tsx` | TypeScript | Tree-sitter | Classes, functions, imports, TSX tags |
-| `.java` | Java | Tree-sitter | Classes, methods, imports, inheritance |
+| `.js`, `.jsx` | JavaScript | Tree-sitter | Classes, functions, imports, calls, exports |
+| `.ts`, `.tsx` | TypeScript | Tree-sitter | Classes, functions, imports, calls, exports |
+| `.java` | Java | Tree-sitter | Classes, interfaces, methods, imports, inheritance |
 | `.rs` | Rust | Tree-sitter | Structs, enums, functions, impl blocks |
-| `.vue` | Vue | Tree-sitter | Vue Single-File Component scripts |
+| `.vue` | Vue | Custom SFC scanner | Vue Single-File Components (tree-sitter for embedded scripts) |
 | `.md` | Markdown | Custom parser | Heading hierarchy and document structure |
+| `.rst` | reStructuredText | Custom parser | Section structure via the shared RST heading scanner |
 | `.yaml`, `.yml` | YAML | Custom parser | Configuration keys with nested structure |
 
 Any extension not listed (e.g., `.go`, `.cpp`, `.h`, `.swift`, `.rb`, `.php`,

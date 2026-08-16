@@ -135,8 +135,8 @@ baseline and routing-quality gate.
 **Work:**
 
 1. Prototype one `knowcode` MCP tool with an `action` enum for `search`,
-   `context`, `trace`, and `query`. Keep the existing four tools available
-   behind an explicit compatibility option for one release.
+   `context`, `trace`, `query`, and `quality`. Keep the existing five tools
+   available behind an explicit compatibility option for one release.
 2. Define response profiles that are summary-first for exploratory work and
    expose raw source only for explicit source requests or task types that need
    it, such as debugging and review.

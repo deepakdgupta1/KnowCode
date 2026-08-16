@@ -1022,13 +1022,14 @@ def mcp_server(store: str, config: Optional[str]) -> None:
     """Start MCP server for IDE integration.
 
     Exposes KnowCode tools via the Model Context Protocol (MCP) using
-    STDIO transport. Four tools are available:
+    STDIO transport. Five tools are available:
 
     \b
     - search_codebase: Search for code entities by name
     - get_entity_context: Get detailed context for an entity
     - trace_calls: Trace call graph (callers/callees) with depth
     - retrieve_context_for_query: Unified query-to-context retrieval bundle
+    - assess_codebase_quality: Return the persisted pre-flight quality report
 
     Example usage with Claude Desktop or other MCP clients:
 
@@ -1061,7 +1062,8 @@ def mcp_server(store: str, config: Optional[str]) -> None:
         click.echo(f"   Store: {store_path}", err=True)
         click.echo("   Transport: STDIO", err=True)
         click.echo(
-            "   Tools: search_codebase, get_entity_context, trace_calls, retrieve_context_for_query",
+            "   Tools: search_codebase, get_entity_context, trace_calls, "
+            "retrieve_context_for_query, assess_codebase_quality",
             err=True,
         )
 

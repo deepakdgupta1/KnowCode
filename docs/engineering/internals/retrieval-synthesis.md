@@ -46,9 +46,10 @@ score +=   α   / (60 + dense_rank  + 1)
 - Candidate IDs are deduplicated by best rank before fusion; a dense ID
   unresolvable in the chunk repository is skipped without consuming a
   result slot.
-- Note: `HybridIndex.__init__`'s own default for `alpha` is 0.5; the
-  shipped 0.2 always arrives via `AppConfig` — construct with an explicit
-  alpha in tests/new call sites.
+- `HybridIndex.__init__`'s own default for `alpha` is 0.2, matching the
+  `AppConfig` default; the service still passes
+  `alpha=self.app_config.hybrid_alpha` explicitly, so a config change never
+  depends on the constructor default.
 
 ## Reranking
 

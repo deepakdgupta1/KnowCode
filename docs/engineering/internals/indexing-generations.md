@@ -14,8 +14,9 @@ records: [ADR 4](../adr/adr-0004-complete-index-generations.md),
 2. **Parse** — per-language parsers produce `ParseResult`s (entities,
    locations, relationships).
 3. **Graph build** (`GraphBuilder`) — entities/relationships assembled;
-   unresolved references remain visible as `unresolved::…` targets
-   (scored by preflight, never silently dropped).
+   unresolved references remain visible as `unresolved::…` targets (never
+   silently dropped). Note: preflight's `unresolved_references` dimension
+   counts leftover legacy `ref::` placeholders, not `unresolved::` endpoints.
 4. **Chunk** (`chunker.py`) — entity-aligned chunks (signature +
    docstring + source; 1000 chars / 100 overlap) plus module-header and
    imports chunks; MD5 content hash, mtime, and `has_docstring` recorded

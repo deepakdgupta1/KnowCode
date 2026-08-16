@@ -68,7 +68,7 @@ unfamiliar repository.
 ### P3 — Locally hosted agent / service
 
 **UC9: Serve codebase intelligence over HTTP.**
-`knowcode server --watch` exposes 11 endpoints (search, context bundles,
+`knowcode server --watch` exposes 12 endpoints (search, context bundles,
 semantic query, call tracing, impact, freshness) with two rate-limit tiers.
 Non-MCP frameworks wrap `/openapi.json` as function-calling tools — see
 [IDE & Agent Integration](../user/ide-integration.md#non-mcp-agent-frameworks-openapi-function-calling).

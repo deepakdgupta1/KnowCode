@@ -37,8 +37,8 @@ Decision records: [ADR 3](../adr/adr-0003-durable-embedding-representation.md),
 
 Both implement `VectorStoreProtocol` (`protocols.py`): `add`, `upsert`
 (exact-ID idempotent), `flush` (write-visibility boundary), `search`,
-`get_embedding`, `save`, `load`, `clear`, `remove`, `count`, `dimension`.
-Typed errors in `knowcode.errors`: `VectorDimensionError`,
+`get_embedding`, `save`, `load`, `clear`, `remove`, `count`, `dimension`,
+`close`. Typed errors in `knowcode.errors`: `VectorDimensionError`,
 `VectorArtifactVersionError`, `VectorContractError`. `hasattr` is not
 capability negotiation.
 
@@ -70,9 +70,12 @@ are snapshot-safe and observe one generation.
 - ID-aware native index: exact-ID assignment/upsert/removal;
   native-tombstone parity (`index.ntotal == count()`), removed IDs never
   consume top-k slots, duplicate adds collapse to one live row.
-- Envelope records backend, dimension, contract version, generation,
-  checksums, and native/live count parity; inconsistencies reject with
-  `VectorArtifactVersionError`.
+- Envelope records backend, dimension, contract version, generation, and
+  native/live count parity; inconsistencies reject with
+  `VectorArtifactVersionError`. Envelope-level checksums are deliberately
+  absent — artifact digests live in the generation manifest (see
+  [indexing & generations](indexing-generations.md)), cross-checking all
+  artifacts of one generation.
 
 ## Versioning & migration policy (fail-closed)
 
