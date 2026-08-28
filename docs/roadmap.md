@@ -147,6 +147,24 @@ baseline and routing-quality gate.
 retrieval and routing quality do not regress, and migration guidance is
 published before the legacy tool surface changes.
 
+- **Done (consolidation):** the default surface is three concern-split tools
+  with `action` enums — `knowcode_retrieve`, `knowcode_lifecycle`,
+  `knowcode_inspect` — and the five flat tools remain behind
+  `mcp-server --legacy-tools` for one release. The split is by concern rather
+  than a single tool because client permissions are per-tool, so retrieval can
+  be allowlisted while builds stay confirmed.
+- **Scope change:** consolidation shipped together with a capability
+  expansion (build/index/export/doctor/freshness/stats/history/preflight/
+  telemetry/job polling), so the recurring schema cost went from ~650 tokens
+  for 5 capabilities to ~1,110 for 14 rather than down to ~200. Cost per
+  capability improved ~2.3x; absolute per-turn cost did not fall. A ceiling
+  test now guards it. Item 2 (summary-first response profiles) and item 3
+  (per-action payload caps in telemetry) remain open, and are where an
+  absolute reduction should now come from.
+- **Unblocked by the same change:** `mcp-server` no longer refuses to start
+  without a store, so an agent can bootstrap a repository through
+  `knowcode_lifecycle action='build'` without a terminal step.
+
 ### P4 - Unified Agent Onboarding
 
 **Goal:** make the canonical MCP policy and connection setup installable rather

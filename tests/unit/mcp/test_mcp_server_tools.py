@@ -205,12 +205,17 @@ def test_handle_tool_call_unknown_tool_returns_error(tmp_path: Path) -> None:
 
 
 def test_handle_tool_call_reports_missing_prerequisites(tmp_path: Path) -> None:
-    """Read tools should fail deterministically when store prerequisites are missing."""
+    """Read tools should fail deterministically when store prerequisites are missing.
+
+    The hint names a tool call rather than the CLI's ``knowcode build``: an
+    agent reached over MCP has no terminal, so the actionable instruction is
+    ``knowcode_lifecycle action='build'``.
+    """
     server = KnowCodeMCPServer(store_path=tmp_path)
     result = json.loads(server.handle_tool_call("search_codebase", {"query": "Foo"}))
 
     assert result["code"] == "missing_knowledge_store"
-    assert "knowcode build" in result["hint"]
+    assert "knowcode_lifecycle" in result["hint"]
 
 
 def test_mcp_server_initializes_service_with_strict_config(

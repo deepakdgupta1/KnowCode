@@ -244,17 +244,39 @@ endpoint reference is in [REST API](rest-api.md).
 ### `mcp-server`
 
 Start the MCP (Model Context Protocol) server over stdio for IDE agent
-integration. Read-only and deterministic: tools never auto-run analysis.
+integration.
 
 ```bash
-knowcode mcp-server [--store <path>] [--config <path>]
+knowcode mcp-server [--store <path>] [--config <path>] [--legacy-tools]
 ```
 
-**Tools exposed:** `search_codebase`, `get_entity_context`, `trace_calls`,
-`retrieve_context_for_query`, `assess_codebase_quality`. Client setup for
-Claude Desktop, VS Code, and Antigravity is covered in
-[IDE & Agent Integration](ide-integration.md); the canonical retrieval
-policy is the [MCP contract](../mcp-contract.md).
+`--store` defaults to `$CLAUDE_PROJECT_DIR`, then the working directory, so
+one registration serves every repository. The server starts whether or not a
+knowledge store exists — a missing store is reported per action, so an agent
+can bootstrap a repository itself rather than requiring a terminal step.
+
+**Tools exposed:** three consolidated tools, each selecting a capability with
+an `action`.
+
+| Tool | Actions | Nature |
+|---|---|---|
+| `knowcode_retrieve` | `query`, `search`, `context`, `trace`, `semantic_search` | Read-only; never auto-runs analysis |
+| `knowcode_lifecycle` | `build`, `index`, `export` | Writes artifacts; returns a job id and runs in the background |
+| `knowcode_inspect` | `job_status`, `doctor`, `freshness`, `quality`, `stats`, `preflight`, `history`, `telemetry` | Read-only |
+
+Retrieval remains read-only and deterministic. Lifecycle actions are the
+exception: they write artifacts and, with an embedding provider configured,
+send repository text to it, so each call is confirmed by the client and paths
+are confined to the repository root. Telemetry deletion, daemon control, and
+`ask` are deliberately not exposed.
+
+`--legacy-tools` additionally advertises the five deprecated flat tools
+(`search_codebase`, `get_entity_context`, `trace_calls`,
+`retrieve_context_for_query`, `assess_codebase_quality`) for one release.
+
+Client setup for Claude Code, Claude Desktop, VS Code, and Antigravity is
+covered in [IDE & Agent Integration](ide-integration.md); the canonical
+retrieval policy is the [MCP contract](../mcp-contract.md).
 
 ## Telemetry
 

@@ -1,6 +1,6 @@
 # KnowCode MCP Retrieval Contract
 
-**Last Updated:** 2026-08-16
+**Last Updated:** 2026-08-28
 
 This is the canonical operating policy for agents that use the KnowCode MCP
 server. Keep agent rules, setup guides, and prompts pointed here instead of
@@ -12,28 +12,78 @@ Agents should minimize expensive context generation by asking KnowCode for the
 smallest useful repository context first, then escalating only when the reduced
 context is not enough to answer safely.
 
+## Tool Surface
+
+Three consolidated tools, each selecting a capability with an `action`:
+
+| Tool | Actions | Nature |
+|---|---|---|
+| `knowcode_retrieve` | `query`, `search`, `context`, `trace`, `semantic_search` | Read-only. The hot path. |
+| `knowcode_lifecycle` | `build`, `index`, `export` | Writes artifacts. Confirmed per call. |
+| `knowcode_inspect` | `job_status`, `doctor`, `freshness`, `quality`, `stats`, `preflight`, `history`, `telemetry` | Read-only. |
+
+Tool schemas are injected into every LLM request, so schema size is a
+recurring per-turn cost. Measured at ~4 chars/token: the previous five flat
+tools cost ~650 tokens for 5 capabilities; this surface costs ~1,110 for 14;
+one tool per capability would cost ~2,000. The ceiling is enforced by
+`tests/unit/mcp/test_consolidated_surface.py`.
+
+The split is by concern because client permissions are per-tool
+(`mcp__knowcode__<tool>`): `knowcode_retrieve` can be allowlisted so ordinary
+questions never prompt, while `knowcode_lifecycle` still asks.
+
+Deliberately **not** exposed: telemetry deletion (irreversible), `server` /
+`mcp-server` / `install` (host-level process control), and `ask` (pays a
+second LLM — an agent should consume context via `query` instead).
+
+The five original flat tools (`search_codebase`, `get_entity_context`,
+`trace_calls`, `retrieve_context_for_query`, `assess_codebase_quality`) remain
+available for one release behind `--legacy-tools`, off by default.
+
 ## Readiness
 
-Before relying on MCP retrieval for a repository:
+The server starts whether or not artifacts exist. A repository KnowCode has
+never seen is bootstrapped through the surface itself:
+
+```json
+{"tool": "knowcode_lifecycle", "action": "build"}
+```
+
+That returns a `job_id` immediately and indexes in the background — indexing
+costs one embedding round-trip per file with no cross-file batching, so a
+cold build on a large repository runs for many minutes. Poll until terminal:
+
+```json
+{"tool": "knowcode_inspect", "action": "job_status", "job_id": "j-…"}
+```
+
+Never report a build as successful before `state` is `succeeded` and
+`result.published` is `true`. A build that fails after parsing leaves the
+previously published generation current, so a non-zero entity count does not
+mean retrieval improved.
+
+From a terminal, the equivalent remains:
 
 ```bash
 uv run knowcode build .
 uv run knowcode doctor --store . --mcp
 ```
 
-`doctor` should confirm that the knowledge store exists, the semantic index is
-compatible with the configured embedding model, and the MCP server can list and
-call tools.
+Two store layouts are valid, and both count as ready: a published generation
+carrying `knowledge.db`, or the legacy flat `knowcode_knowledge.json`. A
+current build produces the former and writes the latter only with
+`export_json`.
 
 ## First Tool
 
-Use `retrieve_context_for_query` whenever the current conversation does not
-already contain enough repository context.
+Use `knowcode_retrieve` with `action="query"` whenever the current
+conversation does not already contain enough repository context.
 
 Default MCP arguments:
 
 ```json
 {
+  "action": "query",
   "query": "<user question>",
   "task_type": "auto",
   "max_tokens": 1500,
@@ -51,6 +101,10 @@ Use larger starting budgets only when the question clearly needs more breadth:
 | Debug a concrete failure | 2000 | 2 | true |
 | Review or extend a feature area | 3000 | 2-3 | true |
 | Trace callers, callees, or impact | 2000 | 2 | true |
+
+Retrieval never builds. If artifacts are missing it returns
+`code="missing_knowledge_store"` with a hint naming the lifecycle call —
+it will not silently spend minutes and embedding quota on your behalf.
 
 ## Verbosity Ladder
 
@@ -89,16 +143,22 @@ when the missing information is likely available locally. Only fall back to a
 larger external LLM prompt after the local context has clearly failed or the
 user explicitly asks for a broader synthesis.
 
-## Other Tools
+## Other Actions
 
-Prefer `retrieve_context_for_query` for natural-language questions. Use the
-other MCP tools only for focused follow-up:
+Prefer `action="query"` for natural-language questions. Use the others only
+for focused follow-up:
 
-- `search_codebase`: find entities by known name or pattern.
-- `get_entity_context`: fetch context for a specific entity after its ID is known.
-- `trace_calls`: inspect callers or callees for a specific entity.
-- `assess_codebase_quality`: return the persisted pre-flight quality report
-  when you need to judge how much to trust local context on a repository.
+- `search`: find entities by known name or pattern.
+- `context`: fetch context for a specific entity after its ID is known.
+- `trace`: inspect callers or callees. Accepts a bare name and resolves it;
+  an unresolvable name returns `code="entity_not_found"` rather than an empty
+  list that would read as "nothing calls this".
+- `semantic_search`: raw ranked chunks, capped per chunk. Bypasses the
+  sufficiency projection, so it is a follow-up, not a first choice.
+- `knowcode_inspect action="quality"`: the persisted pre-flight report when
+  you need to judge how much to trust local context.
+- `knowcode_inspect action="freshness"`: whether artifacts lag the working
+  tree. Check this before trusting context on an actively edited repository.
 
 ## Agent Rule Snippet
 
@@ -106,10 +166,12 @@ Use this compact rule in agent-specific config files:
 
 ```md
 When repository context is needed, follow docs/mcp-contract.md.
-Start with retrieve_context_for_query using verbosity=minimal and the smallest
+Start with knowcode_retrieve action=query, verbosity=minimal, and the smallest
 budget that fits the task. Escalate to standard or verbose only when the minimal
 context is insufficient. Use the configured sufficiency_threshold from
 aimodels.yaml to decide whether to answer from local context.
+If artifacts are missing or stale, run knowcode_lifecycle action=build and poll
+knowcode_inspect action=job_status until it succeeds before retrying.
 ```
 
 ---

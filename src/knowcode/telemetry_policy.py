@@ -87,6 +87,13 @@ ALLOWED_FIELDS: Final[Mapping[str, Mapping[str, str]]] = {
     },
     TOOL_CALL_EVENT: {
         "tool_name": _STR,
+        # The consolidated MCP surface routes many capabilities through one
+        # tool, so ``tool_name`` alone no longer identifies what was used.
+        # Action names are a closed enum defined in ``knowcode.mcp.tools`` —
+        # never user content — so recording one cannot leak a question or
+        # pasted code. Additive and optional: records written before this
+        # field existed stay valid, so no schema version bump is needed.
+        "action": _STR,
         "argument_count": _INT,
         "query_id": _STR,
         "query_chars": _INT,

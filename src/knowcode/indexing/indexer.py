@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import threading
 from pathlib import Path
-from typing import Any, Optional, Sequence
+from typing import Any, Callable, Optional, Sequence
 
 from knowcode.data_models import CodeChunk, ParseResult
 from knowcode.storage.chunk_repository import ChunkRepository
@@ -26,6 +26,24 @@ from knowcode.utils.entity_identity import normalize_file_identity
 from knowcode.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+def _report_progress(
+    callback: Optional[Callable[[int, Optional[int]], None]],
+    done: int,
+    total: Optional[int],
+) -> None:
+    """Invoke a progress callback without letting it break indexing.
+
+    Progress is a reporting nicety; a caller whose callback raises must not
+    lose a build that is otherwise succeeding.
+    """
+    if callback is None:
+        return
+    try:
+        callback(done, total)
+    except Exception as exc:  # noqa: BLE001 - reporting must never be fatal
+        logger.warning("Ignored progress callback error: %s", exc)
 
 
 class Indexer:
@@ -391,7 +409,11 @@ class Indexer:
     # ------------------------------------------------------------------
 
     def index_directory(
-        self, root_dir: str | Path, *, builder: Optional[GraphBuilder] = None
+        self,
+        root_dir: str | Path,
+        *,
+        builder: Optional[GraphBuilder] = None,
+        on_progress: Optional[Callable[[int, Optional[int]], None]] = None,
     ) -> int:
         """Index all supported files under a directory.
 
@@ -402,6 +424,12 @@ class Indexer:
                 ``knowledge.db`` from, so the chunk set derives from exactly the
                 parse that produced the entities (Step 14). Re-scanning here
                 would apply a different ignore set.
+            on_progress: Optional ``(files_done, files_total)`` callback invoked
+                after each file. Embedding is one network round-trip per file
+                with no concurrency, so this loop is the whole wall-clock cost
+                of a build; without a callback a caller running it in the
+                background has no way to report progress. Never raises into the
+                indexing loop.
 
         Returns:
             Total number of chunks added to the index.
@@ -423,7 +451,9 @@ class Indexer:
 
         total_chunks = 0
         self.failed_updates = []
-        for parse_result in parse_results:
+        files_total = len(parse_results)
+        _report_progress(on_progress, 0, files_total)
+        for files_done, parse_result in enumerate(parse_results, start=1):
             # One prepare/commit transaction per file, same as the incremental
             # and watch paths. Nothing can be reused in a fresh generation, so
             # the per-chunk hash lookup is skipped.
@@ -432,6 +462,7 @@ class Indexer:
                 parse_result=parse_result,
                 reuse_embeddings=False,
             )
+            _report_progress(on_progress, files_done, files_total)
 
         # Store current commit hash for future incremental indexing
         try:
@@ -444,11 +475,20 @@ class Indexer:
 
         return total_chunks
 
-    def index_incremental(self, root_dir: str | Path) -> int:
+    def index_incremental(
+        self,
+        root_dir: str | Path,
+        *,
+        on_progress: Optional[Callable[[int, Optional[int]], None]] = None,
+    ) -> int:
         """Incrementally index only changed files and skip re-embedding unchanged chunks.
 
         Args:
             root_dir: Root directory of the repository.
+            on_progress: Optional ``(files_done, files_total)`` callback invoked
+                after each changed file, and forwarded to the full-index
+                fallback paths so a caller reporting progress does not go
+                silent when this method degrades to a full index.
 
         Returns:
             Number of new chunks added.
@@ -468,14 +508,14 @@ class Indexer:
             logger.warning(
                 f"Failed to get current git commit: {e}. Incremental indexer falling back to full index."
             )
-            return self.index_directory(root_dir)
+            return self.index_directory(root_dir, on_progress=on_progress)
 
         if not last_commit:
             logger.info(
                 "No last_indexed_commit found in manifest. Falling back to full index."
             )
             self.manifest["last_indexed_commit"] = current_commit
-            return self.index_directory(root_dir)
+            return self.index_directory(root_dir, on_progress=on_progress)
 
         if current_commit == last_commit:
             logger.info(
@@ -496,7 +536,7 @@ class Indexer:
         except Exception as e:
             logger.warning(f"Failed to get git diff: {e}. Falling back to full index.")
             self.manifest["last_indexed_commit"] = current_commit
-            return self.index_directory(root_dir)
+            return self.index_directory(root_dir, on_progress=on_progress)
 
         changed_files_rel = list(set(changed_files_rel))
         changed_files = [
@@ -509,19 +549,22 @@ class Indexer:
 
         total_chunks = 0
         self.failed_updates = []
+        files_total = len(changed_files)
+        _report_progress(on_progress, 0, files_total)
 
         # Only the changed files are parsed. The scan supplies file identity
         # and indexability; it does not build a graph, because chunking needs
         # the per-file parse result and nothing else.
         file_map = {f.path.resolve(): f for f in Scanner(root_path).scan_all()}
 
-        for file_path_str in changed_files:
+        for files_done, file_path_str in enumerate(changed_files, start=1):
             file_path = Path(file_path_str).resolve()
 
             file_info = file_map.get(file_path)
             if file_info is None:
                 # Deleted, ignored, or no longer an indexable type.
                 self.delete_file(file_path_str)
+                _report_progress(on_progress, files_done, files_total)
                 continue
 
             # One transaction per file: parse, chunk, and embed first, then
@@ -530,6 +573,7 @@ class Indexer:
             total_chunks += self._replace_or_report(
                 file_path_str, parse_result=self._parse_one_file(file_info.path)
             )
+            _report_progress(on_progress, files_done, files_total)
 
         self.manifest["last_indexed_commit"] = current_commit
         return total_chunks

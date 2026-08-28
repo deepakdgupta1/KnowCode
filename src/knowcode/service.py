@@ -11,7 +11,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Iterator, Optional, cast
+from typing import TYPE_CHECKING, Any, Callable, Iterator, Optional, cast
 
 from knowcode.analysis.context_synthesizer import ContextSynthesizer
 from knowcode.config import AppConfig
@@ -63,6 +63,18 @@ _LEASE_STACK: ContextVar[tuple[tuple["KnowCodeService", GenerationBundle], ...]]
 #: means a bug rather than contention; the cap turns that into a clear error
 #: instead of a spinning request thread.
 _LEASE_ACQUIRE_ATTEMPTS = 64
+
+
+def _first_line(text: Optional[str]) -> str:
+    """First line of a commit message, or an empty string.
+
+    Commit docstrings carry the full message; history listings want only the
+    subject, and a commit with no message must not raise on ``splitlines()[0]``.
+    """
+    if not text:
+        return ""
+    lines = text.splitlines()
+    return lines[0] if lines else ""
 
 
 @dataclass(frozen=True)
@@ -716,6 +728,7 @@ class KnowCodeService:
         incremental: bool = False,
         builder: Optional[GraphBuilder] = None,
         run_preflight: bool = True,
+        on_progress: Optional[Callable[[int, Optional[int]], None]] = None,
     ) -> GenerationBuildResult:
         """Stage, validate, and atomically publish one complete generation.
 
@@ -799,9 +812,13 @@ class KnowCodeService:
                 )
                 if incremental and (staging.path / "index_manifest.json").exists():
                     indexer.load(staging.path)
-                    chunk_count = indexer.index_incremental(directory)
+                    chunk_count = indexer.index_incremental(
+                        directory, on_progress=on_progress
+                    )
                 else:
-                    chunk_count = indexer.index_directory(directory, builder=builder)
+                    chunk_count = indexer.index_directory(
+                        directory, builder=builder, on_progress=on_progress
+                    )
 
                 indexer.save(staging.path)
                 vector_count = vector_store.count()
@@ -1213,6 +1230,7 @@ class KnowCodeService:
         coverage: str | Path | None = None,
         export_json: bool = False,
         incremental: bool = False,
+        on_progress: Optional[Callable[[int, Optional[int]], None]] = None,
     ) -> dict[str, Any]:
         """Analyze a codebase and persist the resulting knowledge store.
 
@@ -1263,6 +1281,7 @@ class KnowCodeService:
             index_path,
             incremental=incremental,
             builder=builder,
+            on_progress=on_progress,
         )
 
         stats: dict[str, Any] = builder.stats()
@@ -1436,6 +1455,94 @@ class KnowCodeService:
                 stats["generation_kind"] = generation.kind
 
             return stats
+
+    def get_history(
+        self, target: Optional[str] = None, limit: int = 10
+    ) -> dict[str, Any]:
+        """Return commit history, or the revision history of one entity.
+
+        Temporal data only exists when the repository was built with git
+        history analysis enabled, so an empty ``entries`` list is a normal
+        answer rather than an error.
+
+        Args:
+            target: Entity ID or search pattern. Omitted returns the commit
+                log for the repository.
+            limit: Maximum entries to return.
+
+        Returns:
+            ``{"scope", "entries", "total"}``, plus ``"entity"`` when a target
+            resolved. ``scope`` is ``"commits"`` or ``"entity"``.
+        """
+        from knowcode.data_models import RelationshipKind
+
+        with self.generation_lease() as bundle:
+            store = bundle.store
+
+            if not target:
+                commits = store.get_entities_by_kind("commit")
+                commits.sort(
+                    key=lambda c: c.metadata.get("timestamp", "0"), reverse=True
+                )
+                entries = []
+                for commit in commits[:limit]:
+                    author = "Unknown"
+                    for rel in store.get_incoming_relationships(commit.id):
+                        if rel.kind == RelationshipKind.AUTHORED:
+                            author_entity = store.get_entity(rel.source_id)
+                            if author_entity:
+                                author = author_entity.name
+                            break
+                    entries.append(
+                        {
+                            "commit": commit.name,
+                            "date": commit.metadata.get("date"),
+                            "author": author,
+                            "summary": _first_line(commit.docstring),
+                        }
+                    )
+                return {"scope": "commits", "entries": entries, "total": len(commits)}
+
+            entity = store.get_entity(target)
+            if entity is None:
+                matches = store.search(target)
+                entity = matches[0] if matches else None
+            if entity is None:
+                raise ValueError(f"Entity not found: {target}")
+
+            # Entity -> CHANGED_BY -> Commit, ordered newest first. Insertion
+            # and deletion counts live on the edge, not the commit.
+            changes: list[tuple[str, dict[str, Any]]] = []
+            for rel in store.get_outgoing_relationships(entity.id):
+                if rel.kind != RelationshipKind.CHANGED_BY:
+                    continue
+                commit = store.get_entity(rel.target_id)
+                if commit is None:
+                    continue
+                changes.append(
+                    (
+                        str(commit.metadata.get("timestamp", "0")),
+                        {
+                            "commit": commit.name,
+                            "date": commit.metadata.get("date"),
+                            "insertions": rel.metadata.get("insertions", 0),
+                            "deletions": rel.metadata.get("deletions", 0),
+                            "summary": _first_line(commit.docstring),
+                        },
+                    )
+                )
+            changes.sort(key=lambda item: item[0], reverse=True)
+
+            return {
+                "scope": "entity",
+                "entity": {
+                    "id": entity.id,
+                    "qualified_name": entity.qualified_name,
+                    "kind": entity.kind.value,
+                },
+                "entries": [entry for _, entry in changes[:limit]],
+                "total": len(changes),
+            }
 
     def get_callers(self, entity_id: str) -> list[dict[str, Any]]:
         """Get callers of an entity.

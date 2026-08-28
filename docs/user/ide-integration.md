@@ -13,7 +13,8 @@ Agents retrieve focused repository context *before* building a large
 prompt. The low-token workflow:
 
 1. Agent receives a user query.
-2. Agent calls `retrieve_context_for_query` with `verbosity="minimal"`.
+2. Agent calls `knowcode_retrieve` with `action="query"` and
+   `verbosity="minimal"`.
 3. KnowCode returns compact `context_text`, `sufficiency_score`, and token
    count.
 4. Agent answers locally when the configured threshold is met
@@ -33,22 +34,33 @@ knowcode doctor --store . --mcp
 
 ## Client configuration
 
-Use an absolute repository path for `--store`. In a development checkout,
-`uv run` keeps the MCP server on the project's environment.
+The server resolves its repository root from, in order: an explicit
+`--store`, the `CLAUDE_PROJECT_DIR` environment variable, then the process
+working directory. Claude Code does not document the working directory it
+spawns a stdio server with and its own guidance is to resolve
+project-relative paths from `CLAUDE_PROJECT_DIR`, so **do not rely on
+`--store .`** — omit `--store` and let the env var win.
+
+That makes one registration serve every repository:
+
+```bash
+claude mcp add knowcode --scope user -- knowcode mcp-server
+```
+
+Which is equivalent to:
 
 ```json
 {
   "mcpServers": {
     "knowcode": {
-      "command": "uv",
-      "args": ["run", "knowcode", "mcp-server", "--store", "/absolute/path/to/repository"]
+      "command": "knowcode",
+      "args": ["mcp-server"]
     }
   }
 }
 ```
 
-If your client cannot run through `uv`, point `command` at the absolute
-`knowcode` executable:
+Pin a single repository instead by passing an absolute `--store`:
 
 ```json
 {
@@ -65,21 +77,61 @@ Restart the IDE or agent host after changing its MCP config. On macOS, if
 the stdio server is not spawned correctly from a GUI client, the wrapper
 script `bin/knowcode-mcp.sh` works around provenance checks.
 
+### Bootstrapping a new repository
+
+The server starts whether or not artifacts exist, so an agent in a
+repository KnowCode has never seen can build them itself: call
+`knowcode_lifecycle` with `action="build"`, then poll `knowcode_inspect`
+`action="job_status"`. No terminal step is required.
+
+### Permissions
+
+Tools are named `mcp__knowcode__<tool>`. Because the surface is split by
+concern, retrieval can be allowlisted without also allowing builds:
+
+```json
+{
+  "permissions": {
+    "allow": ["mcp__knowcode__knowcode_retrieve", "mcp__knowcode__knowcode_inspect"]
+  }
+}
+```
+
+`knowcode_lifecycle` declares `anthropic/requiresUserInteraction`, so every
+build is confirmed even if the server is otherwise allowlisted. A build
+sends repository chunk text to the configured embedding provider and consumes
+quota, so this is deliberate.
+
+### Long builds
+
+Lifecycle actions return a `job_id` immediately rather than blocking, because
+indexing costs one embedding round-trip per file with no cross-file batching
+or concurrency — a few hundred files is minutes, a few thousand is tens of
+minutes. Claude Code's stdio idle timeout defaults to 30 minutes
+(`CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT`), which a synchronous build could
+exceed. Polling is cheap and read-only.
+
 ## Tools
 
-The MCP server exposes five read-only, deterministic tools:
+The server exposes three consolidated tools; an `action` selects the
+capability. The canonical policy, token budgets, and escalation ladder live in
+the [MCP contract](../mcp-contract.md).
 
-| Tool | Use |
+| Tool | Actions |
 |---|---|
-| `retrieve_context_for_query` | **Primary** natural-language retrieval path |
-| `search_codebase` | Find entities by known name or pattern |
-| `get_entity_context` | Context for a specific known entity |
-| `trace_calls` | Callers/callees for a specific entity |
-| `assess_codebase_quality` | The preflight report card over MCP |
+| `knowcode_retrieve` | `query` (primary), `search`, `context`, `trace`, `semantic_search` |
+| `knowcode_lifecycle` | `build`, `index`, `export` |
+| `knowcode_inspect` | `job_status`, `doctor`, `freshness`, `quality`, `stats`, `preflight`, `history`, `telemetry` |
 
-Call `retrieve_context_for_query` first for ordinary repository questions;
-use the others for focused follow-up once retrieval has identified the
-relevant entity.
+Call `knowcode_retrieve` with `action="query"` first for ordinary repository
+questions; use the rest for focused follow-up.
+
+Deliberately excluded: telemetry deletion, daemon/host control
+(`server`, `mcp-server`, `install`), and `ask` — inside an agent the model
+should consume retrieved context rather than pay a second LLM.
+
+The five original flat tools remain available for one release via
+`--legacy-tools` (off by default).
 
 ## Agent rule snippet
 
@@ -87,7 +139,7 @@ Put only a pointer plus the compact rule in agent-specific config files:
 
 ```md
 When repository context is needed, follow docs/mcp-contract.md.
-Start with retrieve_context_for_query using verbosity=minimal and the smallest
+Start with knowcode_retrieve action=query, verbosity=minimal, and the smallest
 budget that fits the task. Escalate to standard or verbose only when the minimal
 context is insufficient. Use the configured sufficiency_threshold from
 aimodels.yaml to decide whether to answer from local context.
@@ -99,10 +151,13 @@ aimodels.yaml to decide whether to answer from local context.
 knowcode doctor --store . --mcp
 ```
 
+The MCP handshake check spawns the server, lists tools, and calls the primary
+tool, so a green result proves the surface really answers.
+
 Then ask the agent a repository question such as *“Where is the retrieval
-orchestration implemented?”* Expected: the agent calls
-`retrieve_context_for_query` with `verbosity="minimal"` first, answers
-locally when `sufficiency_score` meets the threshold, and escalates only if
+orchestration implemented?”* Expected: the agent calls `knowcode_retrieve`
+with `action="query"` and `verbosity="minimal"` first, answers locally when
+`sufficiency_score` meets the threshold, and escalates only if
 insufficient. A manual test plan with expected sufficiency scores per
 question is in `tests/test_mcp_workflow.md`.
 
@@ -117,9 +172,12 @@ targets.
 absolute path, and that the IDE was restarted. Run the server directly to
 see errors: `knowcode mcp-server --store .`
 
-**Knowledge store not found.** Run `knowcode build .`, then confirm the
-config's `--store` points at the directory containing
-`knowcode_knowledge.json`.
+**Knowledge store not found.** Call `knowcode_lifecycle action="build"`
+(or run `knowcode build .`) and poll `job_status` until it succeeds. Note
+that a current build publishes the graph as `knowledge.db` *inside*
+`knowcode_index/generations/`; the flat `knowcode_knowledge.json` is a legacy
+export written only with `export_json`. Both layouts count as ready, so do
+not expect the JSON to exist.
 
 **Semantic retrieval fallback.** Rebuild the index (`knowcode index .`) and
 confirm embedding keys from `aimodels.yaml` are present in the *agent's*

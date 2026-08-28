@@ -11,14 +11,12 @@ import click
 
 from knowcode import __version__
 from knowcode.analysis.documentation_synthesizer import DocumentationSynthesizer
-from knowcode.data_models import RelationshipKind
 from knowcode.errors import KnowCodePrerequisiteError
 from knowcode.readiness import (
     IDEAL_SETUP_FEATURES,
     build_install_command,
 )
 from knowcode.service import KnowCodeService
-from knowcode.storage.knowledge_store import KnowledgeStore
 from knowcode.utils.dependency_guard import require_extra
 
 
@@ -888,72 +886,35 @@ def history(target: Optional[str], store: str, limit: int) -> None:
         )
         sys.exit(1)
 
-    knowledge = service.store
+    try:
+        result = service.get_history(target=target, limit=limit)
+    except ValueError as e:
+        click.echo(str(e))
+        return
 
-    if not target:
-        # Show recent commits
-        commits = knowledge.get_entities_by_kind("commit")
-        # Sort by timestamp (metadata)
-        commits.sort(key=lambda x: x.metadata.get("timestamp", "0"), reverse=True)
+    entries = result["entries"]
 
+    if result["scope"] == "commits":
+        click.echo(f"Recent History (showing {len(entries)} of {result['total']}):")
+        for entry in entries:
+            click.echo(
+                f"[{entry['date'] or 'Unknown date'}] {entry['commit']} - {entry['author']}"
+            )
+            click.echo(f"  {entry['summary']}")
+        return
+
+    entity = result["entity"]
+    click.echo(f"History for {entity['qualified_name']} ({entity['kind']}):")
+
+    if not entries:
+        click.echo("  No recorded history (scan with --temporal).")
+        return
+
+    for entry in entries:
+        stats = f"(+{entry['insertions']}/-{entry['deletions']})"
         click.echo(
-            f"Recent History (showing {min(limit, len(commits))} of {len(commits)}):"
+            f"  {entry['date'] or ''} {entry['commit']} {stats}: {entry['summary']}"
         )
-        for commit in commits[:limit]:
-            date = commit.metadata.get("date", "Unknown date")
-            author_rels = knowledge.get_incoming_relationships(commit.id)
-            author = "Unknown"
-            for rel in author_rels:
-                if rel.kind == RelationshipKind.AUTHORED:
-                    # rel.source_id is author
-                    a_ent = knowledge.get_entity(rel.source_id)
-                    if a_ent:
-                        author = a_ent.name
-
-            click.echo(f"[{date}] {commit.name} - {author}")
-            click.echo(
-                f"  {commit.docstring.splitlines()[0] if commit.docstring else ''}"
-            )
-
-    else:
-        # Show history for specific entity
-        entity = knowledge.get_entity(target)
-        if not entity:
-            matches = knowledge.search(target)
-            if matches:
-                entity = matches[0]
-                click.echo(f"Using: {entity.id}\n")
-
-        if not entity:
-            click.echo(f"Entity not found: {target}")
-            return
-
-        click.echo(f"History for {entity.qualified_name} ({entity.kind.value}):")
-
-        # Build history from relationships
-        # Entity -> CHANGED_BY -> Commit
-        rels = knowledge.get_outgoing_relationships(entity.id)
-        changes = []
-        for rel in rels:
-            if rel.kind == RelationshipKind.CHANGED_BY:
-                commit = knowledge.get_entity(rel.target_id)
-                if commit:
-                    # Get modification stats from edge metadata
-                    stats = f"(+{rel.metadata.get('insertions', 0)}/-{rel.metadata.get('deletions', 0)})"
-                    timestamp = commit.metadata.get("timestamp", "0")
-                    changes.append((timestamp, commit, stats))
-
-        changes.sort(key=lambda x: x[0], reverse=True)
-
-        if not changes:
-            click.echo("  No recorded history (scan with --temporal).")
-            return
-
-        for _, commit, stats in changes[:limit]:
-            date = commit.metadata.get("date", "")
-            click.echo(
-                f"  {date} {commit.name} {stats}: {commit.docstring.splitlines()[0]}"
-            )
 
 
 @cli.command()
@@ -1009,8 +970,11 @@ def ask(query_text: tuple[str], store: str, config: Optional[str]) -> None:
     "--store",
     "-s",
     type=click.Path(exists=True),
-    default=".",
-    help="Path to knowledge store file or directory",
+    default=None,
+    help=(
+        "Repository root. Defaults to $CLAUDE_PROJECT_DIR, then the working "
+        "directory, so one registration serves every repository."
+    ),
 )
 @click.option(
     "--config",
@@ -1018,57 +982,79 @@ def ask(query_text: tuple[str], store: str, config: Optional[str]) -> None:
     type=click.Path(exists=True, dir_okay=False),
     help="Path to configuration file for model priorities",
 )
-def mcp_server(store: str, config: Optional[str]) -> None:
+@click.option(
+    "--legacy-tools/--no-legacy-tools",
+    default=False,
+    help=(
+        "Also advertise the five deprecated flat tools (search_codebase, "
+        "get_entity_context, trace_calls, retrieve_context_for_query, "
+        "assess_codebase_quality). Off by default."
+    ),
+)
+def mcp_server(store: Optional[str], config: Optional[str], legacy_tools: bool) -> None:
     """Start MCP server for IDE integration.
 
-    Exposes KnowCode tools via the Model Context Protocol (MCP) using
-    STDIO transport. Five tools are available:
+    Exposes KnowCode over the Model Context Protocol (STDIO transport) as
+    three consolidated tools, each selecting a capability via an ``action``:
 
     \b
-    - search_codebase: Search for code entities by name
-    - get_entity_context: Get detailed context for an entity
-    - trace_calls: Trace call graph (callers/callees) with depth
-    - retrieve_context_for_query: Unified query-to-context retrieval bundle
-    - assess_codebase_quality: Return the persisted pre-flight quality report
+    - knowcode_retrieve:  query | search | context | trace | semantic_search
+    - knowcode_lifecycle: build | index | export
+    - knowcode_inspect:   job_status | doctor | freshness | quality | stats |
+                          preflight | history | telemetry
 
-    Example usage with Claude Desktop or other MCP clients:
+    The server starts whether or not a knowledge store exists: an agent in a
+    repository KnowCode has never seen calls knowcode_lifecycle
+    action='build' to create one, so a missing store is reported per-action
+    rather than preventing startup.
+
+    Example client configuration:
 
     \b
-        # In your MCP client config, add:
         {
             "knowcode": {
                 "command": "knowcode",
-                "args": ["mcp-server", "--store", "/path/to/project"]
+                "args": ["mcp-server"]
             }
         }
     """
-    store_path = Path(store)
-    store_file = (
-        store_path / KnowledgeStore.DEFAULT_FILENAME
-        if store_path.is_dir()
-        else store_path
-    )
-    if not store_file.exists():
-        click.echo(
-            "Error: Knowledge store not found. Run `knowcode build <dir>` first.",
-            err=True,
-        )
+    from knowcode.mcp.roots import resolve_server_root, store_is_ready
+
+    try:
+        store_path = resolve_server_root(explicit=store)
+    except FileNotFoundError as e:
+        click.echo(f"Error: {e}", err=True)
         sys.exit(1)
+
+    # Shared with the server's per-action gate: a current build publishes the
+    # graph inside a generation, so checking only the legacy JSON would report
+    # "not built" for a repository that is in fact fully searchable.
+    store_ready = store_is_ready(store_path)
 
     try:
         from knowcode.mcp.server import run_server
 
         click.echo("🔌 Starting MCP server...", err=True)
-        click.echo(f"   Store: {store_path}", err=True)
+        click.echo(f"   Root: {store_path}", err=True)
         click.echo("   Transport: STDIO", err=True)
         click.echo(
-            "   Tools: search_codebase, get_entity_context, trace_calls, "
-            "retrieve_context_for_query, assess_codebase_quality",
+            "   Tools: knowcode_retrieve, knowcode_lifecycle, knowcode_inspect"
+            + (" (+5 legacy)" if legacy_tools else ""),
             err=True,
         )
+        if store_ready:
+            click.echo("   Store: ready", err=True)
+        else:
+            # Not an error: this is the bootstrap path the build action exists
+            # to serve. Retrieval actions report it with an actionable hint.
+            click.echo(
+                "   Store: not built yet — call knowcode_lifecycle "
+                "action='build' to create it",
+                err=True,
+            )
 
         # Run the server (blocking)
-        run_server(store_path, config_path=config)
+        run_server(store_path, config_path=config, include_legacy_tools=legacy_tools)
 
     except ImportError as e:
         click.echo(

@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "knowcode": {
+      "command": "uv",
+      "args": [
+        "run",
+        "knowcode",
+        "mcp-server"
+      ]
+    }
+  }
+}

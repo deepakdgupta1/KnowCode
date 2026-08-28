@@ -18,6 +18,7 @@ from knowcode.data_models import EmbeddingConfig
 from knowcode.indexing import generations
 from knowcode.indexing.generations import ResolvedGeneration
 from knowcode.indexing.indexer import Indexer
+from knowcode.mcp.tools import PRIMARY_TOOL_NAME
 from knowcode.readiness import (
     IDEAL_SETUP_FEATURE_KEYS,
     IDEAL_SETUP_TARGET,
@@ -175,7 +176,12 @@ def run_doctor(
     if include_mcp:
         checks.append(
             _run_mcp_check(
-                store_path=context.store_file,
+                # The repository root, not the resolved store file. The MCP
+                # server operates on a root, and ``_resolve_store_file`` returns
+                # a *nonexistent* ``knowcode_knowledge.json`` whenever the graph
+                # lives inside a generation instead of the legacy flat layout —
+                # which is every repository built by a current KnowCode.
+                store_path=context.store_root,
                 config_path=context.config_path,
                 timeout_seconds=mcp_timeout_seconds,
             )
@@ -903,18 +909,19 @@ async def _check_mcp_handshake(
                     timeout=timeout_seconds,
                 )
                 tool_names = {tool.name for tool in tools_result.tools}
-                if "retrieve_context_for_query" not in tool_names:
+                if PRIMARY_TOOL_NAME not in tool_names:
                     return DoctorCheck(
                         name="MCP handshake",
                         status="fail",
-                        message="MCP server did not expose retrieve_context_for_query.",
-                        hint="Check src/knowcode/mcp/server.py tool registration.",
+                        message=(f"MCP server did not expose {PRIMARY_TOOL_NAME}."),
+                        hint="Check src/knowcode/mcp/tools.py tool registration.",
                     )
 
                 call_result = await asyncio.wait_for(
                     session.call_tool(
-                        "retrieve_context_for_query",
+                        PRIMARY_TOOL_NAME,
                         {
+                            "action": "query",
                             "query": "doctor test",
                             "max_tokens": 1500,
                             "limit_entities": 1,
@@ -944,7 +951,9 @@ async def _check_mcp_handshake(
 
         errlog.seek(0)
         stderr = errlog.read().strip()
-    message = f"Listed {len(tool_names)} tools and called retrieve_context_for_query successfully."
+    message = (
+        f"Listed {len(tool_names)} tools and called {PRIMARY_TOOL_NAME} successfully."
+    )
     if stderr:
         message = f"{message} Server stderr: {stderr}"
     return DoctorCheck(name="MCP handshake", status="pass", message=message)

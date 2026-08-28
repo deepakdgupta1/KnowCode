@@ -90,9 +90,33 @@ def test_assess_tool_no_report(tmp_path: Path) -> None:
     assert "hint" in result
 
 
-def test_assess_tool_in_tool_definitions() -> None:
-    """The assess_codebase_quality tool is listed in TOOL_DEFINITIONS."""
+def test_quality_capability_is_reachable_on_the_default_surface() -> None:
+    """The capability moved from a flat tool to an inspect action.
+
+    The default surface no longer advertises ``assess_codebase_quality``: it
+    is now ``knowcode_inspect`` with ``action='quality'``. Advertising a
+    per-capability tool costs tokens on every turn, which is what the
+    consolidated surface exists to avoid.
+    """
     from knowcode.mcp.server import TOOL_DEFINITIONS
 
     names = [t["name"] for t in TOOL_DEFINITIONS]
-    assert "assess_codebase_quality" in names
+    assert "knowcode_inspect" in names
+    assert "assess_codebase_quality" not in names
+
+    inspect_tool = next(t for t in TOOL_DEFINITIONS if t["name"] == "knowcode_inspect")
+    actions = inspect_tool["inputSchema"]["properties"]["action"]["enum"]
+    assert "quality" in actions
+
+
+def test_legacy_assess_tool_is_available_behind_the_opt_in() -> None:
+    """The deprecated name stays reachable for one release."""
+    from knowcode.mcp.tools import tool_definitions
+
+    default_names = [t["name"] for t in tool_definitions(include_legacy=False)]
+    legacy_names = [t["name"] for t in tool_definitions(include_legacy=True)]
+
+    assert "assess_codebase_quality" not in default_names
+    assert "assess_codebase_quality" in legacy_names
+    # The consolidated surface is still advertised first when both are on.
+    assert legacy_names[: len(default_names)] == default_names
