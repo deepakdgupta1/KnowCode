@@ -854,3 +854,44 @@ class SqliteChunkRepository(ChunkRepository):
             cursor = conn.execute(f"SELECT {_SELECT_COLUMNS} FROM chunks")
             rows = cursor.fetchall()
         return [self._row_to_chunk(row) for row in rows]
+
+    def iter_embeddings(
+        self, *, batch_size: int = 512
+    ) -> Iterator[tuple[str, list[float]]]:
+        """Stream every durable embedding as ``(chunk_id, vector)`` pairs.
+
+        This is the source a derived vector plane is rebuilt from, so it reads
+        only the two columns a rebuild needs and paginates by ``rowid`` under a
+        fresh short read lease per batch. Holding one lease across the whole
+        stream would block :meth:`close` for as long as a consumer kept the
+        iterator alive.
+
+        Rows with a NULL ``embedding`` carry no durable vector and are skipped;
+        callers that need a count of what was placed should count what they
+        consume.
+
+        Args:
+            batch_size: Rows fetched per lease. Bounds peak memory.
+
+        Yields:
+            ``(chunk_id, embedding)`` in ascending ``rowid`` order.
+        """
+        if batch_size < 1:
+            raise ValueError(f"batch_size must be >= 1, got {batch_size}")
+
+        after = -1
+        while True:
+            with self._read_lease() as conn:
+                rows = conn.execute(
+                    "SELECT rowid, chunk_id, embedding, embedding_dim FROM chunks "
+                    "WHERE embedding IS NOT NULL AND rowid > ? "
+                    "ORDER BY rowid LIMIT ?",
+                    (after, batch_size),
+                ).fetchall()
+            if not rows:
+                return
+            for rowid, chunk_id, blob, dimension in rows:
+                after = rowid
+                embedding = self._decode_embedding(blob, dimension)
+                if embedding is not None:
+                    yield chunk_id, embedding

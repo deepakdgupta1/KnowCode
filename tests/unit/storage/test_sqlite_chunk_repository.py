@@ -5,6 +5,7 @@ They define the contract for the SQLite-backed chunk repository with FTS5 BM25.
 """
 
 import sqlite3
+import tracemalloc
 import threading
 from array import array
 from pathlib import Path
@@ -1106,3 +1107,86 @@ class TestSharedInstanceConcurrency:
         with pytest.raises(RepositoryClosedError):
             repo.count()
         repo.close()  # idempotent
+
+
+# ---------------------------------------------------------------------------
+# Streaming durable embeddings (vector-plane rebuild source)
+# ---------------------------------------------------------------------------
+
+
+class TestIterEmbeddings:
+    """``iter_embeddings`` is the source a rebuilt vector plane reads from.
+
+    The vector index is derived: it is reconstructed from these rows, so the
+    stream must reproduce every durable vector exactly and must not depend on
+    holding the whole corpus in memory.
+    """
+
+    def test_streams_every_durable_embedding_exactly(
+        self, repo: SqliteChunkRepository
+    ) -> None:
+        expected = {f"c{i}": [float(i) + j / 8.0 for j in range(8)] for i in range(5)}
+        repo.add_batch(
+            [
+                CodeChunk(id=cid, entity_id="e1", content=cid, embedding=vec)
+                for cid, vec in expected.items()
+            ]
+        )
+
+        streamed = dict(repo.iter_embeddings())
+
+        assert streamed == pytest.approx(expected)
+
+    def test_skips_rows_without_a_durable_vector(
+        self, repo: SqliteChunkRepository
+    ) -> None:
+        repo.add(CodeChunk(id="has", entity_id="e1", content="x", embedding=[1.0, 0.0]))
+        repo.add(CodeChunk(id="none", entity_id="e1", content="y", embedding=None))
+
+        assert [cid for cid, _ in repo.iter_embeddings()] == ["has"]
+
+    def test_batch_size_does_not_change_the_stream(
+        self, repo: SqliteChunkRepository
+    ) -> None:
+        repo.add_batch(
+            [
+                CodeChunk(id=f"c{i}", entity_id="e1", content="x", embedding=[float(i)])
+                for i in range(7)
+            ]
+        )
+
+        assert list(repo.iter_embeddings(batch_size=1)) == list(
+            repo.iter_embeddings(batch_size=1000)
+        )
+
+    def test_peak_memory_stays_bounded_by_batch_size(
+        self, repo: SqliteChunkRepository
+    ) -> None:
+        """A full-corpus rebuild must not materialize every vector at once.
+
+        Fails if the implementation uses ``fetchall`` or builds a list: peak
+        allocation would then scale with the corpus, not with the batch.
+        """
+        rows, dim = 200, 256
+        repo.add_batch(
+            [
+                CodeChunk(
+                    id=f"c{i}",
+                    entity_id="e1",
+                    content="x",
+                    embedding=[float(i % 7)] * dim,
+                )
+                for i in range(rows)
+            ]
+        )
+        materialized = rows * dim * 32  # ~32 bytes per float in a Python list
+
+        tracemalloc.start()
+        try:
+            for _ in repo.iter_embeddings(batch_size=10):
+                pass
+            _, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+
+        assert peak < materialized // 8
