@@ -101,7 +101,10 @@ class Indexer:
     # a different corpus under the same chunk ids and must be rebuilt, not
     # incrementally updated. This is the version that gates it; the chunk
     # repository's own constant is never compared against a stored value.
-    SCHEMA_VERSION = 3
+    # 4: Phase C. The chunk digest moved out of metadata_json into a
+    # first-class content_hash column, so a generation built before this has
+    # no column for the reuse lookup to read and must be rebuilt.
+    SCHEMA_VERSION = 4
     LEGACY_MANIFEST_VERSION = 1
     SUPPORTED_SCHEMA_VERSIONS = {SCHEMA_VERSION}
 

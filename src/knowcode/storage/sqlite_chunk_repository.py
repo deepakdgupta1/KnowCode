@@ -41,7 +41,11 @@ from typing import Any, Iterator, Optional
 from knowcode.data_models import CodeChunk
 from knowcode.errors import RepositoryClosedError
 from knowcode.storage.chunk_repository import ChunkFileReplacement, ChunkRepository
-from knowcode.utils.entity_identity import normalize_file_identity
+from knowcode.utils.entity_identity import (
+    normalize_file_identity,
+    pack_content_hash,
+    unpack_content_hash,
+)
 from knowcode.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -49,13 +53,14 @@ logger = get_logger(__name__)
 # Columns selected for every CodeChunk hydration, in the order ``_row_to_chunk``
 # unpacks them. Keep the INSERT column list in the same relative order.
 _SELECT_COLUMNS = (
-    "chunk_id, entity_id, content, tokens_text, metadata_json, embedding, embedding_dim"
+    "chunk_id, entity_id, content, tokens_text, metadata_json, embedding, "
+    "embedding_dim, content_hash"
 )
 _INSERT_SQL = (
     "INSERT OR REPLACE INTO chunks "
     "(chunk_id, entity_id, content, tokens_text, metadata_json, file_path, "
-    "embedding, embedding_dim) "
-    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    "embedding, embedding_dim, content_hash) "
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
 )
 
 
@@ -72,7 +77,7 @@ class SqliteChunkRepository(ChunkRepository):
     — without exposing a writer's open transaction to readers.
     """
 
-    SCHEMA_VERSION = 2
+    SCHEMA_VERSION = 3
     # Baseline chunk schema had no durable embedding column; it cannot be
     # losslessly migrated without an embedding provider, so legacy v1 stores
     # fail closed (ADR 3 compatibility).
@@ -310,7 +315,8 @@ class SqliteChunkRepository(ChunkRepository):
                 metadata_json TEXT NOT NULL DEFAULT '{}',
                 file_path  TEXT    NOT NULL DEFAULT '',
                 embedding  BLOB,
-                embedding_dim INTEGER
+                embedding_dim INTEGER,
+                content_hash BLOB
             )
         """)
         self._writer_conn.execute(
@@ -318,6 +324,9 @@ class SqliteChunkRepository(ChunkRepository):
         )
         self._writer_conn.execute(
             "CREATE INDEX idx_chunks_file_path ON chunks (file_path)"
+        )
+        self._writer_conn.execute(
+            "CREATE INDEX idx_chunks_content_hash ON chunks (content_hash)"
         )
 
         # FTS5 external-content table backed by chunks.tokens_text.
@@ -372,6 +381,13 @@ class SqliteChunkRepository(ChunkRepository):
                 f"{self._db_path} has no durable embedding column. Rebuild the "
                 "semantic index with `knowcode build`; embeddings cannot be "
                 "migrated without an embedding provider."
+            )
+        if "content_hash" not in columns:
+            raise ValueError(
+                f"SQLite chunk schema at {self._db_path} predates the "
+                "first-class content_hash column. Rebuild the semantic index "
+                "with `knowcode build`; the digest lives only in the retired "
+                "metadata_json key and this build no longer reads it."
             )
 
     def _ensure_schema_meta(self) -> None:
@@ -475,7 +491,10 @@ class SqliteChunkRepository(ChunkRepository):
         the canonical identity so a file's rows share one lookup key.
         """
         tokens_text = " ".join(chunk.tokens) if chunk.tokens else ""
-        metadata_json = json.dumps(chunk.metadata) if chunk.metadata else "{}"
+        stored_metadata = {
+            key: value for key, value in chunk.metadata.items() if key != "content_hash"
+        }
+        metadata_json = json.dumps(stored_metadata) if stored_metadata else "{}"
         stored_path = (
             file_path
             if file_path is not None
@@ -491,6 +510,7 @@ class SqliteChunkRepository(ChunkRepository):
             stored_path,
             embedding_blob,
             embedding_dim,
+            pack_content_hash(chunk.metadata.get("content_hash")),
         )
 
     def _row_to_chunk(self, row: tuple[Any, ...]) -> CodeChunk:
@@ -498,7 +518,7 @@ class SqliteChunkRepository(ChunkRepository):
 
         Expected column order:
             chunk_id, entity_id, content, tokens_text, metadata_json,
-            embedding, embedding_dim
+            embedding, embedding_dim, content_hash
         """
         (
             chunk_id,
@@ -508,6 +528,7 @@ class SqliteChunkRepository(ChunkRepository):
             metadata_json,
             embedding_blob,
             embedding_dim,
+            content_hash,
         ) = row
         tokens = tokens_text.split() if tokens_text else []
         try:
@@ -516,6 +537,8 @@ class SqliteChunkRepository(ChunkRepository):
             metadata = {}
         if not isinstance(metadata, dict):
             metadata = {}
+        if content_hash is not None:
+            metadata["content_hash"] = unpack_content_hash(content_hash)
         embedding = self._decode_embedding(embedding_blob, embedding_dim)
         return CodeChunk(
             id=chunk_id,
@@ -717,10 +740,8 @@ class SqliteChunkRepository(ChunkRepository):
         """Find a chunk_id given a content_hash (from metadata)."""
         with self._read_lease() as conn:
             cursor = conn.execute(
-                """SELECT chunk_id FROM chunks
-                   WHERE json_extract(metadata_json, '$.content_hash') = ?
-                   LIMIT 1""",
-                (content_hash,),
+                "SELECT chunk_id FROM chunks WHERE content_hash = ? LIMIT 1",
+                (pack_content_hash(content_hash),),
             )
             row = cursor.fetchone()
         return row[0] if row else None

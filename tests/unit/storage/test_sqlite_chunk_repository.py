@@ -773,6 +773,28 @@ class TestSchemaVersioning:
         message = str(excinfo.value).lower()
         assert "rebuild" in message or "migration" in message
 
+    def test_v2_schema_without_content_hash_fails_closed(self, tmp_path: Path) -> None:
+        """A chunks.db predating the digest column must not be silently used."""
+        legacy_path = tmp_path / "v2.db"
+        conn = sqlite3.connect(str(legacy_path))
+        conn.execute(
+            "CREATE TABLE chunks (chunk_id TEXT UNIQUE, entity_id TEXT, "
+            "content TEXT, tokens_text TEXT, metadata_json TEXT, file_path TEXT, "
+            "embedding BLOB, embedding_dim INTEGER)"
+        )
+        conn.execute(
+            "INSERT INTO chunks (chunk_id, entity_id, content, tokens_text, "
+            "metadata_json, file_path) VALUES "
+            "('v2a', '/x.py::X', 'c', 't', '{\"content_hash\": \"ab\"}', '/x.py')"
+        )
+        conn.commit()
+        conn.close()
+
+        with pytest.raises(ValueError) as excinfo:
+            SqliteChunkRepository(legacy_path)
+
+        assert "rebuild" in str(excinfo.value).lower()
+
     def test_load_initializes_schema_for_fresh_target(self, tmp_path: Path) -> None:
         """load() into a directory without chunks.db must initialize the schema."""
         repo = SqliteChunkRepository(tmp_path / "start.db")
@@ -1344,3 +1366,87 @@ class TestCompaction:
 
         with pytest.raises(RepositoryClosedError):
             repo.compact()
+
+
+class TestContentHashColumn:
+    """The chunk digest is stored once, in its own column, as raw bytes."""
+
+    DIGEST = "b" * 31 + "e"
+
+    def _hashed(self, chunk_id: str = "c1") -> CodeChunk:
+        return CodeChunk(
+            id=chunk_id,
+            entity_id="e1",
+            content="body",
+            tokens=["body"],
+            metadata={"content_hash": self.DIGEST, "kind": "function"},
+        )
+
+    def _column(self, db_path: Path, name: str) -> object:
+        con = sqlite3.connect(db_path)
+        try:
+            row = con.execute(
+                f"SELECT {name} FROM chunks WHERE chunk_id = ?", ("c1",)
+            ).fetchone()
+        finally:
+            con.close()
+        return row[0]
+
+    def test_digest_round_trips_as_lowercase_hex(
+        self, repo: SqliteChunkRepository
+    ) -> None:
+        repo.add(self._hashed())
+
+        retrieved = repo.get("c1")
+
+        assert retrieved is not None
+        assert retrieved.metadata["content_hash"] == self.DIGEST
+        assert retrieved.metadata["kind"] == "function"
+
+    def test_lookup_by_hash_finds_the_chunk(self, repo: SqliteChunkRepository) -> None:
+        repo.add(self._hashed())
+
+        assert repo.get_chunk_id_by_hash(self.DIGEST) == "c1"
+
+    def test_lookup_by_hash_misses_an_absent_digest(
+        self, repo: SqliteChunkRepository
+    ) -> None:
+        repo.add(self._hashed())
+
+        assert repo.get_chunk_id_by_hash("c" * 32) is None
+
+    def test_a_chunk_without_a_digest_round_trips(
+        self, repo: SqliteChunkRepository
+    ) -> None:
+        repo.add(CodeChunk(id="c9", entity_id="e1", content="x", tokens=["x"]))
+
+        retrieved = repo.get("c9")
+
+        assert retrieved is not None
+        assert "content_hash" not in retrieved.metadata
+
+    def test_md5_digest_is_stored_as_sixteen_bytes(
+        self, repo: SqliteChunkRepository, db_path: Path
+    ) -> None:
+        repo.add(self._hashed())
+
+        stored = self._column(db_path, "content_hash")
+        assert isinstance(stored, bytes)
+        assert len(stored) == 16
+
+    def test_digest_is_not_duplicated_into_metadata_json(
+        self, repo: SqliteChunkRepository, db_path: Path
+    ) -> None:
+        repo.add(self._hashed())
+
+        assert "content_hash" not in str(self._column(db_path, "metadata_json"))
+
+    def test_digest_survives_replace_file(
+        self, repo: SqliteChunkRepository, tmp_path: Path
+    ) -> None:
+        source = tmp_path / "mod.py"
+        repo.replace_file(source, [self._hashed()])
+
+        repo.replace_file(source, [self._hashed("c2")])
+
+        assert repo.get_chunk_id_by_hash(self.DIGEST) == "c2"
