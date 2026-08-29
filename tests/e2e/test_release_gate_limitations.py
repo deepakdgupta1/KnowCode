@@ -113,14 +113,18 @@ def test_per_file_watch_events_are_queued(tmp_path: Path) -> None:
 
 
 def test_flush_never_writes_an_index_nobody_built(tmp_path: Path) -> None:
-    """The caller guard keeps the empty-LanceDB backend residual unreachable.
+    """The caller guard keeps flush() from writing an index nobody built.
 
-    ``LanceDBVectorStore.save()`` on a brand-new empty store still writes a
-    metadata envelope that fails closed on the next load (the residual backend
-    defect). ``KnowCodeService._has_index_state`` is what keeps ``flush()`` from
-    ever calling it: an empty store with no prior artifact persists nothing.
+    ``Indexer.save()`` on an empty store writes a manifest describing an index
+    with nothing in it, which fails closed on the next load.
+    ``KnowCodeService._has_index_state`` is what keeps ``flush()`` from ever
+    reaching it: an empty store with no prior artifact persists nothing.
+
+    The store takes no directory since ADR 9. It is never pointed at a
+    generation, so the artifact directory is the guard's argument, not the
+    store's.
     """
-    store = create_vector_store("lancedb", dimension=8, index_dir=tmp_path)
+    store = create_vector_store("lancedb", dimension=8)
     try:
         assert store.count() == 0
         indexer = types.SimpleNamespace(vector_store=store)
