@@ -169,3 +169,95 @@ def test_module_chunks_hang_on_the_module_entity(tmp_path: Path) -> None:
     ]
     assert len(module_chunks) == 2
     assert {chunk.entity_id for chunk in module_chunks} == {module.id}
+
+
+def test_a_class_chunk_does_not_contain_its_method_bodies(tmp_path: Path) -> None:
+    """B1. A class entity's source_code contains its methods' source, and each
+    method is already its own entity with its own chunk, so every member body
+    was stored twice."""
+    source = (
+        "class Worker:\n"
+        '    """Runs jobs."""\n\n'
+        "    limit = 10\n\n"
+        "    def start(self):\n"
+        "        return MARKER_START\n\n"
+        "    def stop(self):\n"
+        "        return MARKER_STOP\n"
+    )
+    path = tmp_path / "worker.py"
+    path.write_text(source, encoding="utf-8")
+    result = PythonParser().parse_file(path)
+    cls = next(e for e in result.entities if e.kind == EntityKind.CLASS)
+
+    chunks = Chunker().process_parse_result(result)
+
+    class_chunks = [c for c in chunks if c.entity_id == cls.id]
+    assert class_chunks
+    body = "".join(c.content for c in class_chunks)
+    assert "MARKER_START" not in body
+    assert "MARKER_STOP" not in body
+    # The shell is what a reader needs to recognise the class.
+    assert "class Worker" in body
+    assert "limit = 10" in body
+
+
+def test_each_method_still_has_its_own_chunk(tmp_path: Path) -> None:
+    source = (
+        "class Worker:\n"
+        "    def start(self):\n"
+        "        return MARKER_START\n\n"
+        "    def stop(self):\n"
+        "        return MARKER_STOP\n"
+    )
+    path = tmp_path / "worker.py"
+    path.write_text(source, encoding="utf-8")
+    result = PythonParser().parse_file(path)
+
+    chunks = Chunker().process_parse_result(result)
+
+    text = "".join(c.content for c in chunks)
+    assert "MARKER_START" in text
+    assert "MARKER_STOP" in text
+
+
+def test_a_class_with_no_extracted_members_keeps_its_whole_source(
+    tmp_path: Path,
+) -> None:
+    """Trimming at the first member is only safe when members became entities."""
+    source = 'class Config:\n    """Just data."""\n\n    RETRIES = MARKER_VALUE\n'
+    path = tmp_path / "config.py"
+    path.write_text(source, encoding="utf-8")
+    result = PythonParser().parse_file(path)
+    cls = next(e for e in result.entities if e.kind == EntityKind.CLASS)
+    members = [
+        e
+        for e in result.entities
+        if e is not cls
+        and cls.location.line_start < e.location.line_start <= cls.location.line_end
+    ]
+
+    chunks = Chunker().process_parse_result(result)
+
+    body = "".join(c.content for c in chunks if c.entity_id == cls.id)
+    if not members:
+        assert "MARKER_VALUE" in body
+    else:
+        assert "MARKER_VALUE" in "".join(c.content for c in chunks)
+
+
+def test_no_chunk_is_emitted_for_an_entity_with_nothing_but_a_name(
+    tmp_path: Path,
+) -> None:
+    """B3. A YAML key became a 9-byte chunk holding its own label, and paid a
+    full-width vector for it: 463x amplification for no retrievable text."""
+    path = tmp_path / "service.yaml"
+    path.write_text("service:\n  name: worker\n  port: 8080\n", encoding="utf-8")
+    result = YamlParser().parse_file(path)
+    names = {entity.id: entity.name for entity in result.entities}
+
+    chunks = Chunker().process_parse_result(result)
+
+    label_only = [c for c in chunks if c.content.strip() == names.get(c.entity_id)]
+    assert label_only == []
+    # The file's text is still reachable through the chunk that carries it.
+    assert "port: 8080" in "".join(c.content for c in chunks)

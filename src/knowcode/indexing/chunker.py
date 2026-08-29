@@ -96,10 +96,11 @@ class Chunker:
             )
 
         # 2. Entity Chunks (Classes, Functions, Methods)
+        boundaries = self._member_boundaries(result.entities)
         for entity in result.entities:
             if entity.kind == EntityKind.MODULE:
                 continue
-            self._chunk_entity(entity, last_modified)
+            self._chunk_entity(entity, last_modified, boundaries.get(entity.id))
 
         return self.chunks
 
@@ -291,14 +292,55 @@ class Chunker:
                 lines.append(line)
         return "\n".join(lines).strip()
 
+    @staticmethod
+    def _member_boundaries(entities: list[Entity]) -> dict[str, int]:
+        """First line each class's own text runs out at, keyed by class id.
+
+        A class's ``source_code`` contains its members' source, and each member
+        is already an entity with its own chunk, so storing the whole thing
+        stored every member body twice (B1). The boundary comes from the entity
+        model rather than from a regex over the stored text: a member is an
+        entity whose first line falls inside the class span.
+        """
+        boundaries: dict[str, int] = {}
+        for parent in entities:
+            if parent.kind != EntityKind.CLASS or not parent.source_code:
+                continue
+            starts = [
+                entity.location.line_start
+                for entity in entities
+                if entity is not parent
+                and entity.location.file_path == parent.location.file_path
+                and parent.location.line_start
+                < entity.location.line_start
+                <= parent.location.line_end
+            ]
+            if starts:
+                boundaries[parent.id] = min(starts)
+        return boundaries
+
+    @staticmethod
+    def _own_source(entity: Entity, member_line: Optional[int]) -> str:
+        """The entity's source down to the first member it contains."""
+        source = entity.source_code or ""
+        if member_line is None:
+            return source
+        kept = source.splitlines()[: member_line - entity.location.line_start]
+        return "\n".join(kept).rstrip()
+
     def _chunk_entity(
-        self, entity: Entity, last_modified: Optional[str] = None
+        self,
+        entity: Entity,
+        last_modified: Optional[str] = None,
+        member_line: Optional[int] = None,
     ) -> None:
         """Create chunks for an entity and append them to the in-memory list.
 
         Args:
             entity: Entity to chunk (class, function, method, etc.).
             last_modified: Optional timestamp used for ranking signals.
+            member_line: First line belonging to a member this entity contains.
+                The entity's own text stops there; the member has its own chunk.
         """
         content = ""
 
@@ -308,10 +350,13 @@ class Chunker:
         if self.config.include_docstrings and entity.docstring:
             content += f'"""{entity.docstring}"""\n'
 
-        if entity.source_code:
-            content += entity.source_code
-        else:
-            content += entity.name
+        content += self._own_source(entity, member_line)
+
+        if not content.strip():
+            # Nothing but a label. A YAML key or a bare heading used to fall
+            # back to its own name here and pay a full-width vector for a
+            # handful of bytes (B3). It is a graph node, not a retrieval unit.
+            return
 
         # Sliding window chunking
         has_docstring = "true" if entity.docstring else "false"
