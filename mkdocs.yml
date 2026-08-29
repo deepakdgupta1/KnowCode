@@ -86,4 +86,4 @@ nav:
       - Prose Evaluation: research/knowcode_evaluation_report.md
       - Architecture Synthesis (50M+ LOC): research/knowcode-architecture-synthesis.md
       - Document Collateral Retrieval: research/document_collateral_retrieval_2026.md
-      - Storage Footprint (measured): research/storage_optimization_2026_v4.md
+      - Storage Footprint & Optimization Plan: research/storage_optimization_2026_v4.md
