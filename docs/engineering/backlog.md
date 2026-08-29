@@ -111,44 +111,6 @@ one orphans chunks inside files that do index.
 **Not deferred on purpose.** It was already written down once, in a research
 report nothing links to, and lost. That is the reason this backlog exists.
 
-### BL-2 - A full rebuild can silently drop a watch commit
-
-**Severity:** High. **Found:** 2026-08-29, diagnosing a test failure during
-Phase D1.
-
-`KnowCodeService.build_generation` publishes without `expect_current`, so it
-takes the pointer unconditionally. The watch writer's publication path does
-compare-and-swap. The losing interleaving: a full rebuild scans the tree before
-file `X` exists; the watch writer commits and publishes a generation containing
-`X`; the rebuild finishes and moves the pointer to its own generation, built
-from the earlier scan, which has no `X`. The watch batch published cleanly, so
-`_operations` is empty, `has_pending` is false, and nothing re-derives it.
-
-`tests/unit/service/test_watch_publication.py::test_concurrent_commits_and_publications_converge`
-fails 13 runs in 40 on `main`. Phase D1 makes rebuilds faster, which widens the
-window to 22 in 40. The race is independent of the storage work.
-
-Reproduce:
-
-```bash
-for i in $(seq 1 40); do .venv/bin/python -m pytest "tests/unit/service/test_watch_publication.py::test_concurrent_commits_and_publications_converge" -q -p no:randomly 2>&1 | tail -1; done
-```
-
-The test asserts an invariant the code does not provide: "sustained contention
-may refuse a publication, but never lose one." Either the code gains the
-invariant or the test stops claiming it. Do not weaken the test to make it pass.
-
-**Deferred on purpose.** Folding a publication-concurrency fix into a storage
-change would have made both harder to review, and the defect predates that
-change.
-
-**Closed 2026-08-29.** `build_generation` now compare-and-swaps on
-`expect_current` and re-derives on the generation published in between, bounded
-by `_REBUILD_REBASE_ATTEMPTS`, with the regression test
-`test_a_rebuild_never_reverts_a_concurrent_watch_publication`. 0 failures in 40
-runs. Kept here with its analysis because the reproduction and the failure rates
-are the evidence that it is genuinely fixed.
-
 ### BL-7 - Timing-sensitive tests flake under concurrent load
 
 **Severity:** Low, but it costs trust in the suite. **Found:** 2026-08-29, while
@@ -197,7 +159,7 @@ fp32 scan below the threshold, where an index buys nothing at all.
 **Deferred on purpose.** Neither is needed for the 32.31 MB Phase D1 recovered,
 and building a cache tier before any repository needs one is speculative.
 
-### BL-7 - A generation manifest cannot witness row loss in either database
+### BL-8 - A generation manifest cannot witness row loss in either database
 
 **Severity:** Medium. **Found:** 2026-08-29, mutation-probing Phase A2.
 

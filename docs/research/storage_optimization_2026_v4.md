@@ -1231,6 +1231,87 @@ record the result here.
 
 ## 17. Execution Log
 
+### Phase A2 — shipped 2026-08-29
+
+Both SQLite artifacts are now vacuumed once, on the staged copy, after every
+write and before the generation is digested. `chunks.db` and `knowledge.db`
+each gained a `compact()` method, and `ChunkRepository` declares it with a
+documented no-op default so the publication path can call it through the
+abstraction. Three call sites use it. Two are in `KnowCodeService`, one for the
+staged chunk store and one for the staged knowledge store; the third is in
+`StagedGenerationWriter.publish`, which is the watch path.
+
+**Measured, 3.79 MB.** The plan estimated 2.03 MB. BL-4 predicted the estimate
+was low and it was, by 87%.
+
+Both figures below are one corpus of 6,962 chunks and 5,129 entities, built
+twice in the same directory by the same code. The only variable is whether
+`compact()` does anything.
+
+| Artifact | Uncompacted | Compacted | Saved |
+|---|---:|---:|---:|
+| `chunks.db` | 49.17 MB | 48.20 MB | 0.96 MB |
+| `knowledge.db` | 31.50 MB | 28.68 MB | 2.82 MB |
+| **Total** | **80.67 MB** | **76.88 MB** | **3.79 MB** |
+
+**The bytes did not come from the freelist.** `chunks.db` held 16 free pages
+and `knowledge.db` held none. Almost all of the saving is B-tree repacking,
+which is why sizing this work from a free-page count alone was always going to
+read low. `knowledge.db` gives up three times what `chunks.db` does because
+bulk-inserting entities and relationships leaves its index pages loosely
+packed, and that slack was then copied into every retained generation.
+
+**Correction to §11.** The global ordering constraint is wrong about these two
+artifacts. It says the manifest digests every artifact with sha256 and that
+publication validates those digests, so a byte-level change must precede the
+manifest. In fact `build_manifest` puts only `index_manifest.json` into
+`artifact_names`. `chunks.db` and `knowledge.db` carry logical id digests and
+counts instead, and every one of those is read out of the file *after* it is
+compacted. Two consequences follow. A `VACUUM` running after the manifest is
+built is not caught by anything. A compaction that lost rows would publish a
+manifest that agrees with the damage, because `read_chunk_ids`,
+`count_durable_embeddings`, and `_assert_chunk_vector_parity` all read the
+compacted file. The rule stands for `index_manifest.json`, and it would have
+stood for the LanceDB artifact A1 was going to compact. It never applied to the
+databases.
+
+Both claims were established by mutation probe rather than by reading. A
+`VACUUM` moved to after the manifest was built changed nothing. A `compact()`
+that deleted every seventh chunk row published and validated cleanly.
+
+**What guards it instead.** At the store level, the compaction tests snapshot
+every column of every row through a second connection and compare raw bytes,
+so a re-encoded or dropped embedding fails. At the publication level,
+`test_compaction_does_not_lose_rows_between_indexing_and_publication` compares
+the published chunk count against the count the indexer reported before the
+file was touched, which is the only witness in the build that does not come
+from the compacted artifact. Both go red against the every-seventh-row
+mutation. The first version of that test asserted the manifest digests matched
+the artifacts on disk, exactly as §11 prescribed, and could not fail.
+
+**No runtime guard was added.** `VACUUM` is one statement with SQLite's own
+atomicity behind it, and a disk or I/O failure mid-rewrite rolls back and
+raises. The realistic regression is somebody editing `compact()`, and the tests
+cover that.
+
+**Fixed in passing.** `tests/e2e/test_release_gate_limitations.py` still called
+`create_vector_store(..., index_dir=...)`, an argument D1 removed. The e2e
+suite was not part of D1's verification run, so the branch had been red since
+then.
+
+**Verification.** 1,734 unit, integration, and e2e tests pass. `ruff check`,
+`ruff format --check`, and `mypy` are clean on every changed module.
+
+| After phase | `chunks.db` | `knowledge.db` | vectors | Total |
+|---|---:|---:|---:|---:|
+| uncompacted (2026-08-29 tree) | 49.17 | 31.50 | 0 | **80.67 MB** |
+| A2 — both databases vacuumed | 48.20 | 28.68 | 0 | **76.88 MB** |
+
+**Revised order for the rest.** Unchanged by this phase. B still leads and
+still owns the BL-1 id collision alongside the chunking, C follows, then D2 and
+D3, then E behind the evaluation harness. A1 and A2 are both done with, A1
+retired and A2 shipped.
+
 ### Phase D1 — shipped 2026-08-29
 
 **Taken first, out of the A-B-C-D order.** D1 is the largest single item in the

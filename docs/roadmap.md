@@ -249,11 +249,14 @@ its §17 is the running execution log.
 depends on P1, because it narrows the semantic candidate set and may only ship
 behind a measured recall gate.
 
-**Status:** Phase D1 shipped 2026-08-29. The ANN index stopped being a published
-artifact and became a plane rebuilt from the durable embeddings in `chunks.db`.
-One generation fell from 113.18 MB to 78.87 MB, of which 32.31 MB is the change
-itself. Retrieval is unchanged, verified on 6,874 vectors as identical results,
-identical top-25 vector ids, and a maximum score delta of zero.
+**Status:** Phases D1 and A2 shipped 2026-08-29. D1 stopped publishing the ANN
+index and made it a plane rebuilt from the durable embeddings in `chunks.db`,
+worth 32.31 MB, with retrieval verified unchanged on 6,874 vectors as identical
+results, identical top-25 vector ids, and a maximum score delta of zero. A2
+vacuums both databases on the staged copy before the generation is digested,
+worth a further 3.79 MB measured over one corpus. Nearly all of A2 is B-tree
+repacking rather than free pages, which is why the plan's free-page estimate
+read 87% low.
 
 **Work, in order:**
 
@@ -268,8 +271,9 @@ identical top-25 vector ids, and a maximum score delta of zero.
    fences, instead of by heading hierarchy. `ProseChunker` already exists,
    tested, and is wired to nothing. This is the only item here that fixes
    retrieval defects rather than size, which is why it leads.
-2. **`VACUUM` before the manifest is digested,** sized against a measured
-   free-page count rather than the plan's estimate ([BL-4](engineering/backlog.md)).
+2. ~~**`VACUUM` before the manifest is digested.**~~ Shipped 2026-08-29 as
+   Phase A2, 3.79 MB. Sizing it revealed that the manifest cannot witness row
+   loss in either database, filed as [BL-8](engineering/backlog.md).
 3. **Lossless encoding.** Repository-relative ids, integer-keyed relationships
    with a kind codebook, and binary content hashes. This also makes a generation
    portable, so a CI-cached index can be opened from a different checkout path.
