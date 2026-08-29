@@ -1231,6 +1231,65 @@ record the result here.
 
 ## 17. Execution Log
 
+### Phase C2 — shipped 2026-08-29
+
+Integer edge keys with two codebooks. C1 is the only Phase C item still open.
+
+**Measured by paired build**, both artifacts rewritten to the real repository
+root before sizing, because absolute-path ids make the build location worth 46%:
+
+| | pre | C2+C3+C4+C5 |
+|---|---:|---:|
+| `knowledge.db` at the real root | 22,134,784 | 15,048,704 |
+| entities | 5,304 | 5,304 |
+| relationships | 23,683 | 23,683 |
+| distinct (source, target, kind) | 20,322 | 20,322 |
+
+7,086,080 bytes, 6.76 MB, of which C3 and C4 are 0.74. C2 itself is 6.0 MB,
+which lands on the 6.04 MB the simulation predicted at a real root.
+
+**The endpoint codebook is not `entities.rowid`, and that is the whole design.**
+An import edge lands on an `external::` id and an unresolved call on an
+`unresolved::` one. Neither has a row in `entities` to borrow a key from, so
+`eid` is its own table. It holds 17,073 endpoints against 5,304 entities, so
+more than two thirds of the endpoints in this graph are not entities at all.
+Any scheme that keys edges off the entity table silently drops them.
+
+**Integers never leave the store.** Every read still takes and returns entity id
+strings. The codebooks are resolved inside the SQL, so the integer indexes do
+the traversal rather than the caller paying a round trip. The queries moved out
+to named module constants, because each carries two more joins than it did and
+reading them inline stopped being possible.
+
+**Build time did not move.** Interning both endpoints and the kind adds two
+statements per edge, both `INSERT OR IGNORE` against a UNIQUE index. The full
+corpus builds in the same six seconds it did before.
+
+**Verified against the real artifact, not only the fixtures.** The unit pin
+runs on four entities, which cannot show whether 23,683 edges survive
+re-encoding. On the built graph, the caller set for the busiest call target is
+identical to the set computed directly from the pre-change string-keyed table,
+and the edge-kind histogram sums to the same 23,683.
+
+**Two mutation probes, one of which was worthless and had to be redone.** The
+first swapped source and target in the edge-to-text projection, and the pin
+caught it. The second appended a SQL comment intending to stop interning the
+target endpoint; the comment sat after the complete statement and changed
+nothing, and the suite stayed green. It was replaced by collapsing every edge
+to one codebook kind, confirmed by observing an edge read back under the wrong
+kind, and the pin caught that. A probe verified only by its own diff is not
+verified.
+
+**What C1 is worth now.** Measured on top of everything above, at the real
+root: 1.62 MB of `knowledge.db` and 2.24 MB of `chunks.db`, **3.86 MB** for the
+generation. It is a cross-cutting change to every id in the index and it
+carries two decisions the plan leaves open. What happens when a generation is
+opened against a different root, reject or resolve lazily. And
+`classify_endpoint_id` currently requires `Path(file_identity).is_absolute()`
+for an endpoint to be INTERNAL, so relative ids invert an invariant that has
+its own tests. BL-9 also waits on it, because the honest fix there is the scope
+prefix ADR 1 describes, and both rewrite id encoding.
+
 ### Phase C3, C4, C5 — shipped 2026-08-29
 
 The two content-hash items and the chunk hash column. C1 and C2 are still open.
