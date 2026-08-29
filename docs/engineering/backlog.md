@@ -169,10 +169,12 @@ and building a cache tier before any repository needs one is speculative.
 all read them out of the staged file at the end of the build. Every number in
 the manifest therefore derives from the artifact it is meant to check.
 
-Reproduce it by making `SqliteChunkRepository.compact` delete every seventh row
-before it vacuums. The build publishes, and
-`validate_generation(..., verify_digests=True)` returns no failures, because
-the manifest recorded the post-deletion id list.
+Reproduce it by making `SqliteChunkRepository.compact` drop one row before it
+vacuums. The build publishes, and `validate_generation(..., verify_digests=True)`
+returns no failures, because the manifest recorded the post-deletion id list.
+Delete `WHERE rowid = (SELECT MIN(rowid) FROM chunks)` rather than every
+seventh row. A modulo probe deletes nothing on the small corpora the watch
+tests build, which reads as a clean run and is a false negative.
 
 Independently reproduced 2026-08-29 by a second session, on a scratch copy with
 the probe applied: a generation missing **1,003 of 7,025 chunks, 14% of the
@@ -188,19 +190,30 @@ executes the *shared* tree and the probe appears to do nothing. Set
 before trusting a negative result.
 
 This was theoretical until Phase A2, which introduced the first step that
-rewrites an artifact between indexing and publication. A2 covers itself with
-`test_compaction_does_not_lose_rows_between_indexing_and_publication`, which
-compares the published chunk count against the count the indexer reported
-before the file was touched. The general gap is wider than that one test.
+rewrites an artifact between indexing and publication. All three publication
+paths now carry a witness taken before the rewrite.
+`test_compaction_does_not_lose_rows_between_indexing_and_publication` compares
+the published chunk count against the count `index_directory` reported, and
+`test_a_watch_publication_compacts_without_losing_chunks` compares it against
+the staged repository's own row count read before `publish`. Both fail on a
+single lost row, as do the store-level tests that compare raw row bytes.
 
-Note that adding the two databases to `artifact_names` does not fix this. That
-digest would also be computed from the damaged file. A fix has to compare
-against something produced before the artifact was last written.
+**Rejected fix: threading the indexer's chunk count into
+`_assert_chunk_vector_parity`.** Proposed as a two-line change that would catch
+every build-time loss rather than compaction's alone. It does not, because the
+count it would thread is only a corpus total on one of the three paths.
+`index_incremental` returns the chunks it touched in changed files, not the
+total, and the watch path has no total at all: it commits per-file
+transactions and never counts the corpus. A guard that holds on the full
+rebuild and silently means something else on the other two is worse than the
+three explicit tests.
 
-**Deferred on purpose.** No current step other than compaction rewrites a
-staged database, and compaction is covered. Revisit when Phase C rewrites the
-schema, which is the next change that touches these files after the counts are
-taken.
+**Deferred on purpose.** Compaction is the only step that rewrites a staged
+database, and all three of its paths are covered. Adding the two databases to
+`artifact_names` is not the fix either; that digest would be computed from the
+damaged file for the same reason the counts are. Closing this needs a witness
+that survives every path, and the honest place to design one is Phase C, which
+is the next change that rewrites these files after the counts are taken.
 
 ### BL-5 - The storage plan's code anchors are stale
 

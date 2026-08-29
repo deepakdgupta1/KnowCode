@@ -710,3 +710,38 @@ def test_a_watch_publication_carries_the_graph_across_unchanged(
     assert _validate(current) == []
     assert service.search("beta") == [], "the graph half changed unexpectedly"
     service.close()
+
+
+def test_a_watch_publication_compacts_without_losing_chunks(
+    tmp_path: Path, backend: str
+) -> None:
+    """The watch path vacuums its staged store, so it needs the same witness.
+
+    Every count and digest the manifest records is read out of ``chunks.db``
+    after :meth:`publish` compacts it, so a lossy rewrite would produce a
+    manifest that agrees with the damage (BL-8). The staged repository's own
+    row count, taken before ``publish`` runs, is the one number that does not
+    come from the compacted file.
+    """
+    src = _write(tmp_path, "alpha", "beta")
+    service = _service(tmp_path, backend)
+    service.analyze(directory=src, output=tmp_path)
+
+    _write(tmp_path, "gamma")
+    writer = service.watch_writer()
+    writer.replace_file(src / "gamma.py")
+    session = writer._session
+    assert session is not None, "precondition: the commit opened a staging writer"
+    staged_chunks = session.indexer.chunk_repo.count()
+    assert staged_chunks > 0, "precondition: the batch staged something"
+
+    published = writer.publish_pending()
+    assert published is not None
+
+    current = service.current_generation()
+    assert current is not None and current.generation_id == published
+    assert current.manifest.counts["chunks"] == staged_chunks
+    assert current.manifest.counts["vectors"] == staged_chunks
+    assert _validate(current) == []
+    assert any("gamma.py" in path for path in _indexed_files(service))
+    service.close()
