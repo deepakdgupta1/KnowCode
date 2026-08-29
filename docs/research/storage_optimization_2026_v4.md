@@ -1249,29 +1249,42 @@ loaded module's `__file__` was its own tree before any number was taken.
 
 1,040,384 bytes, 0.99 MB, with every row count unchanged.
 
-**The per-item estimates in §11 are stale, in both directions.** Running
-`storage_simulate.py` against the pre-arm generation on this tree gives numbers
-the plan does not:
+**Measure `knowledge.db` at a realistic repository root or every number is
+wrong.** The build above ran at a 116-character scratch path. The real root is
+30 characters. Because entity ids and both edge endpoints are absolute paths,
+that difference alone inflates the artifact from 21.11 MB to 30.80 MB, **46%**,
+on identical content. Rewriting every id to the real root before measuring is
+one `REPLACE`, and nothing downstream is trustworthy without it.
 
-| Item | §11 says | This tree |
+The same run measured at both roots, so the size of the artifact is the only
+thing that changed:
+
+| | at the 116-char scratch root | at the 30-char real root |
 |---|---:|---:|
-| C1 relative paths, `knowledge.db` | 4.46 MB | 13.02 MB |
-| C2 integer edges | 6.80 MB | 11.17 MB |
-| C4 slim `metadata_json` | 2.09 MB | 0.65 MB |
-| C3 `content_hash` BLOB | 1.76 MB | 0.23 MB |
+| baseline | 30.80 MB | 21.11 MB |
+| C1 alone | 13.02 MB saved | 3.33 MB saved |
+| C2 alone | 11.17 MB saved | 6.04 MB saved |
+| C1 + C2 | 17.30 MB saved | 7.62 MB saved |
 
-Two causes, and they pull opposite ways. `VACUUM only` now measures 0.00 MB,
-so A2 has already banked the repacking that every pre-A2 per-item figure
-silently included. And the two hash items are per-entity constants, 5,304 rows
-times a few dozen bytes, while the path items scale with path length times
-every id occurrence. Anything sized off §11 should be re-measured first.
+**At a real root §11's path and edge estimates hold, and the hash ones do
+not.** C1's 4.46 MB against 3.33 measured, and C2's 6.80 against 6.04, are
+close. C3's 1.76 MB against 0.23 and C4's 2.09 against 0.65 are not, and both
+of those are per-entity constants: 5,304 rows times a few dozen bytes cannot
+reach 2 MB on this corpus whatever the encoding. `VACUUM only` also now
+measures 0.00 MB, so A2 has already taken the repacking that every pre-A2
+per-item figure silently carried. Re-measure before planning against §11.
 
-**The C1 figure above is not transferable.** It was measured with the corpus at
-a 108-character scratch path against a 29-character real root, so roughly 79
-bytes per stripped occurrence is measurement artifact. Across about 58,000 id
-occurrences that is some 4.6 MB of the 13.02. Re-measure C1 at a realistic root
-before planning against it. The direction still holds: C1 is worth well more
-than 4.46 MB.
+**C1 and C2 overlap, and C2 is the larger half.** Together they save 7.62 MB
+where the parts sum to 9.37, so 1.75 MB is double-counted. C2's marginal value
+after C1 is 4.29 MB; C1's marginal value after C2 is 1.58 MB. **C2 should run
+first.** It is also the contained change, living entirely behind the store
+boundary, where C1 rewrites every id in every parser.
+
+**C1's case is not its bytes.** 3.33 MB standing alone, and 1.58 MB after C2,
+is a weak size argument. The real case is the 46% above: an index built at a
+deep path is far larger than the same index built at a shallow one, and today
+the artifact's size depends on where it happened to be built. C1 makes that
+independent, and it is what the portability test in §11 exists for.
 
 **C4 is free because the column already won.** `_row_to_entity` overwrote
 `metadata["content_hash"]` from the column after parsing `metadata_json`, so
