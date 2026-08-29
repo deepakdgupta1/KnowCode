@@ -1226,3 +1226,107 @@ hardware rather than assumed. It does not block any phase: at this repository's
 6,166 vectors the exhaustive scan is unambiguously correct, and the threshold
 only matters once a repository approaches six figures. Measure it during D1 and
 record the result here.
+
+---
+
+## 17. Execution Log
+
+### Phase D1 — shipped 2026-08-29
+
+**Taken first, out of the A-B-C-D order.** D1 is the largest single item in the
+program and larger than Phases A, B and C combined. Those three recover
+21.46 MB between them; D1 recovers the whole vector plane. Run first it
+recovers the full plane rather than the 21.87 MB that would be left after A and
+B had already shrunk it, and it retires A1, which is 3.13 MB of LanceDB
+compaction applied to an artifact D1 removes from the published set entirely.
+D1 is independent of B and C and forward-compatible with both.
+
+**Correction to §3.** The generation these numbers came from,
+`20260828T100515254661Z-fa1be334`, is no longer on disk, and `knowcode_index/`
+in this tree is a stale pre-generation layout. The three reproduction commands
+cannot run as written. Rebuild first. `create_embedding_provider` falls back to
+`DummyEmbeddingProvider` when no API key is set, which produces 1024-dimension
+L2-normalized vectors, the same geometry as `voyage-code-3`. That makes a
+faithful storage baseline reproducible offline with no API calls:
+
+```bash
+git archive HEAD | tar -x -C /tmp/baseline && cd /tmp/baseline
+knowcode build .
+python scripts/measure_storage.py --index knowcode_index --repo-root .
+```
+
+**Corrections to §5 and §14.** `_recover_vectors_from_chunks` is scoped to the
+ids one file transaction touched, not the whole corpus, so the full-corpus
+rebuild D1 needs did not exist and had to be written. The code anchors in §5
+and §14 are stale against the current tree. `_recover_vectors_from_chunks` is
+at `indexer.py:457`, not `:381`, and `save()` is at `:836`, not `:581`.
+
+**Baseline and result.** The tree grew from 221 to 239 Python files and 35 to
+53 markdown files since the audit, so the absolute numbers are larger than §4's.
+
+Both figures below are one build of the same 6,874-chunk corpus, the second
+built by the new code in the same directory.
+
+| Artifact | Before | After |
+|---|---:|---:|
+| `chunks.db` | 48.93 MB | 48.36 MB |
+| `knowledge.db` | 31.93 MB | 30.51 MB |
+| `vectors.lancedb` | 32.31 MB | **0 MB** |
+| **Total** | **113.18 MB** | **78.87 MB** |
+
+**32.31 MB of that is D1**, the whole vector plane, 28.5% of a generation from
+one change. The remaining 2 MB is free-page variance between two SQLite builds,
+not something this change caused; the baseline was measured with a hot
+write-ahead log. Claim the 32.31 MB.
+
+Two retained generations fall from about 226 MB to about 158 MB, because the
+plane is no longer copied per generation. Nothing changed about what is
+retrievable.
+
+**What was built.**
+
+- `SqliteChunkRepository.iter_embeddings` streams `(chunk_id, vector)` pairs,
+  paginated by `rowid` under a fresh read lease per batch. One lease held
+  across the whole stream would block `close()` for as long as a consumer kept
+  the iterator alive.
+- `Indexer.rebuild_vector_plane` clears the store and refills it from that
+  stream, so it converges rather than accumulating.
+- `Indexer.load` rebuilds when the generation carries no native vector
+  artifact, and loads the persisted plane when it does. Old generations keep
+  working.
+- `Indexer.save` writes no vector artifact. `create_vector_store` no longer
+  takes an `index_dir`, so no store can be pointed at a generation directory.
+  For LanceDB that mattered more than dropping the save call, because
+  `lancedb.connect` created the table inside the bundle as a side effect of
+  construction.
+- `SEMANTIC_ARTIFACTS` no longer carries the plane into incremental builds.
+- The publication guard that required a native vector artifact is gone. The
+  chunk/vector parity guard now counts non-null embeddings in `chunks.db`
+  against the manifest, which is what ADR 0003 already required.
+
+**Verification.** 1,677 unit and integration tests pass. On the 6,874-vector
+corpus, with the plane as the only variable, a rebuilt plane and an
+artifact-backed plane return identical results: 10 of 10 end-to-end searches
+identical, top-25 raw vector ids identical, maximum score delta 0.000e+00.
+Rebuild cost is 0.30 s, paid once per process open.
+
+**Left undone.** An in-memory plane is the wrong default above roughly 100,000
+vectors. §5.3's disk-backed int8 cache outside `generations/`, keyed by the
+chunk-id digest, is not implemented, and neither is the exhaustive-scan path in
+`search_engine.py`. Neither is needed for the saving above.
+
+**Found, not fixed.** `KnowCodeService.build_generation` publishes without
+`expect_current`, so a full rebuild that began its scan before a file existed
+unconditionally overwrites a watch generation that contained that file.
+`tests/unit/service/test_watch_publication.py::test_concurrent_commits_and_publications_converge`
+fails 13 runs in 40 on `main` because of it. D1 makes rebuilds faster and
+widens the window to 22 in 40. The race is independent of this change and needs
+its own fix.
+
+**Revised order for the rest.** A2 (`VACUUM`) still stands alone and is worth
+about 2 MB. A1 is retired. B, C and E are unchanged, and D2 and D3 remain.
+
+| After phase | `chunks.db` | `knowledge.db` | vectors | Total |
+|---|---:|---:|---:|---:|
+| baseline (2026-08-29 tree) | 48.93 | 31.93 | 32.31 | **113.18 MB** |
+| D1 — plane becomes derived | 48.36 | 30.51 | 0 | **78.87 MB** |

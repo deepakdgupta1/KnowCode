@@ -50,3 +50,43 @@ files are never mixed. Orphan staging directories are ignored and later
 cleaned. Rollback moves the pointer to a compatible complete generation or
 rebuilds; it never downgrades one artifact in place.
 
+
+### Amendment (2026-08-29): the vector plane is not a published artifact
+
+The layout above shows `vectors/...` inside a generation directory. It is no
+longer written there.
+
+ADR 0003 makes the little-endian float32 BLOB in `chunks.db` the durable
+embedding record and requires that vector rebuilding read committed chunk rows.
+That makes the on-disk ANN index derived data. Publishing it stored every
+vector twice, digested the second copy, copied it into every incremental build,
+and retained it per generation. Measured on this repository, that was 32.31 MB
+of a 113.18 MB generation.
+
+A published generation now contains `knowledge.db`, `chunks.db`,
+`index_manifest.json`, `manifest.json`, and `preflight_report.json`. The vector
+store is held in memory and filled by
+`Indexer.rebuild_vector_plane` from the durable chunk rows when a generation is
+loaded. On 6,874 vectors at 1024 dimensions the rebuild takes 0.3 seconds and
+reproduces the persisted plane exactly, verified as identical ids and identical
+scores over the top 25.
+
+Two validation rules move with it.
+
+A full generation no longer has to record a native vector artifact. That rule
+asserted the presence of a cache.
+
+Chunk and vector membership is now checked by counting rows in `chunks.db` that
+carry a non-null embedding and comparing that against the vector count the
+manifest records. The previous rule compared two numbers inside the same
+manifest, so it could not see a generation whose chunk rows had lost their
+embeddings. This is the rule ADR 0003 already required and the code did not
+enforce.
+
+Generations written before this change still load. They carry a native vector
+artifact, so their persisted plane stays authoritative and no rebuild runs.
+
+Above roughly 100,000 vectors an in-memory plane stops being the right default.
+The intended shape there is a disk-backed ANN cache outside `generations/`,
+keyed by the chunk-id digest the manifest already computes, so retention never
+copies it. That is not implemented.
