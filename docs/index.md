@@ -33,8 +33,9 @@ knowcode ask "How does the graph builder work?"
 
 The full command surface (16 commands, flags, and defaults) is the
 [CLI reference](user/cli-reference.md). The single forward plan is the
-[Roadmap](roadmap.md); the canonical agent retrieval policy is the
-[MCP contract](mcp-contract.md).
+[Roadmap](roadmap.md); what the project already knows is broken is the
+[engineering backlog](engineering/backlog.md); the canonical agent retrieval
+policy is the [MCP contract](mcp-contract.md).
 
 ## How these docs are organized
 
@@ -43,6 +44,7 @@ The full command surface (16 commands, flags, and defaults) is the
 - **Product documentation** — overview, personas and use-cases, and the
   business logic behind every user-visible heuristic, with trade-offs.
 - **Engineering documentation** — current-state architecture, architecture
-  decision records, subsystem internals, testing and release guides.
+  decision records, subsystem internals, testing and release guides, and the
+  backlog of known defects.
 - **Research** — exploratory designs and evaluation studies feeding the
   roadmap.

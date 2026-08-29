@@ -35,9 +35,14 @@ The artifact root holds immutable generation directories plus one pointer:
 
 ```text
 artifact-root/
-  generations/<generation-id>/{knowledge.db, chunks.db, vectors/, manifest.json}
+  generations/<generation-id>/{knowledge.db, chunks.db, index_manifest.json, manifest.json}
   current.json
 ```
+
+- **No vector artifact is published.** The ANN index is derived from the
+  durable embeddings in `chunks.db` and rebuilt in memory when a generation is
+  loaded ([ADR 9](../adr/adr-0009-derived-vector-plane.md)). Generations written
+  before 2026-08-29 carry one and keep using it.
 
 - A build creates a unique **staging** directory on the same filesystem,
   without holding the publication lock.

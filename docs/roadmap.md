@@ -21,6 +21,16 @@ to an empty task allowlist until independent machine adjudication and the
 blocking Python external gates pass. See [Testing & Evaluation](engineering/testing.md)
 for the evidence contract.
 
+Two things found while measuring index storage change what "next" should mean.
+Markdown documents whose H1 slugifies to their own filename are dropped from the
+index entirely by an entity id collision, which is 32% of this repository's
+prose including seven of eight ADRs and most of the user guide. Separately, the
+chunk carrying the largest block of most files is tagged with an entity id no
+parser emits, so it is disconnected from the graph. And a published generation
+was storing every embedding twice, which P7 has now fixed. Defects
+that no workstream owns are recorded in the
+[engineering backlog](engineering/backlog.md).
+
 ## Release Principles
 
 1. Correctness is the release gate. Token savings, consumer installers, and
@@ -44,6 +54,7 @@ for the evidence contract.
 | Freshness and coverage safety | The scanner, watcher, and `doctor` validate source coverage and stale artifacts. | Modify/create/delete/rename tests and `doctor` freshness checks remain required. |
 | Local readiness verification | `knowcode doctor --mcp` checks config, artifacts, disk use, agent rules, and an MCP handshake. | Doctor must stay fast, deterministic, and actionable. |
 | Local telemetry | JSONL events record retrieval, agent-routing, and MCP tool activity. | Event-schema compatibility and failure isolation tests remain required. |
+| Derived vector plane | [ADR 9](engineering/adr/adr-0009-derived-vector-plane.md): the ANN index is rebuilt from durable chunk rows, not published. One generation fell 113.18 MB to 78.87 MB. | A published generation must contain nothing named `vectors.*`, and a rebuilt plane must return identical results to a persisted one. |
 
 ## Priority Workstreams
 
@@ -227,13 +238,62 @@ every failure path remains visible through freshness metadata and `doctor`.
 **Exit criteria:** a developer can understand whether KnowCode is used, trusted,
 fresh, and cost-effective without manually parsing JSONL.
 
+### P7 - Index Footprint and Prose Coverage
+
+**Goal:** make an index proportional to the source it describes, and make every
+document in that source retrievable. The plan of record is
+[Storage Footprint & Optimization Plan](research/storage_optimization_2026_v4.md);
+its §17 is the running execution log.
+
+**Dependencies:** none for the storage phases. The embedding-selection phase
+depends on P1, because it narrows the semantic candidate set and may only ship
+behind a measured recall gate.
+
+**Status:** Phase D1 shipped 2026-08-29. The ANN index stopped being a published
+artifact and became a plane rebuilt from the durable embeddings in `chunks.db`.
+One generation fell from 113.18 MB to 78.87 MB, of which 32.31 MB is the change
+itself. Retrieval is unchanged, verified on 6,874 vectors as identical results,
+identical top-25 vector ids, and a maximum score delta of zero.
+
+**Work, in order:**
+
+1. **Document identity and chunking correctness.** Three defects in one area,
+   fixed together because they share an identity scheme. The entity id collision
+   that drops 32% of this repository's prose from the index
+   ([BL-1](engineering/backlog.md)); module chunks tagged with an entity id no
+   parser emits, which orphans 14% of chunk text from the graph and burns
+   context-budget slots on entities that do not exist
+   ([BL-6](engineering/backlog.md)); and the Python header extractor that
+   chunks prose by stopping at the first `import` line, including inside code
+   fences, instead of by heading hierarchy. `ProseChunker` already exists,
+   tested, and is wired to nothing. This is the only item here that fixes
+   retrieval defects rather than size, which is why it leads.
+2. **`VACUUM` before the manifest is digested,** sized against a measured
+   free-page count rather than the plan's estimate ([BL-4](engineering/backlog.md)).
+3. **Lossless encoding.** Repository-relative ids, integer-keyed relationships
+   with a kind codebook, and binary content hashes. This also makes a generation
+   portable, so a CI-cached index can be opened from a different checkout path.
+4. **Stop persisting the rest of the derived data.** `tokens_text` folds into a
+   contentless FTS table; `entities.source_code` resolves from disk against a
+   verified content hash, failing closed rather than serving stale source.
+5. **Embedding-selection policy,** gated on the retrieval evaluation harness.
+   Chunks below a content-size threshold stay stored and stay reachable through
+   the exact, path, and FTS planes; they leave only the semantic candidate set.
+
+**Exit criteria:** every tracked document in a repository is retrievable, one
+generation is a small multiple of the source it describes rather than an order
+of magnitude, and no phase past the first changes what an existing query
+returns without a measured recall number to justify it.
+
 ## Sequencing and Gates
 
 `P1` and the implementation work in `P2` can proceed in parallel, but the
 release-candidate evaluation must run against the `P2` production response
 shape. `P3` follows once the correctness baseline and contract are stable.
 `P4`, `P5`, and `P6` can proceed independently after their listed dependencies
-are met.
+are met. `P7`'s first item is a correctness fix and is not gated on anything;
+its remaining storage phases are independent of P1 through P6, and its final
+embedding-selection phase is gated on P1's evaluation harness.
 
 The next trust release ships only when all of the following are true:
 
@@ -242,9 +302,11 @@ The next trust release ships only when all of the following are true:
 3. `knowcode doctor --mcp` passes for the supported local configuration.
 4. Freshness and language-coverage checks report no unresolved correctness
    warnings for the target repository.
+5. No `Critical` item is open in the [engineering backlog](engineering/backlog.md).
+   `BL-1` is open today, so this gate is not met.
 
-P3 through P6 improve efficiency and adoption, but they are not permitted to
-weaken these release gates.
+P3 through P7 improve efficiency, adoption, and footprint, but they are not
+permitted to weaken these release gates.
 
 ## Out of Scope
 

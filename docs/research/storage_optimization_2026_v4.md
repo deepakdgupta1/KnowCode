@@ -1315,16 +1315,42 @@ vectors. §5.3's disk-backed int8 cache outside `generations/`, keyed by the
 chunk-id digest, is not implemented, and neither is the exhaustive-scan path in
 `search_engine.py`. Neither is needed for the saving above.
 
-**Found, not fixed.** `KnowCodeService.build_generation` publishes without
-`expect_current`, so a full rebuild that began its scan before a file existed
-unconditionally overwrites a watch generation that contained that file.
+**Found, not fixed.** Both are in the
+[engineering backlog](../engineering/backlog.md).
+
+*Markdown documents are dropped from the index entirely* (BL-1). `MarkdownParser`
+gives the document entity the id `<file>::<file-stem>` and each heading the id
+`<file>::<heading-slug>`. When a document's H1 slugifies to its own filename,
+the two collide, the chunker emits two chunks with the same id,
+`validate_prepared_chunks` rejects the file, and `replace_file` keeps a previous
+generation that does not exist on a first build. **17 of 53 tracked markdown
+files, 259.9 KB, 32% of prose bytes**, including seven of eight ADRs and most of
+the user guide, are absent from the index with only a `WARNING` line. Reproduce
+with `knowcode build . 2>&1 | grep "duplicate chunk id"`.
+
+This changes §6. Section 6.2 measured documents being *truncated* and derived
+"39% of prose is unreachable" on the assumption that these files were indexed.
+They are not indexed at all, so the real figure is worse, and Phase B must fix
+the id collision as well as the chunking. B3 removes the `SECTION` chunk and so
+incidentally removes the chunk collision, but the entity id collision in
+`knowledge.db` survives it and needs its own item.
+
+*A full rebuild can silently drop a watch commit* (BL-2).
+`KnowCodeService.build_generation` publishes without `expect_current`, so a full
+rebuild that began its scan before a file existed unconditionally overwrites a
+watch generation that contained that file.
 `tests/unit/service/test_watch_publication.py::test_concurrent_commits_and_publications_converge`
 fails 13 runs in 40 on `main` because of it. D1 makes rebuilds faster and
-widens the window to 22 in 40. The race is independent of this change and needs
-its own fix.
+widens the window to 22 in 40. The race is independent of this change.
 
-**Revised order for the rest.** A2 (`VACUUM`) still stands alone and is worth
-about 2 MB. A1 is retired. B, C and E are unchanged, and D2 and D3 remain.
+**Revised order for the rest.** B moves to the front and grows: it now owns the
+BL-1 id collision as well as the chunking, and it is the only remaining phase
+that fixes a retrieval defect. A2 (`VACUUM`) still stands alone; its ~2 MB
+estimate predates the observation that `knowledge.db` grew 64% for an 11%
+entity increase, so size it against a measured `dbstat` free-page count
+(BL-4) rather than the estimate. A1 is retired. C and E are unchanged, and D2
+and D3 remain. The roadmap tracks this as
+[P7](../roadmap.md).
 
 | After phase | `chunks.db` | `knowledge.db` | vectors | Total |
 |---|---:|---:|---:|---:|

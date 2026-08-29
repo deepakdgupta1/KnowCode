@@ -73,7 +73,7 @@ All 16 commands with flags and defaults live in the
 |---|---|
 | Users | [CLI reference](docs/user/cli-reference.md) · [Getting started](docs/user/getting-started.md) · [IDE agent setup](docs/user/ide-integration.md) · [REST API](docs/user/rest-api.md) |
 | Product managers | [Product overview](docs/product/overview.md) · [Personas & use-cases](docs/product/personas-use-cases.md) · [Business logic](docs/product/business-logic.md) |
-| Engineers | [Architecture](docs/engineering/architecture.md) · [ADR index](docs/engineering/adr/index.md) · [Parser matrix](docs/engineering/parser-matrix.md) · [Roadmap](docs/roadmap.md) |
+| Engineers | [Architecture](docs/engineering/architecture.md) · [ADR index](docs/engineering/adr/index.md) · [Parser matrix](docs/engineering/parser-matrix.md) · [Roadmap](docs/roadmap.md) · [Backlog](docs/engineering/backlog.md) |
 
 Supported languages: Python, JavaScript/JSX, TypeScript/TSX, Java, Rust,
 Vue, Markdown, reStructuredText, and YAML. Other extensions (`.go`, `.cpp`,
@@ -118,6 +118,7 @@ mkdocs build --strict  # docs site must build warning-free
 ```
 
 The forward plan and release gates live in the [roadmap](docs/roadmap.md);
+known defects in the [engineering backlog](docs/engineering/backlog.md);
 release history in the [changelog](CHANGELOG.md).
 
 ## License

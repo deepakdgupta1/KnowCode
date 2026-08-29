@@ -3,7 +3,8 @@
 On-disk artifacts, their schemas, and the fail-closed versioning policy.
 Decision records: [ADR 3](../adr/adr-0003-durable-embedding-representation.md),
 [ADR 7](../adr/adr-0007-protocol-and-artifact-evolution-inventory.md),
-[ADR 8](../adr/adr-0008-persistence-format-and-token-economics.md).
+[ADR 8](../adr/adr-0008-persistence-format-and-token-economics.md),
+[ADR 9](../adr/adr-0009-derived-vector-plane.md).
 
 ## Artifact sets
 
@@ -12,8 +13,7 @@ Decision records: [ADR 3](../adr/adr-0003-durable-embedding-representation.md),
 | Knowledge store (JSON) | `knowcode_knowledge.json` | 2 | Entities + relationships; readable by the legacy exporter but cannot mix into a current generation |
 | Knowledge store (SQLite) | `knowledge.db` | generation-scoped | Canonical in generations |
 | Chunk repository | `chunks.db` (SQLite) | 2 | Chunks + durable embeddings |
-| Vector store | `vectors.lancedb` + `vectors.json` (LanceDB, default) | 2 | `vector_backend: lancedb` |
-| Vector store | `vectors.index` + `vectors.json` (FAISS/NumPy) | 3 | `vector_backend: faiss` |
+| Vector store | none on disk | 2 (LanceDB) / 3 (FAISS) | **Derived, never published** ([ADR 9](../adr/adr-0009-derived-vector-plane.md)); rebuilt in memory from `chunks.db`. Generations written before 2026-08-29 carry `vectors.lancedb`/`vectors.index` + `vectors.json` and still load. |
 | Generation manifest | `manifest.json` | 3 | Contract version, generation ID, checksums, embedding config, knowledge/chunk/vector counts |
 | Preflight report | `preflight_report.json` | — | Written beside generation artifacts; loaded by doctor/MCP/CLI |
 | Telemetry | `knowcode_telemetry.jsonl` | versioned | Store root, never inside `knowcode_index/` (see [telemetry](../../user/telemetry.md)) |
@@ -32,6 +32,31 @@ Decision records: [ADR 3](../adr/adr-0003-durable-embedding-representation.md),
 - File updates go through transactional `replace_file(file_id, chunks)` —
   prepare/commit, returning previous and committed IDs with generation
   metadata.
+
+## The vector plane is derived
+
+The ANN index is not an artifact. `chunks.db` holds the durable float32 BLOBs
+([ADR 3](../adr/adr-0003-durable-embedding-representation.md)), so the index is
+reconstructible from bytes already published and publishing it stored every
+vector twice. It cost 28.5% of a generation.
+
+- `create_vector_store` takes no directory. The store is in memory, so nothing
+  can write a vector artifact into a generation. This is what stops LanceDB
+  publishing a table, because `lancedb.connect` creates one as a side effect of
+  construction.
+- `SqliteChunkRepository.iter_embeddings` streams `(chunk_id, vector)` pairs,
+  paginated by `rowid` under a fresh read lease per batch. One lease held across
+  the whole stream would block `close()` for as long as a consumer held the
+  iterator.
+- `Indexer.rebuild_vector_plane` clears the store then refills it from that
+  stream, so it converges rather than accumulating. 0.30 s for 6,874 vectors at
+  1024 dimensions, no network and no embedding provider.
+- `Indexer.load` rebuilds when the generation carries no native vector
+  artifact, and loads the persisted plane when it does.
+
+Above roughly 100,000 vectors an in-memory plane stops being the right default.
+The disk-backed cache for that case is not built; see the
+[backlog](../backlog.md).
 
 ## Vector backends
 

@@ -43,6 +43,11 @@ the [ADR index](adr/index.md).
       instruction rather than being adopted. The committed `knowcode_index/` is a
       legacy layout and must be rebuilt. Confirm doctor reports the rebuild need
       rather than a silent in-memory migration.
+- [ ] **No vector artifact is published.** The generation directory holds
+      `knowledge.db`, `chunks.db`, `index_manifest.json`, `manifest.json`, and
+      `preflight_report.json`, and nothing named `vectors.*`
+      ([ADR 9](adr/adr-0009-derived-vector-plane.md)). A generation written by an
+      older build still carries one and must still load.
 - [ ] A failed rebuild (e.g. no embedding provider) preserves the previous
       generation and exits non-zero; it never publishes a graph beside a stale or
       absent index.
