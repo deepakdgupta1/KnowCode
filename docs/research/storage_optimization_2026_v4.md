@@ -1231,6 +1231,126 @@ record the result here.
 
 ## 17. Execution Log
 
+### Phase B — shipped 2026-08-29
+
+Items B1 through B4, plus the two retrieval defects the backlog held against
+this phase. This is the only phase that fixes a correctness bug rather than a
+size one, and it is the last of those.
+
+**Measured end to end.** One corpus, built twice in separate directories, the
+chunking and prose identity the only variables. The pre-phase build is
+`39e3668`, run with `PYTHONPATH` pointed at its own `src` and asserted to be
+that tree before the numbers were taken.
+
+| | pre-B | Phase B |
+|---|---:|---:|
+| chunks | 7,106 | 6,557 |
+| chunk bytes | 4,190,466 | 3,770,537 |
+| chunk bytes off the graph | 495,985 | **0** |
+| markdown files with a chunk | 38 | **55** |
+| prose bytes indexed | 357,245 | **822,542** |
+| prose coverage | 41.6% | **95.7%** |
+| entities | 5,215 | 5,303 |
+| `chunks.db` | 51.53 MB | 48.35 MB |
+| `knowledge.db` | 30.43 MB | 31.43 MB |
+| **generation** | **81.96 MB** | **79.78 MB** |
+
+2.18 MB net, and prose coverage from 41.6% to 95.7%. The size figure is small
+because two of the four items add content rather than remove it. `chunks.db`
+falls 3.18 MB against the plan's 3.99 MB estimate, on a tree that has grown
+since §6.5 measured it. `knowledge.db` grows 1.00 MB, which is the honest cost
+of the 17 documents that were not in the index at all.
+
+**BL-1, the id collision, first.** `MarkdownParser` and `RstParser` built a
+section id from the heading slug alone. A document whose H1 slugified to its
+own filename collided with the document entity, and any two headings sharing a
+title collided with each other. The chunker emitted duplicate chunk ids,
+`validate_prepared_chunks` rejected the file, and on a first build the document
+was absent with only a `WARNING`. 17 of 55 files. A section's qualified name
+now carries its heading path, `<stem>.<h1>.<h2>`, which is what ADR 1 already
+requires and what `module.Type.method` is for code, so a heading cannot collide
+with its own document by construction. Sibling headings that genuinely share a
+title take an ordinal.
+
+**§6.2 is real and still fires, but not where a reading of it suggests.** No
+markdown file in this tree is truncated by the import rule in the way §6.2
+describes. The loss is concentrated in the large documents, and the aggregate
+badly understates it:
+
+| Document | pre-B | Phase B |
+|---|---:|---:|
+| `knowcode-parser-concurrency-security-hardening.md`, 193 KB | 13% | 99% |
+| `hardening-contracts.md`, 87 KB | 31% | 96% |
+| `adr-0007-protocol-and-artifact-evolution-inventory.md`, 79 KB | 23% | 96% |
+| `storage_optimization_2026_v4.md`, 68 KB | 10% | 96% |
+
+Several small documents measured *over* 100% before, because the whole-document
+module chunk, the document chunk and the label-only section chunks all stored
+the same bytes.
+
+**B1 is the money.** 881,970 bytes, 92% of class chunk text, was member bodies
+stored a second time. Trimming each class to the text before its first member
+took `chunks.db` from 56.07 MB to 48.07 MB in isolation, 8.00 MB, the largest
+single item in the phase. The cost is 72 source lines across 242 Python files,
+4,115 bytes, that sit between members and are covered by no member chunk. 71
+are comments, 8 of those divider rules, and exactly one is code. 214 to 1.
+
+**BL-6 needed the prose route to have somewhere to land.** `ProseChunker` mints
+section ids of its own shape, `<doc>::sec::<slug>::L<n>`, that no parser emits.
+Storing those would have reproduced BL-6 in a new form. A prose chunk's stored
+`entity_id` is the graph entity whose span its lines fall in, found by binary
+search over section start lines, with the document anchoring any preamble.
+Module chunks moved from the synthetic `<file>::module` to the file's own
+MODULE or DOCUMENT entity.
+
+**Correction to §11's schema versioning.** The plan says to bump
+`SqliteChunkRepository.SCHEMA_VERSION` to 3 and let the loader reject the
+mismatch through the legacy-schema error path. It does not reject anything.
+`_ensure_schema_meta` writes the constant when no row exists and never compares
+it against a stored one, and `_validate_existing_schema` checks columns rather
+than the version. Probed directly: a database written at 2 reopens clean under
+a constant of 3 and keeps recording 2. Only `Indexer.SCHEMA_VERSION`, mirrored
+into `index_manifest.json`, actually gates, so that is the one that moved to 3.
+Anything that wants the repository constant to mean something has to add the
+comparison first.
+
+**Structural guards, because these defects came back once already.** BL-6 was
+written down in a research report in a previous round and lost. Two contracts
+now hold the shape rather than the instance. Every parser must emit unique
+entity ids within a file, asserted for all nine. No chunk may point at an
+entity that does not exist, asserted for seven languages. The first of those
+found BL-9 while it was being written.
+
+**Found, not fixed.** Both in the
+[engineering backlog](../engineering/backlog.md). BL-9, a top-level symbol
+named after its own file collides with the file's MODULE entity, whose
+qualified name is the stem; `src/knowcode/cli/cli.py` is affected and 48 of its
+relationships land on the ambiguous id. Pinned as a strict `xfail` rather than
+fixed, because the honest repair gives module-scoped symbols the scope prefix
+ADR 1 already describes, which touches every parser and every id, and Phase C
+rewrites id encoding anyway. BL-10, `VueParser` emits no entity for the file
+itself, so 854 bytes across 5 test fixtures now go unindexed rather than being
+stored against a synthetic id.
+
+**Verification.** 1,780 unit, integration and e2e tests pass. `ruff check`,
+`ruff format --check` and `mypy` are clean on every changed module. Each new
+assertion was run against the pre-change tree and observed to fail; two that
+passed under mutation were rewritten until they did not, one because it
+asserted on chunk length where a short section body is legitimate, and one
+because its fixture tripped the very extractor rule it meant to exercise.
+
+**Revised order for the rest.** C leads now, and it inherits two things. BL-8
+named it as the honest place to design a witness that survives every
+publication path. §11's schema-versioning correction above means C cannot rely
+on the repository constant to force a rebuild. D2 and D3 follow, then E behind
+the evaluation harness. A1 is retired; A2, D1 and B are done.
+
+| After phase | `chunks.db` | `knowledge.db` | vectors | Total |
+|---|---:|---:|---:|---:|
+| baseline (2026-08-29 tree) | 48.93 | 31.93 | 32.31 | **113.18 MB** |
+| D1 — plane becomes derived | 48.36 | 30.51 | 0 | **78.87 MB** |
+| B — chunking correctness | 48.35 | 31.43 | 0 | **79.78 MB** |
+
 ### Phase A2 — shipped 2026-08-29
 
 Both SQLite artifacts are now vacuumed once, on the staged copy, after every

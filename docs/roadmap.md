@@ -249,28 +249,33 @@ its §17 is the running execution log.
 depends on P1, because it narrows the semantic candidate set and may only ship
 behind a measured recall gate.
 
-**Status:** Phases D1 and A2 shipped 2026-08-29. D1 stopped publishing the ANN
-index and made it a plane rebuilt from the durable embeddings in `chunks.db`,
-worth 32.31 MB, with retrieval verified unchanged on 6,874 vectors as identical
-results, identical top-25 vector ids, and a maximum score delta of zero. A2
-vacuums both databases on the staged copy before the generation is digested,
-worth a further 3.79 MB measured over one corpus. Nearly all of A2 is B-tree
-repacking rather than free pages, which is why the plan's free-page estimate
-read 87% low.
+**Status:** Phases D1, A2 and B shipped 2026-08-29. D1 stopped publishing the
+ANN index and made it a plane rebuilt from the durable embeddings in
+`chunks.db`, worth 32.31 MB, with retrieval verified unchanged on 6,874 vectors
+as identical results, identical top-25 vector ids, and a maximum score delta of
+zero. A2 vacuums both databases on the staged copy before the generation is
+digested, worth a further 3.79 MB measured over one corpus. Nearly all of A2 is
+B-tree repacking rather than free pages, which is why the plan's free-page
+estimate read 87% low. B fixed the retrieval defects: prose coverage went from
+41.6% to 95.7%, all 55 markdown files now index where 17 were absent, no chunk
+points at an entity that does not exist where 495,985 bytes did, and the
+generation fell 2.18 MB despite indexing 2.3 times as much prose.
 
 **Work, in order:**
 
-1. **Document identity and chunking correctness.** Three defects in one area,
-   fixed together because they share an identity scheme. The entity id collision
-   that drops 32% of this repository's prose from the index
-   ([BL-1](engineering/backlog.md)); module chunks tagged with an entity id no
-   parser emits, which orphans 14% of chunk text from the graph and burns
-   context-budget slots on entities that do not exist
-   ([BL-6](engineering/backlog.md)); and the Python header extractor that
-   chunks prose by stopping at the first `import` line, including inside code
-   fences, instead of by heading hierarchy. `ProseChunker` already exists,
-   tested, and is wired to nothing. This is the only item here that fixes
-   retrieval defects rather than size, which is why it leads.
+1. ~~**Document identity and chunking correctness.**~~ Shipped 2026-08-29 as
+   Phase B. Three defects that shared one identity scheme, fixed together. A
+   section's qualified name now carries its heading path, so a heading cannot
+   collide with its own document and 17 rejected markdown files index (BL-1).
+   Every chunk hangs on an entity that exists, prose on the section its lines
+   fall in and module chunks on the file's own entity (BL-6). `.md` and `.rst`
+   route to `ProseChunker`, which had been in the tree, tested, and wired to
+   nothing. A class chunk stops at its first member, which is 8.00 MB on its
+   own. Two structural contracts now hold the shape rather than the instance:
+   unique entity ids per file for all nine parsers, and no chunk pointing at a
+   missing entity for seven languages. Writing the first found
+   [BL-9](engineering/backlog.md); the Vue gap it left is
+   [BL-10](engineering/backlog.md).
 2. ~~**`VACUUM` before the manifest is digested.**~~ Shipped 2026-08-29 as
    Phase A2, 3.79 MB. Sizing it revealed that the manifest cannot witness row
    loss in either database, filed as [BL-8](engineering/backlog.md).

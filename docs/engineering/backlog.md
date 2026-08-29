@@ -63,58 +63,44 @@ that is where it costs least. Do not paper over it with a reserved `::module`
 token; ADR 1 rules out ad hoc internal namespaces, and BL-6 is the evidence
 that inventing one produces ids nothing else agrees with.
 
-### BL-6 - Module chunks point at an entity that does not exist
+### BL-10 - A Vue file has no entity standing for the file itself
 
-**Severity:** High. **Found:** first in `docs/research/knowcode_evaluation_report.md`
-as "Graph Resolution Mismatch"; re-confirmed 2026-08-29 and never tracked.
+**Severity:** Low. **Found:** 2026-08-29, closing BL-6 in Phase B.
 
-`Chunker._emit_module_chunks` tags the module-header and imports chunks with
-`entity_id = f"{file_path}::module"`. No parser emits an entity with that id. A
-markdown document is stored as `<file>::<doc-name>`, and a Python module under
-its own identity, so the chunk carrying the largest single block of a file's
-text is disconnected from the graph.
+Every other code parser emits a MODULE entity for the file, and the prose and
+YAML parsers emit a DOCUMENT one. `VueParser` emits neither. Its entities are
+the components, functions and variables inside the single-file component, and
+nothing represents the file.
 
-Measured on this repository over the chunker's output: **290 files and 594.7 KB,
-14% of all chunk text**, sits in chunks whose `entity_id` matches no entity.
-446.1 KB of that is markdown across all 53 files, 148.6 KB is Python across 237
-files. For `docs/roadmap.md` the orphaned chunk is 16,788 bytes, most of the
-document's indexed prose.
+Phase B made the module-header and imports chunks hang on that entity. With no
+entity to hang on they are now skipped, so a Vue file's top-of-file text is not
+indexed. The alternative was to keep emitting them against a synthetic
+`<file>::module` id, which is the defect BL-6 was.
 
-Do not add this to BL-1's 32%. These are chunker-output bytes; for the 17 files
-BL-1 rejects outright, nothing is indexed at all and this defect is moot. The
-overlap is why both belong to one fix.
-
-The chunk text still reaches a semantic hit, so this is not total loss. What
-breaks is every path that treats `chunk.entity_id` as a graph handle:
-
-- `expand_dependencies` (`retrieval/completeness.py:41`) calls
-  `get_callees("<file>::module")`, matches nothing, and expands nothing. Silent.
-- `RetrievalOrchestrator` (`retrieval/orchestrator.py:199`) appends the dangling
-  id to `selected_entity_ids` and counts it against `limit_entities`, so a
-  nonexistent entity occupies a slot in the context budget and contributes no
-  entity to the bundle.
-- The evidence trail records an `entity_id` that resolves to nothing.
+Measured on this repository: **854 bytes across 5 files**, all of them parser
+test fixtures. There is no production Vue in this tree, which is why this is
+Low rather than High.
 
 Reproduce:
 
 ```bash
 python - <<'EOF'
-from knowcode.indexing.chunker import Chunker
-from knowcode.parsers import MarkdownParser
-res = MarkdownParser().parse_file("docs/roadmap.md")
-ids = {e.id for e in res.entities}
-print(sorted({c.entity_id for c in Chunker().process_parse_result(res)} - ids))
+from knowcode.data_models import EntityKind
+from knowcode.parsers.vue_parser import VueParser
+kinds = {e.kind for e in VueParser().parse_file(
+    "tests/fixtures/mixed_language/widget.vue").entities}
+print(EntityKind.MODULE in kinds or EntityKind.DOCUMENT in kinds)
 EOF
 ```
 
-The same identity scheme failing a third way, alongside BL-9 above and the
-closed BL-1. They are independent of each other: BL-1 rejected whole files,
-BL-9 merges two entities into one, and this one orphans chunks inside files
-that do index. This one belongs to the chunking phase of
-[P7](../roadmap.md).
+The fix is a MODULE entity in `VueParser` covering the whole file, matching
+what the other code parsers already do. Watch for BL-9 while doing it: naming
+that entity after the file stem is what makes a top-level symbol collide with
+it.
 
-**Not deferred on purpose.** It was already written down once, in a research
-report nothing links to, and lost. That is the reason this backlog exists.
+**Deferred on purpose.** It affects no production file in this repository, and
+it is a parser change with its own contract tests rather than part of the
+chunking work that surfaced it.
 
 ### BL-7 - Timing-sensitive tests flake under concurrent load
 
@@ -241,6 +227,9 @@ the anchors are re-verified as part of adopting a later phase.
 
 | Item | Resolution |
 | --- | --- |
+| Module chunks point at an entity that does not exist (BL-6) | Fixed 2026-08-29. Module-header and imports chunks hang on the file's MODULE entity, or its DOCUMENT entity where that is what the parser emits; prose chunks hang on the section whose span their lines fall in. Paired build: 495,985 chunk bytes off the graph to 0. `no chunk points at an entity that does not exist` is now a chunker contract for seven languages. Left BL-10. |
+| Prose chunked by a Python header extractor, 39% unreachable | Phase B, 2026-08-29. `.md` and `.rst` route to `ProseChunker`. Prose coverage 41.6% to 95.7% over 55 files; the largest document went from 13% to 99%. |
+| Class bodies stored twice, and label-only chunks (6.1, 6.3) | Phase B, 2026-08-29. A class chunk stops at its first member; an entity with nothing but a name emits no chunk. 881,970 bytes of duplicated member text and 68 config-key chunks removed, worth 8.00 MB of `chunks.db`. |
 | Markdown documents dropped by an entity id collision (BL-1) | Fixed 2026-08-29. A section's qualified name now carries its heading path, so it cannot collide with its own document, and sibling headings sharing a title take an ordinal. Paired build over 55 markdown files: 17 rejected files to 0, prose bytes indexed 357,114 to 509,046. Entity id uniqueness is now asserted for all nine parsers, which is what found BL-9. |
 | `knowledge.db` carried unmeasured free-page slack (BL-4) | Phase A2, 2026-08-29. Both databases are vacuumed on the staged copy before the generation is digested. Measured at 3.79 MB over one corpus, against the plan's 2.03 MB estimate; nearly all of it is B-tree repacking rather than free pages. |
 | Every embedding stored twice, 28.5% of a generation | Phase D1, 2026-08-29. [ADR 9](adr/adr-0009-derived-vector-plane.md). |
