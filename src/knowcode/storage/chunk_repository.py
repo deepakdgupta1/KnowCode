@@ -116,6 +116,19 @@ class ChunkRepository(ABC):
         """
         pass
 
+    def compact(self) -> None:
+        """Squeeze the stored form down to what the rows actually need.
+
+        Called once on a staged artifact, after every write and before the
+        generation that owns it is digested. The default is a no-op: a
+        repository that keeps no file of its own has nothing to reclaim.
+
+        Implementations that rewrite a file must do it here rather than in
+        :meth:`close`, so that a reader opening and closing a published
+        generation never pays for it.
+        """
+        pass
+
     @abstractmethod
     def save(self, path: Path) -> None:
         """Persist chunk repository data to disk (if applicable)."""

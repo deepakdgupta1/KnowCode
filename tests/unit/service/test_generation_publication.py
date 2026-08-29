@@ -711,3 +711,100 @@ def test_pointer_json_is_human_readable(tmp_path: Path) -> None:
         (tmp_path / "knowcode_index" / POINTER_FILENAME).read_text(encoding="utf-8")
     )
     assert set(pointer) >= {"schema_version", "generation_id", "published_at"}
+
+
+# ----------------------------------------------------------------------
+# Compaction ordering (Phase A2)
+# ----------------------------------------------------------------------
+
+
+def _wide_source_tree(root: Path, modules: int = 24, per_module: int = 14) -> Path:
+    """Write a tree large enough that an uncompacted build leaves slack pages.
+
+    A one-function tree cannot tell a compacted database from an uncompacted
+    one: neither has anything to reclaim, so every assertion below would pass
+    without the change under test.
+    """
+    src = root / "src"
+    src.mkdir(exist_ok=True)
+    for m in range(modules):
+        body = "\n\n".join(
+            f"def fn_{m}_{i}(alpha, beta):\n"
+            f'    """Return the {i}th combination for module {m}.\n\n'
+            f"    {'Documented behaviour. ' * 8}\n"
+            f'    """\n'
+            f"    total = alpha + beta + {i}\n"
+            f"    return total * {m + 1}"
+            for i in range(per_module)
+        )
+        (src / f"m{m}.py").write_text(body + "\n", encoding="utf-8")
+    return src
+
+
+def _revacuum_page_count(db_path: Path, work_dir: Path) -> tuple[int, int]:
+    """Return ``(published_pages, pages_after_a_second_vacuum)``.
+
+    Vacuuming a copy is the only way to ask "was this file already minimal?"
+    without trusting the code that produced it.
+    """
+    import shutil
+    import sqlite3
+
+    copy = work_dir / f"revacuum-{db_path.name}"
+    shutil.copy2(db_path, copy)
+    conn = sqlite3.connect(str(copy))
+    try:
+        before = int(conn.execute("PRAGMA page_count").fetchone()[0])
+        conn.execute("VACUUM")
+        after = int(conn.execute("PRAGMA page_count").fetchone()[0])
+    finally:
+        conn.close()
+    return before, after
+
+
+def test_published_artifacts_are_already_compact(tmp_path: Path) -> None:
+    """Both databases are vacuumed before the generation is digested."""
+    src = _wide_source_tree(tmp_path)
+    service = _service(tmp_path, "faiss")
+
+    assert service.analyze(directory=src, output=tmp_path)["published"] is True
+
+    resolved = resolve_current_generation(tmp_path / "knowcode_index")
+    assert resolved is not None
+    work = tmp_path / "revacuum"
+    work.mkdir()
+    for db in (resolved.chunks_db, resolved.knowledge_db):
+        published_pages, revacuumed_pages = _revacuum_page_count(db, work)
+        assert revacuumed_pages == published_pages, (
+            f"{db.name} still had {published_pages - revacuumed_pages} pages of "
+            "slack at publication, so it was digested before it was compacted"
+        )
+
+
+def test_compaction_does_not_lose_rows_between_indexing_and_publication(
+    tmp_path: Path,
+) -> None:
+    """Count what the indexer wrote, then count what was published.
+
+    Nothing inside the publication path can catch a compaction that drops
+    rows. ``chunk_ids``, the counts, and the parity check are all read out of
+    ``chunks.db`` *after* it is compacted, so a lossy rewrite produces a
+    manifest that agrees with the damage. The only independent witness is the
+    chunk count the indexer reported before the file was ever touched.
+    """
+    src = _wide_source_tree(tmp_path, modules=6, per_module=6)
+    service = _service(tmp_path, "faiss")
+
+    stats = service.analyze(directory=src, output=tmp_path)
+    assert stats["published"] is True
+    indexed = stats["indexed_chunks"]
+    assert indexed > 0, "precondition: the build indexed something"
+
+    resolved = resolve_current_generation(tmp_path / "knowcode_index")
+    assert resolved is not None
+    assert resolved.manifest.counts["chunks"] == indexed
+    assert resolved.manifest.counts["vectors"] == indexed
+    assert generations.validate_generation(resolved.path, verify_digests=True) == []
+
+    reopened = _service(tmp_path, "faiss")
+    assert reopened.get_search_engine().search("fn_0_0", limit=10)

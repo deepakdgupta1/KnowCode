@@ -782,6 +782,29 @@ class SqliteChunkRepository(ChunkRepository):
     # Lifecycle
     # ------------------------------------------------------------------
 
+    def compact(self) -> None:
+        """Rewrite the database into the fewest pages its rows need.
+
+        Belongs to the moment a staged artifact is final, immediately before
+        the generation that owns it is digested. Running it afterwards would
+        change bytes the manifest has already checksummed, and folding it into
+        :meth:`close` would make every reader that opens and closes a
+        generation rewrite the whole file.
+
+        The rewrite lands in the write-ahead log and truncates the main file at
+        once, so whoever closes afterwards publishes the compact copy. Nothing
+        a row holds changes, durable embedding BLOBs included.
+        """
+        with self._write_lock:
+            if self._closed:
+                raise RepositoryClosedError(
+                    "SqliteChunkRepository is closed; open a new instance."
+                )
+            # VACUUM refuses to run inside a transaction. Every write path here
+            # commits its own, so this only settles a stray one.
+            self._writer_conn.commit()
+            self._writer_conn.execute("VACUUM")
+
     def close(self) -> None:
         """Close all connections idempotently after draining in-flight readers.
 

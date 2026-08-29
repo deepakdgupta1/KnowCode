@@ -939,6 +939,9 @@ class KnowCodeService:
 
                 indexer.save(staging.path)
                 vector_count = vector_store.count()
+                # Last write, and the last chance: the ``finally`` below
+                # closes the connection compaction needs.
+                chunk_repo.compact()
             except Exception as exc:  # noqa: BLE001 - classified, not swallowed
                 semantic_error = exc
                 logger.warning("Semantic index build failed: %s", exc)
@@ -1101,6 +1104,7 @@ class KnowCodeService:
                 entities=list(builder.entities.values()),
                 relationships=list(builder.relationships),
             )
+            store.compact()
         finally:
             store.close()
 

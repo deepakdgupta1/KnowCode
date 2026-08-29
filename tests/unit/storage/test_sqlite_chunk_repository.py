@@ -1190,3 +1190,157 @@ class TestIterEmbeddings:
             tracemalloc.stop()
 
         assert peak < materialized // 8
+
+
+# ---------------------------------------------------------------------------
+# Compaction
+# ---------------------------------------------------------------------------
+
+
+def _raw_rows(db_path: Path) -> list[tuple[object, ...]]:
+    """Read every column of every chunk row straight out of the file.
+
+    A second connection sees what landed on disk rather than what the
+    repository's own decoder would hand back, and raw ``embedding`` BLOBs
+    compare as bytes, which a float round-trip could not distinguish from a
+    re-encoding.
+    """
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    try:
+        columns = [row[1] for row in conn.execute("PRAGMA table_info(chunks)")]
+        return list(
+            conn.execute(f"SELECT {', '.join(columns)} FROM chunks ORDER BY chunk_id")
+        )
+    finally:
+        conn.close()
+
+
+def _page_stats(db_path: Path) -> tuple[int, int]:
+    """Return ``(page_count, freelist_count)``, read through any hot WAL.
+
+    Page counts, not file bytes: freed pages can still be sitting in the
+    write-ahead log, where ``stat()`` on the main file cannot see them.
+    """
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    try:
+        return (
+            int(conn.execute("PRAGMA page_count").fetchone()[0]),
+            int(conn.execute("PRAGMA freelist_count").fetchone()[0]),
+        )
+    finally:
+        conn.close()
+
+
+def _embedded_chunks(count: int, *, dimension: int = 32) -> list[CodeChunk]:
+    return [
+        CodeChunk(
+            id=f"vac_c{i}",
+            entity_id=f"/src/mod{i % 8}.py::fn{i}",
+            content=f"def fn{i}():\n    return {i} * {'x' * 200}\n",
+            tokens=[f"fn{i}", "return"],
+            metadata={"kind": "function", "index": i},
+            embedding=_float32([(i + j) / 1000.0 for j in range(dimension)]),
+        )
+        for i in range(count)
+    ]
+
+
+class TestCompaction:
+    """``compact()`` rewrites the file smaller without changing what it holds."""
+
+    def test_compact_reclaims_pages_freed_by_deletes(self, db_path: Path) -> None:
+        repo = SqliteChunkRepository(db_path, dimension=32)
+        try:
+            repo.add_batch(_embedded_chunks(400))
+            for i in range(8):
+                repo.remove_by_file(f"/src/mod{i}.py")
+            assert repo.count() == 0
+
+            pages_before, free_before = _page_stats(db_path)
+            assert free_before > 0, "precondition: deletes left reclaimable pages"
+
+            repo.compact()
+
+            pages_after, free_after = _page_stats(db_path)
+            assert free_after == 0
+            assert pages_after < pages_before
+        finally:
+            repo.close()
+
+    def test_compact_preserves_every_row_byte_for_byte(self, db_path: Path) -> None:
+        """Row counts and embedding BLOBs survive the rewrite untouched."""
+        repo = SqliteChunkRepository(db_path, dimension=32)
+        try:
+            repo.add_batch(_embedded_chunks(400))
+            repo.remove_by_file("/src/mod3.py")
+            before = _raw_rows(db_path)
+            assert before, "precondition: rows survive the deletes"
+
+            repo.compact()
+
+            assert _raw_rows(db_path) == before
+            assert repo.count() == len(before)
+        finally:
+            repo.close()
+
+    def test_compact_runs_against_a_hot_write_ahead_log(self, db_path: Path) -> None:
+        """Compaction happens mid-build, before the store is ever closed."""
+        repo = SqliteChunkRepository(db_path, dimension=32)
+        try:
+            repo.add_batch(_embedded_chunks(200))
+            assert db_path.with_name(db_path.name + "-wal").exists(), (
+                "precondition: the WAL is hot"
+            )
+
+            repo.compact()
+
+            assert repo.count() == 200
+            assert repo.get("vac_c7") is not None
+        finally:
+            repo.close()
+
+    def test_compact_leaves_the_store_writable(self, db_path: Path) -> None:
+        repo = SqliteChunkRepository(db_path, dimension=32)
+        try:
+            repo.add_batch(_embedded_chunks(50))
+            repo.compact()
+
+            repo.add(
+                CodeChunk(
+                    id="after_compact",
+                    entity_id="/src/late.py::late",
+                    content="def late(): pass",
+                    tokens=["late"],
+                    embedding=_float32([0.5] * 32),
+                )
+            )
+            assert repo.get("after_compact") is not None
+            assert repo.count() == 51
+        finally:
+            repo.close()
+
+    def test_compact_is_idempotent(self, db_path: Path) -> None:
+        """A second compaction of an already-compact file changes nothing."""
+        repo = SqliteChunkRepository(db_path, dimension=32)
+        try:
+            repo.add_batch(_embedded_chunks(300))
+            repo.remove_by_file("/src/mod1.py")
+
+            repo.compact()
+            first_pages = _page_stats(db_path)
+            first_rows = _raw_rows(db_path)
+
+            repo.compact()
+
+            assert _page_stats(db_path) == first_pages
+            assert _raw_rows(db_path) == first_rows
+        finally:
+            repo.close()
+
+    def test_compact_after_close_raises(self, db_path: Path) -> None:
+        repo = SqliteChunkRepository(db_path, dimension=32)
+        repo.add_batch(_embedded_chunks(10))
+        repo.close()
+
+        with pytest.raises(RepositoryClosedError):
+            repo.compact()

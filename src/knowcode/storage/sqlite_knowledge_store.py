@@ -676,6 +676,27 @@ class SqliteKnowledgeStore:
     # Lifecycle and migration
     # ------------------------------------------------------------------
 
+    def compact(self) -> None:
+        """Rewrite the database into the fewest pages its rows need.
+
+        Called once on a staged ``knowledge.db``, after the graph is written
+        and before the generation is digested. Bulk-inserting entities and
+        relationships leaves the index B-trees packed loosely, and that slack
+        is copied into every retained generation until it is squeezed out here.
+
+        Mirrors :meth:`SqliteChunkRepository.compact`, including its ordering
+        constraint: a rewrite after the manifest is built breaks every digest.
+        """
+        with self._write_lock:
+            if self._closed:
+                raise RepositoryClosedError(
+                    "SqliteKnowledgeStore is closed; open a new instance."
+                )
+            # VACUUM refuses to run inside a transaction. Every write path here
+            # commits its own, so this only settles a stray one.
+            self._writer_conn.commit()
+            self._writer_conn.execute("VACUUM")
+
     def close(self) -> None:
         """Close all connections idempotently after draining in-flight readers."""
         if self._closed:

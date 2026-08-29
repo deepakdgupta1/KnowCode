@@ -418,3 +418,151 @@ def test_closed_store_raises(tmp_path: Path) -> None:
     with pytest.raises(RepositoryClosedError):
         store.add_entity(_make_entity("file.py::y", EntityKind.FUNCTION, "y"))
     store.close()  # idempotent
+
+
+# ---------------------------------------------------------------------------
+# Compaction
+# ---------------------------------------------------------------------------
+
+
+def _entity_rows(db_path: Path) -> list[tuple[object, ...]]:
+    """Read every column of every entity row straight out of the file."""
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    try:
+        columns = [row[1] for row in conn.execute("PRAGMA table_info(entities)")]
+        return [
+            tuple(row)
+            for row in conn.execute(
+                f"SELECT {', '.join(columns)} FROM entities ORDER BY entity_id"
+            )
+        ]
+    finally:
+        conn.close()
+
+
+def _page_stats(db_path: Path) -> tuple[int, int]:
+    """Return ``(page_count, freelist_count)``, read through any hot WAL."""
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    try:
+        return (
+            int(conn.execute("PRAGMA page_count").fetchone()[0]),
+            int(conn.execute("PRAGMA freelist_count").fetchone()[0]),
+        )
+    finally:
+        conn.close()
+
+
+def _populated_store(db_path: Path, count: int) -> SqliteKnowledgeStore:
+    store = SqliteKnowledgeStore(db_path)
+    entities = [
+        Entity(
+            id=f"src/mod{i % 8}.py::fn{i}",
+            kind=EntityKind.FUNCTION,
+            name=f"fn{i}",
+            qualified_name=f"mod{i % 8}.fn{i}",
+            location=Location(f"src/mod{i % 8}.py", i, i + 4),
+            source_code=f"def fn{i}():\n    return {i} * {'y' * 200}\n",
+            docstring=f"Documented function number {i}. " * 4,
+            metadata={"content_hash": f"hash{i}"},
+        )
+        for i in range(count)
+    ]
+    relationships = [
+        Relationship(
+            source_id=f"src/mod{i % 8}.py::fn{i}",
+            target_id=f"src/mod{(i + 1) % 8}.py::fn{(i + 1) % count}",
+            kind=RelationshipKind.CALLS,
+        )
+        for i in range(count)
+    ]
+    store.bulk_insert(entities=entities, relationships=relationships)
+    return store
+
+
+def test_compact_reclaims_pages_freed_by_deletes(tmp_path: Path) -> None:
+    db_path = tmp_path / "knowledge.db"
+    store = _populated_store(db_path, 400)
+    try:
+        with store._writer_conn:
+            store._writer_conn.execute("DELETE FROM relationships")
+            store._writer_conn.execute("DELETE FROM entities")
+
+        pages_before, free_before = _page_stats(db_path)
+        assert free_before > 0, "precondition: deletes left reclaimable pages"
+
+        store.compact()
+
+        pages_after, free_after = _page_stats(db_path)
+        assert free_after == 0
+        assert pages_after < pages_before
+    finally:
+        store.close()
+
+
+def test_compact_preserves_every_entity_row_byte_for_byte(tmp_path: Path) -> None:
+    db_path = tmp_path / "knowledge.db"
+    store = _populated_store(db_path, 400)
+    try:
+        before = _entity_rows(db_path)
+        assert before, "precondition: the store holds entities"
+        relationships_before = len(store.relationships)
+
+        store.compact()
+
+        assert _entity_rows(db_path) == before
+        assert len(store.entities) == len(before)
+        assert len(store.relationships) == relationships_before
+    finally:
+        store.close()
+
+
+def test_compact_runs_against_a_hot_write_ahead_log(tmp_path: Path) -> None:
+    """Compaction happens mid-build, before the store is ever closed."""
+    db_path = tmp_path / "knowledge.db"
+    store = _populated_store(db_path, 200)
+    try:
+        assert db_path.with_name(db_path.name + "-wal").exists(), (
+            "precondition: the WAL is hot"
+        )
+
+        store.compact()
+
+        assert store.get_entity("src/mod7.py::fn7") is not None
+    finally:
+        store.close()
+
+
+def test_compact_leaves_the_store_writable(tmp_path: Path) -> None:
+    db_path = tmp_path / "knowledge.db"
+    store = _populated_store(db_path, 50)
+    try:
+        store.compact()
+        store.add_entity(_make_entity("late.py::late", EntityKind.FUNCTION, "late"))
+
+        assert store.get_entity("late.py::late") is not None
+    finally:
+        store.close()
+
+
+def test_compact_is_idempotent(tmp_path: Path) -> None:
+    db_path = tmp_path / "knowledge.db"
+    store = _populated_store(db_path, 300)
+    try:
+        store.compact()
+        first_pages = _page_stats(db_path)
+        first_rows = _entity_rows(db_path)
+
+        store.compact()
+
+        assert _page_stats(db_path) == first_pages
+        assert _entity_rows(db_path) == first_rows
+    finally:
+        store.close()
+
+
+def test_compact_after_close_raises(tmp_path: Path) -> None:
+    store = _populated_store(tmp_path / "knowledge.db", 10)
+    store.close()
+
+    with pytest.raises(RepositoryClosedError):
+        store.compact()

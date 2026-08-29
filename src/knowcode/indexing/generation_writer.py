@@ -203,6 +203,7 @@ class StagedGenerationWriter:
         self._assert_open()
         try:
             self.indexer.save(self.path)
+            self.indexer.chunk_repo.compact()
             self.indexer.chunk_repo.close()
 
             chunk_ids = generations.read_chunk_ids(self.path / generations.CHUNKS_DB)
