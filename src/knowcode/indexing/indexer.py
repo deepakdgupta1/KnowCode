@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import threading
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional, Sequence
+from typing import Any, Callable, Iterable, Iterator, Optional, Sequence
 
 from knowcode.data_models import CodeChunk, ParseResult
 from knowcode.storage.chunk_repository import ChunkRepository
 from knowcode.storage.sqlite_chunk_repository import SqliteChunkRepository
 from knowcode.indexing.chunker import Chunker
+from knowcode.indexing.embedding_batch import BatchEmbedder, EmbeddingBatchError
 from knowcode.indexing.file_updates import (
     FileMoveCommit,
     FileUpdateCommit,
@@ -26,6 +28,58 @@ from knowcode.utils.entity_identity import normalize_file_identity
 from knowcode.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+#: Files a bulk pipeline plans before it embeds, whatever their chunk count.
+#: Bounds the memory a directory of tiny files can accumulate, and bounds how
+#: long progress can stall when nothing is triggering the chunk-count flush.
+MAX_WINDOW_FILES = 512
+
+#: ``(files_done, files_total)``; ``files_total`` is ``None`` when unknown.
+ProgressCallback = Callable[[int, Optional[int]], None]
+
+
+def _report_progress(
+    callback: Optional[ProgressCallback], done: int, total: Optional[int]
+) -> None:
+    """Invoke a progress callback without letting it break indexing.
+
+    The callback belongs to whoever asked for the build — an MCP lifecycle job,
+    a CLI spinner — and a reporter that throws must not cost the caller its
+    generation. The failure is logged rather than swallowed silently.
+    """
+    if callback is None:
+        return
+    try:
+        callback(done, total)
+    except Exception as exc:  # noqa: BLE001 - a reporter cannot fail a build
+        logger.warning("Index progress callback failed: %s", exc)
+
+
+@dataclass
+class _PlannedFile:
+    """One file parsed, chunked, and waiting only on embeddings.
+
+    Nothing live has been touched yet, which is what lets a bulk pipeline hold
+    several of these open at once and embed their chunks as one batch.
+    """
+
+    file_path: str
+    chunks: list[CodeChunk] = field(default_factory=list)
+    pending: list[CodeChunk] = field(default_factory=list)
+    parse_errors: tuple[str, ...] = ()
+    reused: int = 0
+    #: Set when this file alone could not be embedded, so the window commits
+    #: its healthy neighbours and reports this one as kept back.
+    failure: Optional[FileUpdatePreparationError] = None
+
+
+@dataclass(frozen=True)
+class _IndexTask:
+    """One file a bulk pipeline must either replace or remove."""
+
+    file_path: str | Path
+    parse_result: Optional[ParseResult] = None
+    delete: bool = False
 
 
 class Indexer:
@@ -49,6 +103,8 @@ class Indexer:
         embedding_provider: EmbeddingProviderProtocol,
         chunk_repo: Optional[ChunkRepository] = None,
         vector_store: Optional[VectorStoreProtocol] = None,
+        *,
+        batch_embedder: Optional[BatchEmbedder] = None,
     ) -> None:
         """Initialize an indexer with optional storage backends.
 
@@ -56,8 +112,13 @@ class Indexer:
             embedding_provider: Provider used to generate chunk embeddings.
             chunk_repo: Optional chunk repository (defaults to in-memory).
             vector_store: Optional vector store (defaults to FAISS-backed store).
+            batch_embedder: How chunk embeddings are batched, overlapped, and
+                retried. Defaults to :class:`~knowcode.indexing.
+                embedding_batch.BatchEmbedder` over ``embedding_provider``.
+                Injected by tests that need a fixed batch size or no backoff.
         """
         self.embedding_provider = embedding_provider
+        self._batch_embedder = batch_embedder or BatchEmbedder(embedding_provider)
         self.chunk_repo: ChunkRepository = chunk_repo or SqliteChunkRepository(
             ":memory:", dimension=embedding_provider.config.dimension
         )
@@ -121,6 +182,37 @@ class Indexer:
             FileUpdatePreparationError: The replacement could not be built or
                 validated. Nothing was mutated.
         """
+        plan = self._plan_file_update(
+            file_path, parse_result=parse_result, reuse_embeddings=reuse_embeddings
+        )
+        if plan.pending:
+            # No retry here. One file's transaction is what the watch worker
+            # drives, and that worker already retries a ``retryable`` failure
+            # with its own backoff (Step 16). Retrying underneath it would
+            # multiply the two budgets and stall the queue for the minutes its
+            # design deliberately refuses to stall for. The bulk pipelines,
+            # which have no such outer loop, spend the budget themselves.
+            self._embed_pending(plan.file_path, plan.pending, retry=False)
+        return self._finish_plan(plan)
+
+    def _plan_file_update(
+        self,
+        file_path: str | Path,
+        *,
+        parse_result: Optional[ParseResult] = None,
+        reuse_embeddings: bool = True,
+    ) -> _PlannedFile:
+        """Parse, chunk, and reuse embeddings for one file. No network, no writes.
+
+        Everything :meth:`prepare_file_update` does *except* the provider call,
+        split out so a bulk pipeline can plan many files and then embed their
+        pending chunks as one cross-file batch.
+
+        Raises:
+            FileUpdatePreparationError: The file exists but produced nothing
+                extractable. Same rule as before the split: that is a failed
+                replacement, never a deletion.
+        """
         file_identity = normalize_file_identity(file_path)
         path = Path(file_identity)
 
@@ -129,7 +221,7 @@ class Indexer:
                 # A deleted or no-longer-indexable file prepares as a deletion
                 # rather than an error: that is exactly what a watch delete
                 # event and a removed-in-git file need to commit.
-                return PreparedFileUpdate(file_identity, (), self.dimension)
+                return _PlannedFile(file_identity)
             parse_result = self._parse_one_file(path)
 
         chunks = self.chunker.process_parse_result(parse_result)
@@ -141,23 +233,32 @@ class Indexer:
                 # with a syntax error. Committing this as a deletion would drop
                 # the file out of the index until the next event.
                 raise FileUpdatePreparationError(file_identity, list(parse_errors))
-            return PreparedFileUpdate(
-                file_identity, (), self.dimension, parse_errors=parse_errors
-            )
+            return _PlannedFile(file_identity, parse_errors=parse_errors)
 
         reused = self._reuse_durable_embeddings(chunks) if reuse_embeddings else 0
-        pending = [chunk for chunk in chunks if chunk.embedding is None]
-        if pending:
-            self._embed_pending(file_identity, pending)
-
-        validate_prepared_chunks(file_identity, chunks, self.dimension)
-        return PreparedFileUpdate(
+        return _PlannedFile(
             file_path=file_identity,
-            chunks=tuple(chunks),
-            dimension=self.dimension,
-            reused_embeddings=reused,
-            embedded_chunks=len(pending),
+            chunks=chunks,
+            pending=[chunk for chunk in chunks if chunk.embedding is None],
             parse_errors=parse_errors,
+            reused=reused,
+        )
+
+    def _finish_plan(self, plan: _PlannedFile) -> PreparedFileUpdate:
+        """Validate an embedded plan into a committable update.
+
+        Raises:
+            FileUpdatePreparationError: The replacement did not validate.
+                Nothing has been mutated.
+        """
+        validate_prepared_chunks(plan.file_path, plan.chunks, self.dimension)
+        return PreparedFileUpdate(
+            file_path=plan.file_path,
+            chunks=tuple(plan.chunks),
+            dimension=self.dimension,
+            reused_embeddings=plan.reused,
+            embedded_chunks=len(plan.pending),
+            parse_errors=plan.parse_errors,
         )
 
     def commit_file_update(self, update: PreparedFileUpdate) -> FileUpdateCommit:
@@ -288,59 +389,52 @@ class Indexer:
             reused += 1
         return reused
 
-    def _embed_pending(self, file_identity: str, pending: list[CodeChunk]) -> None:
-        """Embed the chunks with no reusable vector, in one batch."""
+    def _embed_pending(
+        self, file_identity: str, pending: list[CodeChunk], *, retry: bool
+    ) -> None:
+        """Embed one file's chunks that have no reusable vector.
+
+        Args:
+            file_identity: Canonical identity blamed if the provider fails.
+            pending: Chunks still missing an embedding.
+            retry: Spend the embedder's retry budget. Both of this method's
+                callers pass ``False``; see :meth:`_run_bulk_index` for where
+                the budget is spent and why it is not spent here.
+
+        Raises:
+            FileUpdatePreparationError: The provider failed, or answered with
+                the wrong number of vectors. Nothing has been mutated. The
+                error keeps the batch's own ``retryable`` verdict, so the watch
+                worker still knows a provider outage is worth another attempt
+                while a wrong-count response is not.
+        """
         try:
-            embeddings = self.embedding_provider.embed(
-                [chunk.content for chunk in pending]
+            embeddings = self._batch_embedder.embed(
+                [chunk.content for chunk in pending], retry=retry
             )
-        except Exception as exc:  # noqa: BLE001 - reported as a preparation failure
+        except EmbeddingBatchError as exc:
             # The chunks are fine; the provider is not. A caller that can wait
             # and try again — the watch worker — should (Step 16).
             raise FileUpdatePreparationError(
-                file_identity, [f"embedding failed: {exc}"], retryable=True
+                file_identity, [f"embedding failed: {exc}"], retryable=exc.retryable
             ) from exc
 
-        if len(embeddings) != len(pending):
-            raise FileUpdatePreparationError(
-                file_identity,
-                [
-                    f"embedding provider returned {len(embeddings)} vectors "
-                    f"for {len(pending)} chunks"
-                ],
-            )
         for chunk, embedding in zip(pending, embeddings):
             chunk.embedding = list(embedding)
 
-    def _replace_or_report(
-        self,
-        file_path: str | Path,
-        *,
-        parse_result: Optional[ParseResult] = None,
-        reuse_embeddings: bool = True,
-    ) -> int:
-        """Replace one file inside a bulk pipeline, keeping it on failure.
+    def _report_failed_update(self, exc: FileUpdatePreparationError) -> None:
+        """Record a file a bulk pipeline could not replace, and say so.
 
         A bulk build must not abort because one file was saved mid-edit: that
         file simply keeps whatever generation it already had. The failure is
         recorded in :attr:`failed_updates` and logged rather than swallowed,
         because a silently skipped file looks identical to an up-to-date one.
         """
-        try:
-            commit = self.replace_file(
-                file_path,
-                parse_result=parse_result,
-                reuse_embeddings=reuse_embeddings,
-            )
-        except FileUpdatePreparationError as exc:
-            logger.warning(
-                "Keeping the previous index generation for %s: %s",
-                exc.file_path,
-                "; ".join(exc.reasons),
-            )
-            self.failed_updates.append((exc.file_path, "; ".join(exc.reasons)))
-            return 0
-        return commit.chunk_count
+        reason = "; ".join(exc.reasons)
+        logger.warning(
+            "Keeping the previous index generation for %s: %s", exc.file_path, reason
+        )
+        self.failed_updates.append((exc.file_path, reason))
 
     def _apply_vector_generation(
         self, chunks: Sequence[CodeChunk], removed_ids: Sequence[str]
@@ -390,8 +484,192 @@ class Indexer:
     # Bulk pipelines
     # ------------------------------------------------------------------
 
+    def _run_bulk_index(
+        self,
+        tasks: Iterable[_IndexTask],
+        *,
+        reuse_embeddings: bool,
+        on_progress: Optional[ProgressCallback],
+        files_total: Optional[int],
+    ) -> int:
+        """Plan files in windows, embed each window as one batch, commit per file.
+
+        The pipeline this replaced embedded one file per provider call and ran
+        those calls one after another, so an N-file repository cost N sequential
+        network round-trips — the dominant wall-clock cost of a cold build.
+        Here, files are planned (parsed, chunked, durable embeddings reused)
+        until a window holds enough pending chunks to fill every worker, and the
+        whole window is embedded as concurrent provider-sized batches.
+
+        What deliberately did **not** move:
+
+        * **The transaction boundary.** Every file is still committed by its own
+          :meth:`commit_file_update`, so a failure still leaves exactly that
+          file's previous generation intact and never a half-written one.
+        * **Parity.** A window is embedded before any of its files commit, so a
+          committed chunk always carries its own vector and the chunk/vector
+          counts ``build_generation`` asserts on stay exact.
+        * **Failure isolation.** A window whose batch fails is retried one file
+          at a time, so a single file the provider rejects is kept back alone
+          instead of taking its neighbours with it.
+
+        Only embedding runs off the calling thread. Parsing, chunking, commits,
+        and every store write stay here, in order, which is what keeps the
+        chunk repository's single-writer contract and the vector generation
+        unchanged.
+
+        This driver also owns the retry budget for transient provider failures,
+        because it is the outermost loop over these files. The single-file
+        transaction deliberately does not retry: there, the outermost loop is
+        the watch worker, which already does.
+
+        Args:
+            tasks: Files to replace or remove, consumed lazily.
+            reuse_embeddings: Look up durable embeddings for unchanged content.
+            on_progress: Called with ``(files_done, files_total)`` after each
+                file is committed or recorded as kept back.
+            files_total: Files the caller expects, or ``None`` if unknown.
+
+        Returns:
+            Total number of chunks committed.
+        """
+        total_chunks = 0
+        files_done = 0
+        window: list[_PlannedFile] = []
+        pending_in_window = 0
+        # One full round of batches across every worker: enough to keep the
+        # pool busy, small enough that progress and memory stay bounded.
+        window_chunk_limit = (
+            self._batch_embedder.batch_size * self._batch_embedder.max_workers
+        )
+
+        _report_progress(on_progress, 0, files_total)
+
+        def flush() -> None:
+            nonlocal total_chunks, files_done, pending_in_window
+            if not window:
+                return
+            self._embed_window(window)
+            for plan in window:
+                total_chunks += self._commit_planned(plan)
+                files_done += 1
+                # Reported per file even though embedding was batched: a file
+                # counts as done when its generation is committed, so progress
+                # advances in bursts at window boundaries rather than smoothly.
+                _report_progress(on_progress, files_done, files_total)
+            window.clear()
+            pending_in_window = 0
+
+        for task in tasks:
+            if task.delete:
+                # Flushed first so a delete never overtakes a replacement that
+                # is still sitting in the window; the pipelines only ever queue
+                # one task per identity, but the ordering is worth not relying
+                # on that. Consecutive deletes cost nothing: the window is
+                # already empty.
+                flush()
+                self.delete_file(task.file_path)
+                files_done += 1
+                _report_progress(on_progress, files_done, files_total)
+                continue
+
+            try:
+                plan = self._plan_file_update(
+                    task.file_path,
+                    parse_result=task.parse_result,
+                    reuse_embeddings=reuse_embeddings,
+                )
+            except FileUpdatePreparationError as exc:
+                self._report_failed_update(exc)
+                files_done += 1
+                _report_progress(on_progress, files_done, files_total)
+                continue
+
+            window.append(plan)
+            pending_in_window += len(plan.pending)
+            window_is_full = (
+                pending_in_window >= window_chunk_limit
+                or len(window) >= MAX_WINDOW_FILES
+            )
+            if window_is_full:
+                flush()
+
+        flush()
+        return total_chunks
+
+    def _embed_window(self, window: Sequence[_PlannedFile]) -> None:
+        """Embed every pending chunk in a window as one cross-file batch.
+
+        This is the one place the retry budget is spent. A bulk build has no
+        outer loop that would try again — unlike a watched file, whose worker
+        does — so a transient blip here would otherwise cost the whole window's
+        files their new generation.
+
+        A failed batch falls back to embedding the window one file at a time,
+        which is what preserves the per-file isolation batching would otherwise
+        cost: a single file the provider rejects is kept back alone rather than
+        failing every file that happened to share its batch. The fallback makes
+        one attempt per file because the batch already spent a full retry
+        budget; re-spending one per file would multiply an outage by the
+        window size.
+        """
+        texts = [chunk.content for plan in window for chunk in plan.pending]
+        if not texts:
+            return
+
+        try:
+            embeddings = self._batch_embedder.embed(texts)
+        except EmbeddingBatchError as exc:
+            logger.warning(
+                "Embedding %d chunks across %d files failed (%s); "
+                "retrying one file at a time so only the file at fault is "
+                "kept back",
+                len(texts),
+                len(window),
+                exc,
+            )
+            self._embed_window_per_file(window)
+            return
+
+        offset = 0
+        for plan in window:
+            for chunk in plan.pending:
+                chunk.embedding = embeddings[offset]
+                offset += 1
+
+    def _embed_window_per_file(self, window: Sequence[_PlannedFile]) -> None:
+        """Embed a failed window file by file, blaming only what actually fails."""
+        for plan in window:
+            if not plan.pending:
+                continue
+            try:
+                self._embed_pending(plan.file_path, plan.pending, retry=False)
+            except FileUpdatePreparationError as exc:
+                plan.failure = exc
+
+    def _commit_planned(self, plan: _PlannedFile) -> int:
+        """Commit one planned file, keeping its previous generation on failure.
+
+        Raises:
+            FileUpdateCommitError: The commit left the stores disagreeing. Not
+                caught here, exactly as before: the caller's generation is
+                inconsistent and a bulk build must not publish it.
+        """
+        try:
+            if plan.failure is not None:
+                raise plan.failure
+            update = self._finish_plan(plan)
+        except FileUpdatePreparationError as exc:
+            self._report_failed_update(exc)
+            return 0
+        return self.commit_file_update(update).chunk_count
+
     def index_directory(
-        self, root_dir: str | Path, *, builder: Optional[GraphBuilder] = None
+        self,
+        root_dir: str | Path,
+        *,
+        builder: Optional[GraphBuilder] = None,
+        on_progress: Optional[ProgressCallback] = None,
     ) -> int:
         """Index all supported files under a directory.
 
@@ -402,6 +680,11 @@ class Indexer:
                 ``knowledge.db`` from, so the chunk set derives from exactly the
                 parse that produced the entities (Step 14). Re-scanning here
                 would apply a different ignore set.
+            on_progress: Optional ``(files_done, files_total)`` callback invoked
+                once with zero and then after each file is committed or
+                recorded as kept back. Embedding is batched across files, so
+                the count advances in bursts at window boundaries rather than
+                one file at a time. Never raises into the indexing loop.
 
         Returns:
             Total number of chunks added to the index.
@@ -421,17 +704,19 @@ class Indexer:
                 builder._parse_file(file_info) for file_info in scanner.scan_all()
             ]
 
-        total_chunks = 0
         self.failed_updates = []
-        for parse_result in parse_results:
-            # One prepare/commit transaction per file, same as the incremental
-            # and watch paths. Nothing can be reused in a fresh generation, so
-            # the per-chunk hash lookup is skipped.
-            total_chunks += self._replace_or_report(
-                parse_result.file_path,
-                parse_result=parse_result,
-                reuse_embeddings=False,
-            )
+        # One commit transaction per file, same as the incremental and watch
+        # paths; only the embedding is batched across them. Nothing can be
+        # reused in a fresh generation, so the per-chunk hash lookup is skipped.
+        total_chunks = self._run_bulk_index(
+            (
+                _IndexTask(parse_result.file_path, parse_result=parse_result)
+                for parse_result in parse_results
+            ),
+            reuse_embeddings=False,
+            on_progress=on_progress,
+            files_total=len(parse_results),
+        )
 
         # Store current commit hash for future incremental indexing
         try:
@@ -444,11 +729,20 @@ class Indexer:
 
         return total_chunks
 
-    def index_incremental(self, root_dir: str | Path) -> int:
+    def index_incremental(
+        self,
+        root_dir: str | Path,
+        *,
+        on_progress: Optional[ProgressCallback] = None,
+    ) -> int:
         """Incrementally index only changed files and skip re-embedding unchanged chunks.
 
         Args:
             root_dir: Root directory of the repository.
+            on_progress: Optional ``(files_done, files_total)`` callback with
+                the same contract as :meth:`index_directory`. A fallback to a
+                full index forwards it, so a caller reporting progress keeps
+                reporting it.
 
         Returns:
             Number of new chunks added.
@@ -468,14 +762,14 @@ class Indexer:
             logger.warning(
                 f"Failed to get current git commit: {e}. Incremental indexer falling back to full index."
             )
-            return self.index_directory(root_dir)
+            return self.index_directory(root_dir, on_progress=on_progress)
 
         if not last_commit:
             logger.info(
                 "No last_indexed_commit found in manifest. Falling back to full index."
             )
             self.manifest["last_indexed_commit"] = current_commit
-            return self.index_directory(root_dir)
+            return self.index_directory(root_dir, on_progress=on_progress)
 
         if current_commit == last_commit:
             logger.info(
@@ -496,7 +790,7 @@ class Indexer:
         except Exception as e:
             logger.warning(f"Failed to get git diff: {e}. Falling back to full index.")
             self.manifest["last_indexed_commit"] = current_commit
-            return self.index_directory(root_dir)
+            return self.index_directory(root_dir, on_progress=on_progress)
 
         changed_files_rel = list(set(changed_files_rel))
         changed_files = [
@@ -507,7 +801,6 @@ class Indexer:
             self.manifest["last_indexed_commit"] = current_commit
             return 0
 
-        total_chunks = 0
         self.failed_updates = []
 
         # Only the changed files are parsed. The scan supplies file identity
@@ -515,21 +808,27 @@ class Indexer:
         # the per-file parse result and nothing else.
         file_map = {f.path.resolve(): f for f in Scanner(root_path).scan_all()}
 
-        for file_path_str in changed_files:
-            file_path = Path(file_path_str).resolve()
+        def tasks() -> Iterator[_IndexTask]:
+            """Parse lazily, so only a window's parse results are held at once."""
+            for file_path_str in changed_files:
+                file_info = file_map.get(Path(file_path_str).resolve())
+                if file_info is None:
+                    # Deleted, ignored, or no longer an indexable type.
+                    yield _IndexTask(file_path_str, delete=True)
+                    continue
+                yield _IndexTask(
+                    file_path_str, parse_result=self._parse_one_file(file_info.path)
+                )
 
-            file_info = file_map.get(file_path)
-            if file_info is None:
-                # Deleted, ignored, or no longer an indexable type.
-                self.delete_file(file_path_str)
-                continue
-
-            # One transaction per file: parse, chunk, and embed first, then
-            # replace the file's whole generation. A failure here leaves the
-            # file's previous chunks and vectors searchable.
-            total_chunks += self._replace_or_report(
-                file_path_str, parse_result=self._parse_one_file(file_info.path)
-            )
+        # One commit transaction per file: parse, chunk, and embed first, then
+        # replace the file's whole generation. A failure there leaves the file's
+        # previous chunks and vectors searchable.
+        total_chunks = self._run_bulk_index(
+            tasks(),
+            reuse_embeddings=True,
+            on_progress=on_progress,
+            files_total=len(changed_files),
+        )
 
         self.manifest["last_indexed_commit"] = current_commit
         return total_chunks

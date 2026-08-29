@@ -44,7 +44,7 @@ read the current generation through leases.
 | Graph builder | `indexing/graph_builder.py` | Entities + relationships into a networkx graph; unresolved references stay visible (`unresolved::…`) |
 | Knowledge store | `storage/knowledge_store.py`, `sqlite_knowledge_store.py` | In-memory graph with JSON/SQLite persistence; graph queries, tracing, impact |
 | Chunker | `indexing/chunker.py`, `prose_chunker.py` | Entity-aligned code chunks (1000 chars/100 overlap); prototype heading-hierarchy prose chunking |
-| Indexer | `indexing/indexer.py` | Embedding pipeline, durable embedding cache (content-hash reuse), generation staging |
+| Indexer | `indexing/indexer.py` | Embedding pipeline (batched across files, bounded concurrency, retry — `indexing/embedding_batch.py`), durable embedding cache (content-hash reuse), generation staging |
 | Hybrid index | `retrieval/hybrid_index.py` | BM25 + dense retrieval fused by RRF (α=0.2 sparse-heavy) |
 | Reranker | `retrieval/reranker.py` | VoyageAI cross-encoder; deterministic signal-based fallback |
 | Orchestrator | `retrieval/orchestrator.py` | Exact/semantic/lexical routing, dependency expansion, dedup, budgets |

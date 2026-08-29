@@ -234,3 +234,101 @@ def test_create_prose_provider_none_config_returns_dummy() -> None:
     """Without any AppConfig, prose selection degrades to the deterministic dummy."""
     provider = create_prose_embedding_provider(app_config=None)
     assert isinstance(provider, DummyEmbeddingProvider)
+
+
+# --- concurrent client initialization ---------------------------------------
+#
+# Indexing embeds several batches at once, so two threads can reach a
+# provider's lazy ``_get_client`` before either has finished building one.
+# Unguarded, that builds two clients and throws one away — and for VoyageAI it
+# runs the credential lookup twice.
+
+
+def _build_clients_concurrently(
+    provider: Any, monkeypatch: pytest.MonkeyPatch, factory_target: str
+) -> int:
+    """Call ``embed`` from several threads at once; count clients built."""
+    import threading
+
+    built = 0
+    lock = threading.Lock()
+    start = threading.Barrier(4)
+
+    def slow_factory(*args: Any, **kwargs: Any) -> Any:
+        nonlocal built
+        with lock:
+            built += 1
+        # Widen the window a real factory (a network handshake) would open.
+        import time
+
+        time.sleep(0.05)
+        return _StubClient()
+
+    monkeypatch.setattr(factory_target, slow_factory)
+
+    errors: list[BaseException] = []
+
+    def worker() -> None:
+        try:
+            start.wait(timeout=5)
+            provider.embed(["text"])
+        except BaseException as exc:  # noqa: BLE001 - re-raised by the assert
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker) for _ in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=5)
+
+    assert errors == []
+    return built
+
+
+class _StubClient:
+    """Answers both provider SDK shapes with fixed-width vectors."""
+
+    def __init__(self) -> None:
+        self.embeddings = self
+
+    def create(self, model: str, input: list[str]) -> Any:
+        class _Item:
+            def __init__(self) -> None:
+                self.embedding = [0.1, 0.2, 0.3]
+
+        class _Response:
+            def __init__(self, count: int) -> None:
+                self.data = [_Item() for _ in range(count)]
+
+        return _Response(len(input))
+
+    def embed(self, texts: list[str], model: str, input_type: str) -> list[list[float]]:
+        return [[0.1, 0.2, 0.3] for _ in texts]
+
+
+def test_openai_builds_one_client_under_concurrent_embeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY_TEST", "key")
+    provider = OpenAIEmbeddingProvider(
+        EmbeddingConfig(), api_key_env="OPENAI_API_KEY_TEST"
+    )
+    provider.client = None
+
+    built = _build_clients_concurrently(
+        provider, monkeypatch, "knowcode.llm.embedding._create_openai_client"
+    )
+
+    assert built == 1
+
+
+def test_voyageai_builds_one_client_under_concurrent_embeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = VoyageAIEmbeddingProvider(EmbeddingConfig(provider="voyageai"))
+
+    built = _build_clients_concurrently(
+        provider, monkeypatch, "knowcode.llm.voyageai_client.get_voyageai_client"
+    )
+
+    assert built == 1
