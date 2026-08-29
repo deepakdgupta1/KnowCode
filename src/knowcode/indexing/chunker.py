@@ -81,8 +81,19 @@ class Chunker:
             last_modified = str(Path(file_path).stat().st_mtime)
 
         # 1. Module and Import Chunks
-        if source_code:
-            self._emit_module_chunks(file_path, source_code)
+        file_entity = module_entity or next(
+            (e for e in result.entities if e.kind == EntityKind.DOCUMENT), None
+        )
+        if source_code and file_entity is not None:
+            self._emit_module_chunks(file_entity.id, source_code)
+        elif source_code:
+            # Nothing in the graph stands for this file, so these chunks would
+            # have no entity to hang on. Emitting them anyway is what put 14%
+            # of chunk text off the graph (BL-6).
+            logger.debug(
+                "No module or document entity for %s; skipping its module chunks",
+                file_path,
+            )
 
         # 2. Entity Chunks (Classes, Functions, Methods)
         for entity in result.entities:
@@ -202,42 +213,39 @@ class Chunker:
     # Code
     # ------------------------------------------------------------------
 
-    def _emit_module_chunks(self, file_path: str, source: str) -> None:
+    def _emit_module_chunks(self, file_entity_id: str, source: str) -> None:
         """Extract module-level header and imports into dedicated chunks.
 
+        Both hang on the entity that stands for the file itself. They used to
+        hang on ``<file>::module``, an id no parser emits, so the chunk holding
+        the largest single block of a file's text sat off the graph and every
+        path treating ``chunk.entity_id`` as a handle silently did nothing with
+        it (BL-6).
+
         Args:
-            file_path: File path used to namespace chunk IDs.
+            file_entity_id: ID of the file's MODULE or DOCUMENT entity.
             source: Full source code for the module.
         """
-        # Module Header
-        header = self._extract_module_header(source)
-        if header:
-            module_chunk = CodeChunk(
-                id=f"{file_path}::module::0",
-                entity_id=f"{file_path}::module",
-                content=header,
-                tokens=tokenize_code(header),
-                metadata={
-                    "type": "module_header",
-                    "content_hash": hashlib.md5(header.encode("utf-8")).hexdigest(),
-                },
+        for kind, content in (
+            ("module_header", self._extract_module_header(source)),
+            ("imports", self._extract_imports(source)),
+        ):
+            if not content:
+                continue
+            self.chunks.append(
+                CodeChunk(
+                    id=f"{file_entity_id}::{kind}::0",
+                    entity_id=file_entity_id,
+                    content=content,
+                    tokens=tokenize_code(content),
+                    metadata={
+                        "type": kind,
+                        "content_hash": hashlib.md5(
+                            content.encode("utf-8")
+                        ).hexdigest(),
+                    },
+                )
             )
-            self.chunks.append(module_chunk)
-
-        # Imports
-        imports = self._extract_imports(source)
-        if imports:
-            import_chunk = CodeChunk(
-                id=f"{file_path}::imports::0",
-                entity_id=f"{file_path}::module",
-                content=imports,
-                tokens=tokenize_code(imports),
-                metadata={
-                    "type": "imports",
-                    "content_hash": hashlib.md5(imports.encode("utf-8")).hexdigest(),
-                },
-            )
-            self.chunks.append(import_chunk)
 
     def _extract_module_header(self, source: str) -> str:
         """Extract the leading module header and docstring block."""

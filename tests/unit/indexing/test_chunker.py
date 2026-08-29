@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from knowcode.indexing.chunker import Chunker
 from knowcode.data_models import (
     ChunkingConfig,
@@ -10,6 +12,13 @@ from knowcode.data_models import (
     Location,
     ParseResult,
 )
+from knowcode.parsers.java_parser import JavaParser
+from knowcode.parsers.javascript_parser import JavaScriptParser
+from knowcode.parsers.markdown_parser import MarkdownParser
+from knowcode.parsers.python_parser import PythonParser
+from knowcode.parsers.rust_parser import RustParser
+from knowcode.parsers.typescript_parser import TypeScriptParser
+from knowcode.parsers.yaml_parser import YamlParser
 
 
 def test_chunker_module_extraction() -> None:
@@ -81,3 +90,82 @@ def test_chunker_overlap_chunking() -> None:
 
     assert len(chunks) > 1
     assert chunks[0].metadata["chunk_index"] == "0"
+
+
+# BL-6. `_emit_module_chunks` tagged its chunks `<file>::module`, an id no
+# parser emits, so the chunk carrying the largest block of a file's text was
+# disconnected from the graph. Every path that treats `chunk.entity_id` as a
+# graph handle silently did nothing with it.
+CHUNKABLE = [
+    pytest.param(
+        PythonParser,
+        ".py",
+        '"""Worker."""\n\nimport os\n\n\ndef run():\n    """Go."""\n    return os.getpid()\n',
+        id="python",
+    ),
+    pytest.param(
+        JavaScriptParser,
+        ".js",
+        "// Worker.\nimport os from 'os';\n\nexport function run() { return os.cpus(); }\n",
+        id="javascript",
+    ),
+    pytest.param(
+        TypeScriptParser,
+        ".ts",
+        "// Worker.\nimport os from 'os';\n\nexport function run(): number { return 1; }\n",
+        id="typescript",
+    ),
+    pytest.param(
+        RustParser,
+        ".rs",
+        "//! Worker.\nuse std::env;\n\npub fn run() -> u32 { 1 }\n",
+        id="rust",
+    ),
+    pytest.param(
+        JavaParser,
+        ".java",
+        "import java.util.List;\n\nclass Worker { void run() {} }\n",
+        id="java",
+    ),
+    pytest.param(
+        YamlParser, ".yaml", "service:\n  name: worker\n  port: 8080\n", id="yaml"
+    ),
+    pytest.param(
+        MarkdownParser, ".md", "# Worker\n\nIt runs the thing.\n", id="markdown"
+    ),
+]
+
+
+@pytest.mark.parametrize("parser_class, ext, code", CHUNKABLE)
+def test_no_chunk_points_at_an_entity_that_does_not_exist(
+    tmp_path: Path, parser_class, ext, code
+) -> None:
+    source = tmp_path / f"worker{ext}"
+    source.write_text(code, encoding="utf-8")
+    result = parser_class().parse_file(source)
+    known = {entity.id for entity in result.entities}
+
+    chunks = Chunker().process_parse_result(result)
+
+    assert chunks, "the file produced no chunks at all"
+    assert sorted({chunk.entity_id for chunk in chunks} - known) == []
+
+
+def test_module_chunks_hang_on_the_module_entity(tmp_path: Path) -> None:
+    source = tmp_path / "worker.py"
+    source.write_text(
+        '"""Worker."""\n\nimport os\n\n\ndef run():\n    return os.getpid()\n',
+        encoding="utf-8",
+    )
+    result = PythonParser().parse_file(source)
+    module = next(e for e in result.entities if e.kind == EntityKind.MODULE)
+
+    chunks = Chunker().process_parse_result(result)
+
+    module_chunks = [
+        chunk
+        for chunk in chunks
+        if chunk.metadata.get("type") in {"module_header", "imports"}
+    ]
+    assert len(module_chunks) == 2
+    assert {chunk.entity_id for chunk in module_chunks} == {module.id}
