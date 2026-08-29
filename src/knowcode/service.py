@@ -47,6 +47,14 @@ STAGE_KNOWLEDGE_STORE = "knowledge_store"
 STAGE_SEMANTIC_INDEX = "semantic_index"
 STAGE_PUBLICATION = "publication"
 
+#: How many times a full build may refuse publication and re-derive on the
+#: generation somebody published in between. Every refusal consumes at least
+#: one *successful* foreign publication since the previous attempt's base, so
+#: the loop converges whenever contention is finite; the bound turns truly
+#: sustained contention into a classified refusal instead of a livelock, and
+#: the source tree keeps every refused file for the next build to pick up.
+_REBUILD_REBASE_ATTEMPTS = 8
+
 #: Bundles pinned by the ``generation_lease()`` calls active on this execution
 #: context, innermost last. A :class:`~contextvars.ContextVar` rather than a
 #: thread-local so one lease covers nested calls in both a sync request thread
@@ -727,6 +735,7 @@ class KnowCodeService:
         builder: Optional[GraphBuilder] = None,
         run_preflight: bool = True,
         on_progress: Optional[Callable[[int, Optional[int]], None]] = None,
+        expect_current: Optional[str] = None,
     ) -> GenerationBuildResult:
         """Stage, validate, and atomically publish one complete generation.
 
@@ -737,10 +746,111 @@ class KnowCodeService:
         failure at any point leaves the previously published generation
         current, which is the defect this step exists to fix.
 
+        A full build is a snapshot of the tree as it stood when its scan began,
+        so it publishes by compare-and-swap like a watch batch does: if another
+        writer published in between, the snapshot is stale, publication is
+        refused, and the whole build is re-derived on the generation that won
+        — a fresh scan, never a replay of the staged snapshot's artifacts. A
+        ``builder`` passed by the caller (already scanned) is therefore used by
+        the first attempt only. Refusal keeps every file on disk, so refusing
+        never loses work; only finishing on a stale snapshot would.
+
         A graph parse failure propagates: nothing has been staged and there is
         no artifact story to tell. Every failure after that is classified into
         :class:`GenerationBuildResult` so a caller can report it without
         mistaking it for success.
+
+        Args:
+            directory: Root directory to scan and parse.
+            index_path: Artifact root the generation is published under.
+            ignore: Additional ignore patterns for the scan.
+            temporal: Whether to include git history analysis.
+            coverage: Optional Cobertura coverage report path.
+            incremental: Whether to seed the semantic plane from the current
+                generation and index only the delta.
+            builder: An already-built graph to derive from, scanned before this
+                call. The first attempt uses it as-is; a re-derivation scans
+                afresh, because the caller's scan predates whatever publication
+                forced it.
+            run_preflight: Whether to run the pre-flight assessment.
+            on_progress: Optional ``(files_done, files_total)`` callback, called
+                for every attempt.
+            expect_current: The generation that was current when the caller's
+                ``builder`` scan began. The build refuses rather than publish a
+                snapshot that predates a newer publication. Without a caller
+                builder the build captures its own base before its own scan.
+
+        Returns:
+            The classified outcome of the attempt that finished. Under
+            sustained contention — another publication landing inside every
+            one of :data:`_REBUILD_REBASE_ATTEMPTS` windows — the result is a
+            refusal with ``stage=STAGE_PUBLICATION`` and the last conflict as
+            its error.
+        """
+        for attempt in range(_REBUILD_REBASE_ATTEMPTS):
+            try:
+                return self._build_generation_attempt(
+                    directory,
+                    index_path,
+                    ignore=ignore,
+                    temporal=temporal,
+                    coverage=coverage,
+                    incremental=incremental,
+                    builder=builder,
+                    run_preflight=run_preflight,
+                    on_progress=on_progress,
+                    expect_current=expect_current,
+                )
+            except generations.GenerationConflictError as exc:
+                if attempt == _REBUILD_REBASE_ATTEMPTS - 1:
+                    logger.warning(
+                        "Refusing to publish a rebuild the index moved under %d "
+                        "times; the tree still has every file for the next build: %s",
+                        _REBUILD_REBASE_ATTEMPTS,
+                        exc,
+                    )
+                    return GenerationBuildResult(
+                        published=False,
+                        error=str(exc),
+                        stage=STAGE_PUBLICATION,
+                    )
+                logger.info(
+                    "Re-deriving the rebuild on the current generation "
+                    "(attempt %d of %d): %s",
+                    attempt + 2,
+                    _REBUILD_REBASE_ATTEMPTS,
+                    exc,
+                )
+                # The retry scans now, so it must capture its own base — and a
+                # builder scanned before the conflict is a stale snapshot by
+                # definition, whatever supplied it.
+                builder = None
+                expect_current = None
+        raise AssertionError(
+            "unreachable: the loop returns or raises"
+        )  # pragma: no cover
+
+    def _build_generation_attempt(
+        self,
+        directory: str | Path,
+        index_path: str | Path,
+        *,
+        ignore: list[str] | None = None,
+        temporal: bool = False,
+        coverage: Path | None = None,
+        incremental: bool = False,
+        builder: Optional[GraphBuilder] = None,
+        run_preflight: bool = True,
+        on_progress: Optional[Callable[[int, Optional[int]], None]] = None,
+        expect_current: Optional[str] = None,
+    ) -> GenerationBuildResult:
+        """Build and publish one generation, refusing if the pointer moved.
+
+        One attempt of :meth:`build_generation`; the docstring there covers the
+        staging and atomicity contract. Raises
+        :class:`~knowcode.indexing.generations.GenerationConflictError` out of
+        the publication step when the pointer no longer names this attempt's
+        base, for the caller's re-derivation loop to catch.
         """
         from knowcode.llm.embedding import create_embedding_provider
         from knowcode.indexing.indexer import Indexer
@@ -754,6 +864,16 @@ class KnowCodeService:
         generations.cleanup_staging_generations(index_root)
 
         previous = generations.resolve_current_generation(index_root)
+        if expect_current is not None and (
+            previous is None or previous.generation_id != expect_current
+        ):
+            # The caller's scan already predates a publication; deriving from
+            # that snapshot would only end in a refusal after a full build, so
+            # refuse now, before anything is staged.
+            raise generations.GenerationConflictError(
+                expect_current,
+                None if previous is None else previous.generation_id,
+            )
 
         if builder is None:
             builder = GraphBuilder()
@@ -874,7 +994,21 @@ class KnowCodeService:
                     # A generation a request is still reading must survive
                     # retention until that reader releases its lease (Step 18).
                     protect=self.live_generation_ids(),
+                    # Compare-and-swap: this snapshot derives from the tree as
+                    # of ``previous``, so it must not revert whoever published
+                    # in between. Without a previous generation there is no
+                    # concurrent publisher to lose — the watch writer needs a
+                    # published base, and a second concurrent first build is
+                    # outside ADR 4's one-writer-process model.
+                    expect_current=(
+                        previous.generation_id if previous is not None else None
+                    ),
                 )
+            except generations.GenerationConflictError:
+                # Not a failure to classify: the attempt's snapshot is stale,
+                # and build_generation's re-derivation loop handles it. The
+                # staging context manager discards the snapshot on the way out.
+                raise
             except Exception as exc:  # noqa: BLE001 - classified, not swallowed
                 logger.exception("Failed to publish index generation")
                 return GenerationBuildResult(
@@ -1262,6 +1396,17 @@ class KnowCodeService:
             ``published``, ``generation_id``, ``indexed_chunks``, and — when
             something failed — ``index_error`` and ``index_error_stage``.
         """
+        output_path = Path(output)
+        store_root = output_path if output_path.is_dir() else output_path.parent
+        index_path = store_root / "knowcode_index"
+
+        # The scan starts with the graph builder below, so the build's
+        # compare-and-swap must be keyed to the generation current *now*: a
+        # watch batch published while that scan runs would otherwise be
+        # reverted by the snapshot the scan produces, with nothing left
+        # pending anywhere to re-derive it from.
+        scan_base = generations.resolve_current_generation(index_path)
+
         builder = GraphBuilder()
         builder.build_from_directory(
             root_dir=directory,
@@ -1269,10 +1414,6 @@ class KnowCodeService:
             analyze_temporal=temporal,
             coverage_path=Path(coverage) if coverage else None,
         )
-
-        output_path = Path(output)
-        store_root = output_path if output_path.is_dir() else output_path.parent
-        index_path = store_root / "knowcode_index"
 
         if export_json:
             # The legacy JSON exporter is deliberately outside the generation:
@@ -1291,6 +1432,7 @@ class KnowCodeService:
             incremental=incremental,
             builder=builder,
             on_progress=on_progress,
+            expect_current=(scan_base.generation_id if scan_base is not None else None),
         )
 
         stats: dict[str, Any] = builder.stats()

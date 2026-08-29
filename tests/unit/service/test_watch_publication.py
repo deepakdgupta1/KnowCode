@@ -363,6 +363,55 @@ def test_a_watch_publication_never_reverts_a_concurrent_rebuild(
     service.close()
 
 
+def test_a_rebuild_never_reverts_a_concurrent_watch_publication(
+    tmp_path: Path, backend: str
+) -> None:
+    """A watch publication between a rebuild's scan and its publish must survive.
+
+    The mirror of the test above: there the watch batch had to re-derive over a
+    rebuild; here the watch batch has *already published* by the time the
+    rebuild's snapshot finishes staging, so its writer holds nothing back to
+    re-derive with. Publishing the snapshot unconditionally would revert the
+    batch with no record left anywhere. The publication is injected from the
+    rebuild's own first progress callback — after its scan, before its publish
+    — which makes the losing interleaving deterministic instead of a race.
+    """
+    src = _write(tmp_path, "alpha")
+    service = _service(tmp_path, backend)
+    service.analyze(directory=src, output=tmp_path)
+    base = service.current_generation()
+    assert base is not None
+    writer = service.watch_writer()
+
+    injected = threading.Event()
+
+    def inject_watch_publication(files_done: int, files_total: int | None) -> None:
+        if injected.is_set():
+            return
+        injected.set()
+        _write(tmp_path, "bravo")
+        writer.replace_file(src / "bravo.py")
+        writer.publish_pending()
+
+    stats = service.analyze(
+        directory=src, output=tmp_path, on_progress=inject_watch_publication
+    )
+
+    assert injected.is_set(), "the watch publication never landed mid-build"
+    assert stats["published"] is True, stats
+    current = service.current_generation()
+    assert current is not None
+    assert current.generation_id != base.generation_id
+    assert _validate(current) == []
+    files = _indexed_files(service)
+    assert any("alpha.py" in path for path in files)
+    assert any("bravo.py" in path for path in files), (
+        "the rebuild reverted a watch publication that landed mid-build"
+    )
+    assert not writer.has_pending
+    service.close()
+
+
 def test_concurrent_commits_and_publications_converge(
     tmp_path: Path, backend: str
 ) -> None:
