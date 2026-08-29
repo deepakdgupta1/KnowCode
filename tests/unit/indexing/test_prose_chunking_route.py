@@ -19,7 +19,6 @@ from pathlib import Path
 
 import pytest
 
-from knowcode.data_models import EntityKind
 from knowcode.indexing.chunker import Chunker
 from knowcode.indexing.prose_chunker import ProseChunkingConfig
 from knowcode.parsers.markdown_parser import MarkdownParser
