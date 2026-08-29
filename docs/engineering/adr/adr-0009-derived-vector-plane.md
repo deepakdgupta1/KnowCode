@@ -78,6 +78,29 @@ process open. It reads no network and calls no embedding provider.
 A process now holds the plane in RAM for its lifetime, about 27 MB here. That is
 the tradeoff, and it is the reason for the limit below.
 
+### What the new membership rule does not witness
+
+Added 2026-08-29, after Phase A2's mutation probe and an independent
+reproduction.
+
+The rule above catches a published generation whose chunk rows later lose their
+embeddings, because the manifest is fixed by then and the count is recomputed
+from the artifact. It does not catch rows disappearing *during* a build. At
+build time both operands come from the same staged file: `read_chunk_ids` and
+`count_durable_embeddings` read `chunks.db` after every step that writes it, so
+a step that drops rows shrinks both numbers together and they agree.
+
+Measured with `SqliteChunkRepository.compact` mutated to delete every seventh
+row: a generation missing 1,003 of 7,025 chunks, 14% of the corpus, published
+successfully, and `validate_generation(..., verify_digests=True)` returned no
+failures. The manifest recorded 6,022 for both counts.
+
+So this is a post-publication integrity check, not a build-time loss check.
+Read it as "the artifact still matches what was published", never as "the build
+did not lose anything". Closing the second gap needs a comparison against
+something produced before the artifact was last written, such as the chunk count
+the indexer reports. Tracked as BL-8 in the [backlog](../backlog.md).
+
 ### Compatibility
 
 Generations written before this decision still load. They carry a native vector

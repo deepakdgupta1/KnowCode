@@ -174,6 +174,19 @@ before it vacuums. The build publishes, and
 `validate_generation(..., verify_digests=True)` returns no failures, because
 the manifest recorded the post-deletion id list.
 
+Independently reproduced 2026-08-29 by a second session, on a scratch copy with
+the probe applied: a generation missing **1,003 of 7,025 chunks, 14% of the
+corpus, published successfully** and `validate_generation(..., verify_digests=True)`
+returned no failures. The manifest recorded 6,022 for both `counts.chunks` and
+`counts.vectors`. The D1 durable-embedding guard shares the blind spot for the
+same reason, and [ADR 9](adr/adr-0009-derived-vector-plane.md) now says so.
+
+A trap for anyone repeating this: the repository venv installs `knowcode`
+editable against `src/`, so running a scratch copy with the venv's interpreter
+executes the *shared* tree and the probe appears to do nothing. Set
+`PYTHONPATH=<scratch>/src`, and assert the loaded `__file__` is the scratch one
+before trusting a negative result.
+
 This was theoretical until Phase A2, which introduced the first step that
 rewrites an artifact between indexing and publication. A2 covers itself with
 `test_compaction_does_not_lose_rows_between_indexing_and_publication`, which
