@@ -647,3 +647,106 @@ def test_content_hash_is_not_duplicated_into_metadata_json(tmp_path: Path) -> No
         store.close()
 
     assert "content_hash" not in _stored_metadata_json(db_path, "file.py::hashed")
+
+
+def _graph_store(db_path: Path) -> SqliteKnowledgeStore:
+    """A graph whose edges include endpoints that are not entities."""
+    store = SqliteKnowledgeStore(db_path)
+    for name in ("mod", "a", "b", "c"):
+        store.add_entity(_make_entity(f"/r/f.py::{name}", EntityKind.FUNCTION, name))
+    edges = [
+        ("/r/f.py::mod", "/r/f.py::a", RelationshipKind.CONTAINS),
+        ("/r/f.py::mod", "/r/f.py::b", RelationshipKind.CONTAINS),
+        ("/r/f.py::a", "/r/f.py::b", RelationshipKind.CALLS),
+        ("/r/f.py::b", "/r/f.py::c", RelationshipKind.CALLS),
+        ("/r/f.py::a", "external::os::path", RelationshipKind.IMPORTS),
+        ("/r/f.py::a", "unresolved::python::/r/f.py::a::zzz", RelationshipKind.CALLS),
+    ]
+    for source, target, kind in edges:
+        store.add_relationship(
+            Relationship(source_id=source, target_id=target, kind=kind)
+        )
+    return store
+
+
+def _read_surface(store: SqliteKnowledgeStore) -> dict[str, object]:
+    """Every relationship read path, rendered as comparable plain data."""
+    ids = lambda entities: sorted(e.id for e in entities)  # noqa: E731
+    return {
+        "callers_of_b": ids(store.get_callers("/r/f.py::b")),
+        "callees_of_a": ids(store.get_callees("/r/f.py::a")),
+        "dependencies_of_a": ids(store.get_dependencies("/r/f.py::a")),
+        "dependents_of_b": ids(store.get_dependents("/r/f.py::b")),
+        "parent_of_a": (
+            store.get_parent("/r/f.py::a").id
+            if store.get_parent("/r/f.py::a")
+            else None
+        ),
+        "children_of_mod": ids(store.get_children("/r/f.py::mod")),
+        "imports_of_a": sorted(store.get_imports("/r/f.py::a")),
+        "outgoing_a": sorted(
+            (r.source_id, r.kind.value, r.target_id)
+            for r in store.get_outgoing_relationships("/r/f.py::a")
+        ),
+        "incoming_b": sorted(
+            (r.source_id, r.kind.value, r.target_id)
+            for r in store.get_incoming_relationships("/r/f.py::b")
+        ),
+        "all_edges": sorted(
+            (r.source_id, r.kind.value, r.target_id) for r in store.relationships
+        ),
+        "counts": store.count_by_kind()["relationships"],
+        "trace_callees_a": [
+            (r["entity_id"], r["call_depth"])
+            for r in store.trace_calls("/r/f.py::a", "callees", depth=3)
+        ],
+        "trace_callers_c": [
+            (r["entity_id"], r["call_depth"])
+            for r in store.trace_calls("/r/f.py::c", "callers", depth=3)
+        ],
+    }
+
+
+EXPECTED_READ_SURFACE: dict[str, object] = {
+    "callers_of_b": ["/r/f.py::a"],
+    "callees_of_a": ["/r/f.py::b"],
+    "dependencies_of_a": ["/r/f.py::b"],
+    "dependents_of_b": ["/r/f.py::a"],
+    "parent_of_a": "/r/f.py::mod",
+    "children_of_mod": ["/r/f.py::a", "/r/f.py::b"],
+    "imports_of_a": ["external::os::path"],
+    "outgoing_a": [
+        ("/r/f.py::a", "calls", "/r/f.py::b"),
+        ("/r/f.py::a", "calls", "unresolved::python::/r/f.py::a::zzz"),
+        ("/r/f.py::a", "imports", "external::os::path"),
+    ],
+    "incoming_b": [
+        ("/r/f.py::a", "calls", "/r/f.py::b"),
+        ("/r/f.py::mod", "contains", "/r/f.py::b"),
+    ],
+    "all_edges": [
+        ("/r/f.py::a", "calls", "/r/f.py::b"),
+        ("/r/f.py::a", "calls", "unresolved::python::/r/f.py::a::zzz"),
+        ("/r/f.py::a", "imports", "external::os::path"),
+        ("/r/f.py::b", "calls", "/r/f.py::c"),
+        ("/r/f.py::mod", "contains", "/r/f.py::a"),
+        ("/r/f.py::mod", "contains", "/r/f.py::b"),
+    ],
+    "counts": {"calls": 3, "contains": 2, "imports": 1},
+    "trace_callees_a": [("/r/f.py::b", 1), ("/r/f.py::c", 2)],
+    "trace_callers_c": [("/r/f.py::b", 1), ("/r/f.py::a", 2)],
+}
+
+
+def test_relationship_read_surface_is_pinned(tmp_path: Path) -> None:
+    """Every relationship read path, pinned against the edge encoding.
+
+    Endpoints that are not entities are deliberately present: an external
+    import and an unresolved call. Any encoding of the edge table has to carry
+    them, because they have no row in ``entities`` to borrow a key from.
+    """
+    store = _graph_store(tmp_path / "knowledge.db")
+    try:
+        assert _read_surface(store) == EXPECTED_READ_SURFACE
+    finally:
+        store.close()

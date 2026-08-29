@@ -37,6 +37,60 @@ from knowcode.utils.entity_identity import (
 )
 
 
+# An edge endpoint resolved to its codebook key. Endpoints are not always
+# entities: an import lands on an ``external::`` id and an unresolved call on
+# an ``unresolved::`` one, and neither has a row in ``entities`` to key on.
+_EID_OF = "(SELECT id FROM eid WHERE entity_id = ?)"
+_KIND_OF = "(SELECT id FROM relkind WHERE kind = ?)"
+
+# Edges rendered back under the column names ``_row_to_relationship`` reads.
+_EDGE_AS_TEXT = """
+    SELECT s.entity_id AS source_id,
+           t.entity_id AS target_id,
+           k.kind      AS kind,
+           r.metadata_json AS metadata_json
+    FROM relationships r
+    JOIN eid s     ON s.id = r.source_id
+    JOIN eid t     ON t.id = r.target_id
+    JOIN relkind k ON k.id = r.kind
+"""
+
+_ALL_EDGES_SQL = _EDGE_AS_TEXT
+_OUTGOING_EDGES_SQL = f"{_EDGE_AS_TEXT} WHERE r.source_id = {_EID_OF}"
+_INCOMING_EDGES_SQL = f"{_EDGE_AS_TEXT} WHERE r.target_id = {_EID_OF}"
+
+# Walk one edge and hydrate the entity at its far end. The joined column names
+# the endpoint being walked to, so ``source_id`` returns an edge's sources.
+_SOURCES_OF = f"""
+    SELECT {{distinct}} e.* FROM entities e
+    JOIN eid ne ON ne.entity_id = e.entity_id
+    JOIN relationships r ON r.source_id = ne.id
+    WHERE r.target_id = {_EID_OF} AND r.kind {{kinds}}
+"""
+_TARGETS_OF = f"""
+    SELECT {{distinct}} e.* FROM entities e
+    JOIN eid ne ON ne.entity_id = e.entity_id
+    JOIN relationships r ON r.target_id = ne.id
+    WHERE r.source_id = {_EID_OF} AND r.kind {{kinds}}
+"""
+
+_ONE_KIND = f"= {_KIND_OF}"
+_TWO_KINDS = f"IN ({_KIND_OF}, {_KIND_OF})"
+
+_CALLERS_SQL = _SOURCES_OF.format(distinct="", kinds=_ONE_KIND)
+_CALLEES_SQL = _TARGETS_OF.format(distinct="", kinds=_ONE_KIND)
+_PARENT_SQL = _SOURCES_OF.format(distinct="", kinds=_ONE_KIND)
+_CHILDREN_SQL = _TARGETS_OF.format(distinct="", kinds=_ONE_KIND)
+_DEPENDENCIES_SQL = _TARGETS_OF.format(distinct="DISTINCT", kinds=_TWO_KINDS)
+_DEPENDENTS_SQL = _SOURCES_OF.format(distinct="DISTINCT", kinds=_TWO_KINDS)
+
+_IMPORTS_SQL = f"""
+    SELECT t.entity_id AS target_id FROM relationships r
+    JOIN eid t ON t.id = r.target_id
+    WHERE r.source_id = {_EID_OF} AND r.kind = {_KIND_OF}
+"""
+
+
 class SqliteKnowledgeStore:
     """SQLite-backed knowledge store with recursive query support."""
 
@@ -187,10 +241,26 @@ class SqliteKnowledgeStore:
             )
             conn.execute(
                 """
+                CREATE TABLE IF NOT EXISTS eid (
+                    id INTEGER PRIMARY KEY,
+                    entity_id TEXT UNIQUE NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS relkind (
+                    id INTEGER PRIMARY KEY,
+                    kind TEXT UNIQUE NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS relationships (
-                    source_id TEXT NOT NULL,
-                    target_id TEXT NOT NULL,
-                    kind TEXT NOT NULL,
+                    source_id INTEGER NOT NULL,
+                    target_id INTEGER NOT NULL,
+                    kind INTEGER NOT NULL,
                     metadata_json TEXT
                 )
                 """
@@ -206,11 +276,33 @@ class SqliteKnowledgeStore:
                 "CREATE INDEX IF NOT EXISTS idx_entities_qualified_name ON entities(qualified_name)"
             )
             conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_relationships_source_kind ON relationships(source_id, kind)"
+                "CREATE INDEX IF NOT EXISTS idx_relationships_source_kind "
+                "ON relationships(source_id, kind)"
             )
             conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_relationships_target_kind ON relationships(target_id, kind)"
+                "CREATE INDEX IF NOT EXISTS idx_relationships_target_kind "
+                "ON relationships(target_id, kind)"
             )
+            self._reject_string_keyed_edges(conn)
+
+    @staticmethod
+    def _reject_string_keyed_edges(conn: sqlite3.Connection) -> None:
+        """Fail closed on a knowledge.db whose edges still hold entity id text.
+
+        ``CREATE TABLE IF NOT EXISTS`` leaves an older edge table in place, and
+        integers written into it would read back as ids that match nothing.
+        A populated edge table with no codebook entry is that database.
+        """
+        edges = conn.execute("SELECT COUNT(*) FROM relationships").fetchone()[0]
+        if not edges:
+            return
+        if conn.execute("SELECT COUNT(*) FROM eid").fetchone()[0]:
+            return
+        raise ValueError(
+            "knowledge.db holds string-keyed relationships and no endpoint "
+            "codebook. Rebuild the index with `knowcode build`; edge keys "
+            "cannot be migrated without the entity ids they were written from."
+        )
 
     # ------------------------------------------------------------------
     # Mutation (writer connection, serialized by _write_lock)
@@ -255,14 +347,30 @@ class SqliteKnowledgeStore:
 
     @staticmethod
     def _insert_relationship_row(conn: sqlite3.Connection, rel: Relationship) -> None:
-        """Insert one relationship row on the caller's open transaction."""
-        metadata_json = json.dumps(rel.metadata) if rel.metadata else "{}"
+        """Insert one relationship row on the caller's open transaction.
+
+        The endpoints and the kind are interned first, so the edge row itself
+        holds three integers. An empty metadata payload is stored as NULL
+        rather than ``{}``; :meth:`_row_to_relationship` reads both as ``{}``.
+        """
         conn.execute(
-            """
+            "INSERT OR IGNORE INTO eid (entity_id) VALUES (?), (?)",
+            (rel.source_id, rel.target_id),
+        )
+        conn.execute(
+            "INSERT OR IGNORE INTO relkind (kind) VALUES (?)", (rel.kind.value,)
+        )
+        conn.execute(
+            f"""
             INSERT INTO relationships (source_id, target_id, kind, metadata_json)
-            VALUES (?, ?, ?, ?)
+            VALUES ({_EID_OF}, {_EID_OF}, {_KIND_OF}, ?)
             """,
-            (rel.source_id, rel.target_id, rel.kind.value, metadata_json),
+            (
+                rel.source_id,
+                rel.target_id,
+                rel.kind.value,
+                json.dumps(rel.metadata) if rel.metadata else None,
+            ),
         )
 
     def bulk_insert(
@@ -346,7 +454,8 @@ class SqliteKnowledgeStore:
             ):
                 entities[row["kind"]] = int(row["c"])
             for row in conn.execute(
-                "SELECT kind, COUNT(*) AS c FROM relationships GROUP BY kind"
+                "SELECT k.kind AS kind, COUNT(*) AS c FROM relationships r "
+                "JOIN relkind k ON k.id = r.kind GROUP BY k.kind"
             ):
                 relationships[row["kind"]] = int(row["c"])
         return {"entities": entities, "relationships": relationships}
@@ -419,11 +528,7 @@ class SqliteKnowledgeStore:
         """Return caller entities."""
         with self._read_lease() as conn:
             cursor = conn.execute(
-                """
-                SELECT e.* FROM entities e
-                JOIN relationships r ON e.entity_id = r.source_id
-                WHERE r.target_id = ? AND r.kind = ?
-                """,
+                _CALLERS_SQL,
                 (entity_id, RelationshipKind.CALLS.value),
             )
             rows = cursor.fetchall()
@@ -433,11 +538,7 @@ class SqliteKnowledgeStore:
         """Return callee entities."""
         with self._read_lease() as conn:
             cursor = conn.execute(
-                """
-                SELECT e.* FROM entities e
-                JOIN relationships r ON e.entity_id = r.target_id
-                WHERE r.source_id = ? AND r.kind = ?
-                """,
+                _CALLEES_SQL,
                 (entity_id, RelationshipKind.CALLS.value),
             )
             rows = cursor.fetchall()
@@ -447,11 +548,7 @@ class SqliteKnowledgeStore:
         """Return entities this entity depends on."""
         with self._read_lease() as conn:
             cursor = conn.execute(
-                """
-                SELECT DISTINCT e.* FROM entities e
-                JOIN relationships r ON e.entity_id = r.target_id
-                WHERE r.source_id = ? AND r.kind IN (?, ?)
-                """,
+                _DEPENDENCIES_SQL,
                 (
                     entity_id,
                     RelationshipKind.CALLS.value,
@@ -465,11 +562,7 @@ class SqliteKnowledgeStore:
         """Return entities depending on this entity."""
         with self._read_lease() as conn:
             cursor = conn.execute(
-                """
-                SELECT DISTINCT e.* FROM entities e
-                JOIN relationships r ON e.entity_id = r.source_id
-                WHERE r.target_id = ? AND r.kind IN (?, ?)
-                """,
+                _DEPENDENTS_SQL,
                 (
                     entity_id,
                     RelationshipKind.CALLS.value,
@@ -491,7 +584,7 @@ class SqliteKnowledgeStore:
     def relationships(self) -> list[Relationship]:
         """Get all relationships."""
         with self._read_lease() as conn:
-            cursor = conn.execute("SELECT * FROM relationships")
+            cursor = conn.execute(_ALL_EDGES_SQL)
             rows = cursor.fetchall()
         return [self._row_to_relationship(row) for row in rows]
 
@@ -499,11 +592,7 @@ class SqliteKnowledgeStore:
         """Get the parent entity (container) of an entity."""
         with self._read_lease() as conn:
             cursor = conn.execute(
-                """
-                SELECT e.* FROM entities e
-                JOIN relationships r ON e.entity_id = r.source_id
-                WHERE r.target_id = ? AND r.kind = ?
-                """,
+                _PARENT_SQL,
                 (entity_id, RelationshipKind.CONTAINS.value),
             )
             row = cursor.fetchone()
@@ -513,11 +602,7 @@ class SqliteKnowledgeStore:
         """Get entities contained by the given entity."""
         with self._read_lease() as conn:
             cursor = conn.execute(
-                """
-                SELECT e.* FROM entities e
-                JOIN relationships r ON e.entity_id = r.target_id
-                WHERE r.source_id = ? AND r.kind = ?
-                """,
+                _CHILDREN_SQL,
                 (entity_id, RelationshipKind.CONTAINS.value),
             )
             rows = cursor.fetchall()
@@ -527,10 +612,7 @@ class SqliteKnowledgeStore:
         """Get imports for a module entity."""
         with self._read_lease() as conn:
             cursor = conn.execute(
-                """
-                SELECT target_id FROM relationships
-                WHERE source_id = ? AND kind = ?
-                """,
+                _IMPORTS_SQL,
                 (entity_id, RelationshipKind.IMPORTS.value),
             )
             rows = cursor.fetchall()
@@ -540,7 +622,7 @@ class SqliteKnowledgeStore:
         """Return relationships where the entity is the source."""
         with self._read_lease() as conn:
             cursor = conn.execute(
-                "SELECT * FROM relationships WHERE source_id = ?",
+                _OUTGOING_EDGES_SQL,
                 (entity_id,),
             )
             rows = cursor.fetchall()
@@ -550,7 +632,7 @@ class SqliteKnowledgeStore:
         """Return relationships where the entity is the target."""
         with self._read_lease() as conn:
             cursor = conn.execute(
-                "SELECT * FROM relationships WHERE target_id = ?",
+                _INCOMING_EDGES_SQL,
                 (entity_id,),
             )
             rows = cursor.fetchall()
@@ -590,18 +672,20 @@ class SqliteKnowledgeStore:
             start_col, next_col = "target_id", "source_id"
 
         query = f"""
-            WITH RECURSIVE call_chain(entity_id, depth) AS (
+            WITH RECURSIVE call_chain(endpoint, depth) AS (
                 SELECT {next_col}, 1 FROM relationships
-                WHERE {start_col} = ? AND kind = ?
+                WHERE {start_col} = {_EID_OF} AND kind = {_KIND_OF}
               UNION ALL
                 SELECT r.{next_col}, cc.depth + 1
                 FROM relationships r
-                JOIN call_chain cc ON r.{start_col} = cc.entity_id
-                WHERE r.kind = ? AND cc.depth < ?
+                JOIN call_chain cc ON r.{start_col} = cc.endpoint
+                WHERE r.kind = {_KIND_OF} AND cc.depth < ?
             )
-            SELECT DISTINCT e.entity_id, e.name, e.qualified_name, e.kind, e.file_path, e.line_start, MIN(cc.depth) as call_depth
+            SELECT DISTINCT e.entity_id, e.name, e.qualified_name, e.kind,
+                   e.file_path, e.line_start, MIN(cc.depth) as call_depth
             FROM call_chain cc
-            JOIN entities e ON e.entity_id = cc.entity_id
+            JOIN eid x ON x.id = cc.endpoint
+            JOIN entities e ON e.entity_id = x.entity_id
             GROUP BY e.entity_id
             ORDER BY call_depth, e.name
             LIMIT ?;
