@@ -1231,6 +1231,88 @@ record the result here.
 
 ## 17. Execution Log
 
+### Phase C3, C4, C5 — shipped 2026-08-29
+
+The two content-hash items and the chunk hash column. C1 and C2 are still open.
+
+**Measured by paired build.** One corpus extracted once, two source trees, the
+only variable which `PYTHONPATH` the build ran under. Each arm asserted the
+loaded module's `__file__` was its own tree before any number was taken.
+
+| | pre | C3+C4+C5 |
+|---|---:|---:|
+| `knowledge.db` | 32,292,864 | 31,514,624 |
+| `chunks.db` | 48,828,416 | 48,566,272 |
+| entities | 5,304 | 5,304 |
+| relationships | 23,683 | 23,683 |
+| chunks | 6,562 | 6,562 |
+
+1,040,384 bytes, 0.99 MB, with every row count unchanged.
+
+**The per-item estimates in §11 are stale, in both directions.** Running
+`storage_simulate.py` against the pre-arm generation on this tree gives numbers
+the plan does not:
+
+| Item | §11 says | This tree |
+|---|---:|---:|
+| C1 relative paths, `knowledge.db` | 4.46 MB | 13.02 MB |
+| C2 integer edges | 6.80 MB | 11.17 MB |
+| C4 slim `metadata_json` | 2.09 MB | 0.65 MB |
+| C3 `content_hash` BLOB | 1.76 MB | 0.23 MB |
+
+Two causes, and they pull opposite ways. `VACUUM only` now measures 0.00 MB,
+so A2 has already banked the repacking that every pre-A2 per-item figure
+silently included. And the two hash items are per-entity constants, 5,304 rows
+times a few dozen bytes, while the path items scale with path length times
+every id occurrence. Anything sized off §11 should be re-measured first.
+
+**The C1 figure above is not transferable.** It was measured with the corpus at
+a 108-character scratch path against a 29-character real root, so roughly 79
+bytes per stripped occurrence is measurement artifact. Across about 58,000 id
+occurrences that is some 4.6 MB of the 13.02. Re-measure C1 at a realistic root
+before planning against it. The direction still holds: C1 is worth well more
+than 4.46 MB.
+
+**C4 is free because the column already won.** `_row_to_entity` overwrote
+`metadata["content_hash"]` from the column after parsing `metadata_json`, so
+the copy inside the JSON was never read. Dropping it changes no hydrated
+entity. The chunk side is not like this: `_row_to_chunk` built metadata wholly
+from `metadata_json`, so C5 had to re-inject the digest from the column or the
+key would have gone missing rather than moved.
+
+**A chunk digest is MD5, not SHA-256, and this decided C5.** §15's SQL assumes
+`unhex()` of a 64-character digest into 32 bytes. `Chunker` has always emitted
+`hashlib.md5(...).hexdigest()`, 32 characters wide. A packer that only handled
+64-character digests left all 6,562 chunk rows stored as text, and C5 measured
+a net **loss** of 36,864 bytes, because the new index cost 266,240 while the
+table gave back only 229,376. Packing any even-length lowercase hex string, which
+round-trips both widths exactly, turns that into a 262,144-byte saving: the
+table gives up 425,984 and the index costs 163,840. The digest strength itself
+is filed as BL-11.
+
+**The index earns its 163,840 bytes.** Over 500 real digests from the built
+generation, the reuse lookup runs in 62.8 ms against the indexed column, 1,803
+ms against the pre-C5 `json_extract` over `metadata_json`, and 1,939 ms against
+the same column with the index dropped. `_reuse_durable_embeddings` calls it
+once per chunk, so this is the incremental build's inner loop.
+
+**§11's instruction to bump both store schema versions is half wrong, again.**
+Phase B established that `SqliteChunkRepository.SCHEMA_VERSION` is never
+compared against a stored value. It moved to 3 for accuracy, and
+`Indexer.SCHEMA_VERSION` moved to 4 because that is the one a generation
+carries and the one that forces the rebuild C5 needs. Separately,
+`_validate_existing_schema` now rejects a chunks table with no `content_hash`
+column, so an old artifact fails at open with a rebuild message instead of
+inside a query. That check is the structural form of the Phase B lesson.
+
+**Verification.** 1,790 unit, integration and e2e tests pass. Every new
+assertion was observed failing. The two encoding tests ran red on the
+pre-change tree. The hydration re-injection and the new schema guard were each
+probed by mutation, and in both cases the mutation was confirmed to have fired
+by inspecting the loaded source before the test result was read. One test
+initially failed for the wrong reason, passing an entity id where `replace_file`
+takes a normalized file path, and was corrected rather than the code.
+
 ### Phase B — shipped 2026-08-29
 
 Items B1 through B4, plus the two retrieval defects the backlog held against

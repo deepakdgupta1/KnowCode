@@ -102,6 +102,41 @@ it.
 it is a parser change with its own contract tests rather than part of the
 chunking work that surfaced it.
 
+### BL-11 - A chunk is content-addressed by MD5
+
+**Severity:** Medium. **Found:** 2026-08-29, executing Phase C5.
+
+`Chunker` hashes chunk content with `hashlib.md5` in all four places it mints a
+`content_hash`, at `chunker.py:197`, `:244`, `:368` and `:393`. Entities use
+SHA-256 through `compute_entity_content_hash`, so the two halves of one index
+are addressed by digests of different strength.
+
+That hash is not decorative. `Indexer._reuse_durable_embeddings` looks a chunk
+up by it and, on a hit, attaches the stored embedding to the new chunk. A
+collision therefore hands one chunk another chunk's vector, and the chunk still
+retrieves, so nothing fails loudly. MD5 collisions are cheap to construct, which
+makes this reachable by a crafted source file rather than by chance alone.
+
+`ProseChunker` already computes SHA-256 for `ProseChunk.content_hash`
+(`prose_chunker.py:310`, `:346`), and `chunker.py:197` throws it away and
+re-hashes the same bytes with MD5. So the stronger digest is computed and
+discarded on the prose route.
+
+Reproduce:
+
+```bash
+sqlite3 <generation>/chunks.db "SELECT DISTINCT LENGTH(content_hash) FROM chunks"
+```
+
+That returns 16, the packed width of a 32-character MD5 digest. An entity digest
+in the same generation is 32 bytes.
+
+**Deferred on purpose.** Changing the digest changes every chunk's reuse key, so
+every generation must rebuild. Phase C already bumped `Indexer.SCHEMA_VERSION`
+once for C5, and Phase E revisits embedding policy, which is the same reuse
+path. Doing it there costs one rebuild instead of two. `pack_content_hash`
+already packs both widths, so the storage layer needs no further change.
+
 ### BL-7 - Timing-sensitive tests flake under concurrent load
 
 **Severity:** Low, but it costs trust in the suite. **Found:** 2026-08-29, while
