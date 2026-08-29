@@ -19,6 +19,9 @@ class EndpointKind(str, Enum):
     INVALID = "invalid"
 
 
+_SHA256_HEX_LENGTH = 64
+_LOWERCASE_HEX_DIGITS = frozenset("0123456789abcdef")
+
 _RESERVED_ENDPOINT_PREFIXES = {
     "composable",
     "external",
@@ -144,6 +147,24 @@ def compute_entity_content_hash(entity: Entity) -> str:
             if part
         )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def pack_content_hash(value: object) -> object:
+    """Return a SHA-256 hex digest as its 32 raw bytes, other values unchanged.
+
+    Only a canonical lowercase 64-character digest is packed, because that is
+    the only input :func:`unpack_content_hash` can render back byte for byte.
+    Anything else is stored as it arrived.
+    """
+    if isinstance(value, str) and len(value) == _SHA256_HEX_LENGTH:
+        if all(char in _LOWERCASE_HEX_DIGITS for char in value):
+            return bytes.fromhex(value)
+    return value
+
+
+def unpack_content_hash(value: object) -> object:
+    """Render a stored digest back as the lowercase hex callers expect."""
+    return value.hex() if isinstance(value, bytes) else value
 
 
 def ensure_entity_content_hash(entity: Entity) -> None:

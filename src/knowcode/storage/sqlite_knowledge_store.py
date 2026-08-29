@@ -30,7 +30,11 @@ from knowcode.data_models import (
 )
 from knowcode.errors import RepositoryClosedError
 from knowcode.storage.knowledge_store import KnowledgeStore
-from knowcode.utils.entity_identity import ensure_entity_content_hash
+from knowcode.utils.entity_identity import (
+    ensure_entity_content_hash,
+    pack_content_hash,
+    unpack_content_hash,
+)
 
 
 class SqliteKnowledgeStore:
@@ -177,7 +181,7 @@ class SqliteKnowledgeStore:
                     signature TEXT,
                     source_code TEXT,
                     metadata_json TEXT,
-                    content_hash TEXT
+                    content_hash BLOB
                 )
                 """
             )
@@ -219,7 +223,12 @@ class SqliteKnowledgeStore:
         Same SQL as :meth:`add_entity`. Private so :meth:`bulk_insert` can use
         it without re-acquiring the writer lock (which would deadlock).
         """
-        metadata_json = json.dumps(entity.metadata) if entity.metadata else "{}"
+        stored_metadata = {
+            key: value
+            for key, value in entity.metadata.items()
+            if key != "content_hash"
+        }
+        metadata_json = json.dumps(stored_metadata) if stored_metadata else "{}"
         conn.execute(
             """
             INSERT OR REPLACE INTO entities (
@@ -240,7 +249,7 @@ class SqliteKnowledgeStore:
                 entity.signature,
                 entity.source_code,
                 metadata_json,
-                entity.metadata.get("content_hash"),
+                pack_content_hash(entity.metadata.get("content_hash")),
             ),
         )
 
@@ -350,7 +359,7 @@ class SqliteKnowledgeStore:
         """Convert a database row to an Entity."""
         metadata = json.loads(row["metadata_json"]) if row["metadata_json"] else {}
         if row["content_hash"]:
-            metadata["content_hash"] = row["content_hash"]
+            metadata["content_hash"] = unpack_content_hash(row["content_hash"])
 
         location = Location(
             file_path=row["file_path"],

@@ -566,3 +566,84 @@ def test_compact_after_close_raises(tmp_path: Path) -> None:
 
     with pytest.raises(RepositoryClosedError):
         store.compact()
+
+
+def _stored_content_hash(db_path: Path) -> object:
+    con = sqlite3.connect(db_path)
+    try:
+        row = con.execute(
+            "SELECT content_hash FROM entities WHERE entity_id = ?",
+            ("file.py::hashed",),
+        ).fetchone()
+    finally:
+        con.close()
+    return row[0]
+
+
+def _stored_metadata_json(db_path: Path, entity_id: str) -> str:
+    con = sqlite3.connect(db_path)
+    try:
+        row = con.execute(
+            "SELECT metadata_json FROM entities WHERE entity_id = ?",
+            (entity_id,),
+        ).fetchone()
+    finally:
+        con.close()
+    return str(row[0])
+
+
+def _hashed_entity(digest: str) -> Entity:
+    entity = _make_entity("file.py::hashed", EntityKind.FUNCTION, "hashed")
+    entity.metadata["content_hash"] = digest
+    return entity
+
+
+def test_sha256_content_hash_round_trips_as_lowercase_hex(tmp_path: Path) -> None:
+    digest = "a" * 63 + "f"
+    store = SqliteKnowledgeStore(tmp_path / "knowledge.db")
+    try:
+        store.add_entity(_hashed_entity(digest))
+        retrieved = store.get_entity("file.py::hashed")
+    finally:
+        store.close()
+
+    assert retrieved is not None
+    assert retrieved.metadata["content_hash"] == digest
+
+
+def test_content_hash_that_is_not_a_digest_round_trips_unchanged(
+    tmp_path: Path,
+) -> None:
+    store = SqliteKnowledgeStore(tmp_path / "knowledge.db")
+    try:
+        store.add_entity(_hashed_entity("dummy_hash"))
+        retrieved = store.get_entity("file.py::hashed")
+    finally:
+        store.close()
+
+    assert retrieved is not None
+    assert retrieved.metadata["content_hash"] == "dummy_hash"
+
+
+def test_sha256_content_hash_is_stored_as_thirty_two_bytes(tmp_path: Path) -> None:
+    db_path = tmp_path / "knowledge.db"
+    store = SqliteKnowledgeStore(db_path)
+    try:
+        store.add_entity(_hashed_entity("a" * 63 + "f"))
+    finally:
+        store.close()
+
+    stored = _stored_content_hash(db_path)
+    assert isinstance(stored, bytes)
+    assert len(stored) == 32
+
+
+def test_content_hash_is_not_duplicated_into_metadata_json(tmp_path: Path) -> None:
+    db_path = tmp_path / "knowledge.db"
+    store = SqliteKnowledgeStore(db_path)
+    try:
+        store.add_entity(_hashed_entity("a" * 63 + "f"))
+    finally:
+        store.close()
+
+    assert "content_hash" not in _stored_metadata_json(db_path, "file.py::hashed")
