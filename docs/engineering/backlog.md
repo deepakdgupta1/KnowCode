@@ -142,11 +142,41 @@ invariant or the test stops claiming it. Do not weaken the test to make it pass.
 change would have made both harder to review, and the defect predates that
 change.
 
-**In progress, uncommitted (2026-08-29).** A working tree change gives
-`build_generation` an `expect_current` parameter and a bounded rebase loop
-(`_REBUILD_REBASE_ATTEMPTS`), with a regression test named
-`test_a_rebuild_never_reverts_a_concurrent_watch_publication`. Check whether
-that landed before starting; do not duplicate it.
+**Closed 2026-08-29.** `build_generation` now compare-and-swaps on
+`expect_current` and re-derives on the generation published in between, bounded
+by `_REBUILD_REBASE_ATTEMPTS`, with the regression test
+`test_a_rebuild_never_reverts_a_concurrent_watch_publication`. 0 failures in 40
+runs. Kept here with its analysis because the reproduction and the failure rates
+are the evidence that it is genuinely fixed.
+
+### BL-7 - Timing-sensitive tests flake under concurrent load
+
+**Severity:** Low, but it costs trust in the suite. **Found:** 2026-08-29, while
+two agent sessions ran the suite on the same machine.
+
+Two tests fail intermittently in a full-suite run and never in isolation, and it
+is a different test each time:
+
+- `tests/unit/indexing/test_index_batching.py::test_a_bulk_build_retries_a_transient_provider_failure`
+  waits on a thread barrier with `timeout=5.0` (`test_index_batching.py:96`).
+- `tests/integration/test_generation_hotswap.py::test_the_api_serves_requests_while_reload_runs`
+  waits on events and thread joins with 30 and 60 second timeouts.
+
+Measured: 1 failure in 4 full-suite runs, different test each time, 0 failures in
+5 runs of the module in isolation and 3 runs of the single test. Load average was
+2.9 with two agent sessions running suites concurrently.
+
+The suspected cause is wall-clock waits sized for an idle machine, not a
+correctness defect: nothing in the product changed between a passing and a
+failing run. That is a hypothesis, not a finding. Confirm it by running the
+suite under deliberate CPU load before changing any timeout.
+
+Do not simply raise the timeouts. A barrier that needs more than five seconds
+for threads that are already spawned is worth understanding first, and a longer
+timeout converts a fast failure into a slow one.
+
+**Deferred on purpose.** It is test infrastructure, not product behaviour, and
+it was found while diagnosing something else.
 
 ### BL-3 - An in-memory vector plane is the wrong default at scale
 
@@ -167,26 +197,35 @@ fp32 scan below the threshold, where an index buys nothing at all.
 **Deferred on purpose.** Neither is needed for the 32.31 MB Phase D1 recovered,
 and building a cache tier before any repository needs one is speculative.
 
-### BL-4 - `knowledge.db` carries unmeasured free-page slack
+### BL-7 - A generation manifest cannot witness row loss in either database
 
-**Severity:** Medium. **Found:** 2026-08-29, comparing two storage baselines.
+**Severity:** Medium. **Found:** 2026-08-29, mutation-probing Phase A2.
 
-Between the audit build and the Phase D1 baseline, entities grew 11% and
-relationships 10%, but `knowledge.db` grew 64%, from 19.48 MB to 31.93 MB. A
-freshly built generation measured 30.51 MB against the baseline's 31.93 MB for
-the identical corpus, which points at free pages rather than payload.
+`build_manifest` byte-digests only `index_manifest.json`. `chunks.db` and
+`knowledge.db` are described by logical id digests and counts, and
+`read_chunk_ids`, `count_durable_embeddings`, and `_assert_chunk_vector_parity`
+all read them out of the staged file at the end of the build. Every number in
+the manifest therefore derives from the artifact it is meant to check.
 
-Phase A2 of the storage plan already proposes `VACUUM` before the manifest is
-digested and estimates about 2 MB. That estimate predates this observation and
-is probably low. Measure the free-page count with `dbstat` before sizing the
-work.
+Reproduce it by making `SqliteChunkRepository.compact` delete every seventh row
+before it vacuums. The build publishes, and
+`validate_generation(..., verify_digests=True)` returns no failures, because
+the manifest recorded the post-deletion id list.
 
-**Owner:** Phase A2 of `storage_optimization_2026_v4.md`.
+This was theoretical until Phase A2, which introduced the first step that
+rewrites an artifact between indexing and publication. A2 covers itself with
+`test_compaction_does_not_lose_rows_between_indexing_and_publication`, which
+compares the published chunk count against the count the indexer reported
+before the file was touched. The general gap is wider than that one test.
 
-**In progress, uncommitted (2026-08-29).** A working tree change adds a
-`compact()` path to `SqliteChunkRepository` with tests covering page reclamation,
-byte-for-byte row preservation, a hot write-ahead log, idempotence, and use after
-close. Check whether that landed before starting.
+Note that adding the two databases to `artifact_names` does not fix this. That
+digest would also be computed from the damaged file. A fix has to compare
+against something produced before the artifact was last written.
+
+**Deferred on purpose.** No current step other than compaction rewrites a
+staged database, and compaction is covered. Revisit when Phase C rewrites the
+schema, which is the next change that touches these files after the counts are
+taken.
 
 ### BL-5 - The storage plan's code anchors are stale
 
@@ -209,5 +248,7 @@ the anchors are re-verified as part of adopting a later phase.
 
 | Item | Resolution |
 | --- | --- |
+| `knowledge.db` carried unmeasured free-page slack (BL-4) | Phase A2, 2026-08-29. Both databases are vacuumed on the staged copy before the generation is digested. Measured at 3.79 MB over one corpus, against the plan's 2.03 MB estimate; nearly all of it is B-tree repacking rather than free pages. |
 | Every embedding stored twice, 28.5% of a generation | Phase D1, 2026-08-29. [ADR 9](adr/adr-0009-derived-vector-plane.md). |
+| BL-2, a full rebuild reverting a concurrent watch publication | Fixed 2026-08-29. `build_generation` compare-and-swaps on `expect_current` and re-derives on the generation published in between, bounded by `_REBUILD_REBASE_ATTEMPTS`. The flaky convergence test went from 13 failures in 40 runs to 0 in 40. |
 | Publication asserted the presence of a cache and compared two manifest numbers to check chunk/vector membership | Phase D1, 2026-08-29. The guard now counts durable embeddings in `chunks.db`, which is what [ADR 3](adr/adr-0003-durable-embedding-representation.md) already required. |
