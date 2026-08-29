@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 import hashlib
 import math
 import os
+import threading
 from typing import Any, cast
 
 from knowcode.config import AppConfig, ModelConfig
@@ -70,6 +71,9 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
         super().__init__(config)
         self.api_key_env = api_key_env
         self.base_url = base_url
+        # Indexing embeds several batches at once, so client construction is a
+        # contended path: guard it rather than build one client per thread.
+        self._client_lock = threading.Lock()
 
         api_key = os.environ.get(self.api_key_env)
         if not api_key:
@@ -79,13 +83,27 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
             self.client = _create_openai_client(api_key=api_key, base_url=base_url)
 
     def _get_client(self) -> Any:
-        """Return an initialized OpenAI client, loading credentials if needed."""
-        if not self.client:
-            api_key = os.environ.get(self.api_key_env)
-            if not api_key:
-                raise ValueError(f"{self.api_key_env} environment variable is not set.")
-            self.client = _create_openai_client(api_key=api_key, base_url=self.base_url)
-        return self.client
+        """Return an initialized OpenAI client, loading credentials if needed.
+
+        Double-checked because concurrent batches all reach this before any of
+        them has a client: unguarded, each thread builds its own and discards
+        all but the last.
+        """
+        client = self.client
+        if client is not None:
+            return client
+
+        with self._client_lock:
+            if self.client is None:
+                api_key = os.environ.get(self.api_key_env)
+                if not api_key:
+                    raise ValueError(
+                        f"{self.api_key_env} environment variable is not set."
+                    )
+                self.client = _create_openai_client(
+                    api_key=api_key, base_url=self.base_url
+                )
+            return self.client
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         """Generate embeddings for a batch of texts.
@@ -137,21 +155,29 @@ class VoyageAIEmbeddingProvider(EmbeddingProvider):
         super().__init__(config)
         self.api_key_env = api_key_env
         self.client: Any = None
+        # See OpenAIEmbeddingProvider: concurrent batches race this, and here
+        # the loser also repeats the credential lookup.
+        self._client_lock = threading.Lock()
 
     def _get_client(self) -> Any:
         """Return an initialized VoyageAI client, loading credentials if needed."""
-        if self.client is None:
-            from knowcode.llm.voyageai_client import get_voyageai_client
+        client = self.client
+        if client is not None:
+            return client
 
-            self.client = get_voyageai_client(self.api_key_env)
+        with self._client_lock:
+            if self.client is None:
+                from knowcode.llm.voyageai_client import get_voyageai_client
 
-        if self.client is None:
-            raise ValueError(
-                f"VoyageAI client unavailable; set {self.api_key_env} and install "
-                'optional dependency with: pip install "knowcode[voyageai]"'
-            )
+                self.client = get_voyageai_client(self.api_key_env)
 
-        return self.client
+            if self.client is None:
+                raise ValueError(
+                    f"VoyageAI client unavailable; set {self.api_key_env} and install "
+                    'optional dependency with: pip install "knowcode[voyageai]"'
+                )
+
+            return self.client
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         """Generate document embeddings for a batch of texts."""

@@ -21,9 +21,12 @@ records: [ADR 4](../adr/adr-0004-complete-index-generations.md),
    docstring + source; 1000 chars / 100 overlap) plus module-header and
    imports chunks; MD5 content hash, mtime, and `has_docstring` recorded
    as rerank signals.
-5. **Embed** (`llm/embedding.py`) — provider selection VoyageAI →
-   OpenAI-compatible → deterministic `DummyEmbeddingProvider` (SHA-derived
-   pseudo-embeddings: search still works, BM25-dominated).
+5. **Embed** (`llm/embedding.py`, `indexing/embedding_batch.py`) — provider
+   selection VoyageAI → OpenAI-compatible → deterministic
+   `DummyEmbeddingProvider` (SHA-derived pseudo-embeddings: search still
+   works, BM25-dominated). Bulk pipelines batch chunks **across** files up to
+   the provider's configured limit and overlap a bounded number of those
+   batches; see [Embedding batches](#embedding-batches).
 6. **Stage & publish** (`generation_writer.py`) — see below.
 
 ## Generations
@@ -63,6 +66,40 @@ their stored embeddings — no provider call. Vector rebuilds read committed
 chunk rows, never transient in-process embeddings. Dense generations
 cannot publish if any searchable chunk lacks a valid embedding; a null
 embedding is legal only for an explicitly non-dense generation.
+
+## Embedding batches
+
+A bulk build plans files (parse, chunk, reuse durable embeddings) into a
+window, embeds that whole window as provider-sized batches with bounded
+concurrency, then commits each file on its own. Embedding was previously one
+provider call per file, issued one after another, which made an N-file
+repository cost N sequential network round-trips — the dominant wall-clock
+cost of a cold build.
+
+What the change deliberately preserves:
+
+- **One transaction per file.** Commits are unchanged and stay serialized on
+  the calling thread, so a failure still leaves exactly that file's previous
+  generation intact. Only the provider call runs off-thread.
+- **Parity.** A window is fully embedded before any of its files commit, so
+  every committed chunk carries its own vector and the chunk↔vector counts
+  validated before publication stay exact.
+- **Failure isolation.** A batch that fails is retried one file at a time, so
+  a file the provider rejects is kept back alone instead of taking down every
+  file that shared its batch.
+
+**Retry ownership.** Transient provider failures are retried with backoff by
+the bulk driver, which is the outermost loop over its files. The single-file
+transaction (`replace_file`, what watch mode commits) deliberately does *not*
+retry: there the outermost loop is `BackgroundIndexer`, which already retries
+`retryable` failures with its own backoff. Nesting the two would multiply the
+budgets and stall the watch queue for the minutes its design refuses to.
+
+**Progress.** `index_directory` and `index_incremental` accept an optional
+`on_progress(files_done, files_total)` callback, counted per *committed* file
+and reported once with zero first. Because embedding is batched, the count
+advances in bursts at window boundaries rather than one file at a time. A
+callback that raises is logged and never fails the build.
 
 ## Watch mode
 
