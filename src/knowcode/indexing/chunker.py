@@ -1,6 +1,13 @@
-"""Code chunker for breaking down entities into searchable units."""
+"""Chunker for breaking a parsed file down into searchable units.
+
+Code is chunked by entity. Prose is chunked by heading hierarchy, which is a
+different enough job that :class:`~knowcode.indexing.prose_chunker.ProseChunker`
+owns it; this class routes by file type and joins the result back to the graph.
+"""
 
 from __future__ import annotations
+
+import bisect
 from pathlib import Path
 from typing import Optional
 
@@ -10,6 +17,12 @@ from knowcode.data_models import (
     ParseResult,
     Entity,
     EntityKind,
+    RelationshipKind,
+)
+from knowcode.indexing.prose_chunker import (
+    ProseChunk,
+    ProseChunker,
+    ProseChunkingConfig,
 )
 from knowcode.utils.tokenizer import tokenize_code
 from knowcode.utils.logger import get_logger
@@ -17,12 +30,23 @@ import hashlib
 
 logger = get_logger(__name__)
 
+#: File types chunked by heading hierarchy rather than by entity. Running the
+#: code path over these truncated them at the first line looking like a Python
+#: import or definition, which inside a fenced block is ordinary prose.
+PROSE_SUFFIXES = frozenset({".md", ".markdown", ".rst"})
+
 
 class Chunker:
-    """Chunks code entities into smaller, searchable units."""
+    """Chunks a parsed file into smaller, searchable units."""
 
-    def __init__(self, config: Optional[ChunkingConfig] = None) -> None:
+    def __init__(
+        self,
+        config: Optional[ChunkingConfig] = None,
+        prose_config: Optional[ProseChunkingConfig] = None,
+    ) -> None:
         self.config = config or ChunkingConfig()
+        self.prose_config = prose_config or ProseChunkingConfig()
+        self._prose_chunker = ProseChunker(self.prose_config)
         self.chunks: list[CodeChunk] = []
 
     def process_parse_result(self, result: ParseResult) -> list[CodeChunk]:
@@ -37,6 +61,10 @@ class Chunker:
         self.chunks = []  # Single initialization at start of process
 
         file_path = result.file_path
+        if Path(file_path).suffix.lower() in PROSE_SUFFIXES:
+            self.chunks = self._chunk_prose(result)
+            return self.chunks
+
         source_code = ""
 
         # Try to find module source code if available
@@ -63,6 +91,116 @@ class Chunker:
             self._chunk_entity(entity, last_modified)
 
         return self.chunks
+
+    # ------------------------------------------------------------------
+    # Prose
+    # ------------------------------------------------------------------
+
+    def _chunk_prose(self, result: ParseResult) -> list[CodeChunk]:
+        """Chunk a document by heading hierarchy, hanging each chunk on its section.
+
+        The prose chunker keeps a section identity of its own that nothing else
+        in the index knows about. What gets stored is the graph entity whose
+        span the chunk's lines fall inside, so ``chunk.entity_id`` remains a
+        usable graph handle rather than a dangling one (BL-6).
+        """
+        path = Path(result.file_path)
+        if not path.is_file():
+            return []
+
+        anchors = self._section_anchors(result)
+        if not anchors:
+            # No document entity to hang text on. Emitting orphans here would
+            # put content in the index that no graph path can reach.
+            return []
+
+        anchor_lines = [line for line, _ in anchors]
+        kinds = {entity.id: entity.kind.value for entity in result.entities}
+        parents = {
+            relationship.target_id: relationship.source_id
+            for relationship in result.relationships
+            if relationship.kind == RelationshipKind.CONTAINS
+        }
+        last_modified = str(path.stat().st_mtime)
+
+        emitted: dict[str, int] = {}
+        chunks: list[CodeChunk] = []
+        for prose in self._prose_chunker.chunk_file(path, doc_id=result.file_path):
+            position = bisect.bisect_right(anchor_lines, prose.start_line)
+            entity_id = anchors[position - 1][1]
+            index = emitted.get(entity_id, 0)
+            emitted[entity_id] = index + 1
+            chunks.append(
+                self._prose_chunk(
+                    prose,
+                    entity_id=entity_id,
+                    index=index,
+                    kind=kinds.get(entity_id, EntityKind.SECTION.value),
+                    parent_id=parents.get(entity_id),
+                    last_modified=last_modified,
+                )
+            )
+        return chunks
+
+    @staticmethod
+    def _section_anchors(result: ParseResult) -> list[tuple[int, str]]:
+        """Each entity's first line and id, ascending, for a line-to-entity join.
+
+        The document anchors line 0 so that a preamble before the first heading
+        belongs to the document rather than to nothing.
+        """
+        document = next(
+            (e for e in result.entities if e.kind == EntityKind.DOCUMENT), None
+        )
+        if document is None:
+            return []
+        sections = sorted(
+            (entity.location.line_start, entity.id)
+            for entity in result.entities
+            if entity.kind == EntityKind.SECTION
+        )
+        return [(0, document.id), *sections]
+
+    def _prose_chunk(
+        self,
+        prose: ProseChunk,
+        *,
+        entity_id: str,
+        index: int,
+        kind: str,
+        parent_id: Optional[str],
+        last_modified: str,
+    ) -> CodeChunk:
+        """Convert one ProseChunk into the CodeChunk the stores speak (B4)."""
+        metadata = {
+            "type": "prose",
+            "kind": kind,
+            "doc_type": prose.doc_type,
+            "level": str(prose.level),
+            "line_range": f"{prose.start_line}-{prose.end_line}",
+            "token_count": str(prose.token_count),
+            "context_header": prose.context_header,
+            # md5 like every other chunk: this column is the embedding-reuse
+            # key, so two chunks holding the same text must hash the same.
+            "content_hash": hashlib.md5(prose.content.encode("utf-8")).hexdigest(),
+            "last_modified": last_modified,
+        }
+        if parent_id:
+            metadata["parent_id"] = parent_id
+        if prose.is_oversize:
+            metadata["oversize"] = "true"
+
+        return CodeChunk(
+            id=f"{entity_id}::{index}",
+            entity_id=entity_id,
+            content=prose.content,
+            tokens=tokenize_code(prose.content),
+            metadata=metadata,
+        )
+
+    # ------------------------------------------------------------------
+    # Code
+    # ------------------------------------------------------------------
 
     def _emit_module_chunks(self, file_path: str, source: str) -> None:
         """Extract module-level header and imports into dedicated chunks.

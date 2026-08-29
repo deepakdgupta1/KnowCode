@@ -96,7 +96,12 @@ class Indexer:
     whenever embedding failed.
     """
 
-    SCHEMA_VERSION = 2
+    # 3: Phase B. Prose is chunked by heading hierarchy rather than by the
+    # Python module-header extractor, so a generation built before this carries
+    # a different corpus under the same chunk ids and must be rebuilt, not
+    # incrementally updated. This is the version that gates it; the chunk
+    # repository's own constant is never compared against a stored value.
+    SCHEMA_VERSION = 3
     LEGACY_MANIFEST_VERSION = 1
     SUPPORTED_SCHEMA_VERSIONS = {SCHEMA_VERSION}
 
@@ -899,6 +904,7 @@ class Indexer:
                 "created_at": int(time.time()),
                 "embedding": asdict(self.embedding_provider.config),
                 "chunking": asdict(self.chunker.config),
+                "prose_chunking": asdict(self.chunker.prose_config),
             }
         )
         # Manifest last, and atomically (Step 13): it describes the vectors and

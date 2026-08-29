@@ -208,3 +208,35 @@ def test_load_removes_orphaned_temporary_files(tmp_path: Path) -> None:
 
     assert not orphan.exists()
     assert (out_dir / "index_manifest.json").exists()
+
+
+def test_a_pre_prose_chunking_manifest_is_rejected_rather_than_reused() -> None:
+    """Phase B changed which corpus a build produces, not the table shape.
+
+    A generation written before prose was routed through `ProseChunker` holds
+    truncated markdown under chunk ids the current code no longer mints, so an
+    incremental build over it would leave stale rows nothing reaches. The
+    manifest version is what refuses it; `SqliteChunkRepository.SCHEMA_VERSION`
+    cannot, because no code path compares it against the value stored in an
+    existing file.
+    """
+    with pytest.raises(ValueError, match="Rebuild"):
+        Indexer._validate_and_migrate_manifest({"schema_version": 2})
+
+
+def test_the_manifest_records_both_chunking_configs(tmp_path: Path) -> None:
+    """A loaded index must be able to say which chunking produced it."""
+    provider = DummyEmbeddingProvider(
+        EmbeddingConfig(provider="openai", model_name="x", dimension=8)
+    )
+    indexer = Indexer(provider)
+
+    indexer.save(tmp_path)
+
+    manifest = json.loads((tmp_path / "index_manifest.json").read_text())
+    assert (
+        manifest["chunking"]["max_chunk_size"] == indexer.chunker.config.max_chunk_size
+    )
+    assert manifest["prose_chunking"]["max_tokens"] == (
+        indexer.chunker.prose_config.max_tokens
+    )
