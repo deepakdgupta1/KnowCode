@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterable, Iterator, Optional, Sequence
@@ -20,6 +21,7 @@ from knowcode.indexing.file_updates import (
     PreparedFileUpdate,
     validate_prepared_chunks,
 )
+from knowcode.indexing.generations import has_native_vector_artifact
 from knowcode.indexing.graph_builder import GraphBuilder
 from knowcode.indexing.scanner import FileInfo, Scanner
 from knowcode.protocols import EmbeddingProviderProtocol, VectorStoreProtocol
@@ -480,6 +482,41 @@ class Indexer:
             return False
         return True
 
+    def rebuild_vector_plane(self, *, batch_size: int = 512) -> int:
+        """Reconstruct the whole vector index from the durable chunk rows.
+
+        ADR 0003 makes the fp32 BLOB in ``chunks.db`` the durable record, which
+        makes the ANN index a cache. This is the full-corpus counterpart of
+        :meth:`_recover_vectors_from_chunks`, which repairs only the ids one
+        file transaction touched.
+
+        The plane is cleared first so the result describes the current corpus
+        rather than the union of it and whatever the store held before. That
+        makes the rebuild idempotent: running it twice is running it once.
+
+        Args:
+            batch_size: Chunk rows read per query. Bounds peak memory.
+
+        Returns:
+            How many vectors were placed. Chunks with no durable embedding are
+            not in the semantic plane and are not counted.
+        """
+        started = time.monotonic()
+        self.vector_store.clear()
+        placed = 0
+        for chunk_id, embedding in self.chunk_repo.iter_embeddings(
+            batch_size=batch_size
+        ):
+            self.vector_store.upsert(chunk_id, embedding)
+            placed += 1
+        self.vector_store.flush()
+        logger.info(
+            "Rebuilt vector plane: %d vectors in %.2fs",
+            placed,
+            time.monotonic() - started,
+        )
+        return placed
+
     # ------------------------------------------------------------------
     # Bulk pipelines
     # ------------------------------------------------------------------
@@ -881,9 +918,6 @@ class Indexer:
         # before anything reads the directory (Step 13).
         cleanup_orphaned_temp_files(path)
 
-        # Load vector store
-        self.vector_store.load(path / "vectors")
-
         # Load manifest (optional, for compatibility checks).
         import json
 
@@ -911,8 +945,14 @@ class Indexer:
                 "version": self.LEGACY_MANIFEST_VERSION,
             }
 
-        # Load chunks via repository
+        # Chunks before vectors: the vector plane is derived from the durable
+        # embeddings those rows carry, so a generation published without a
+        # native vector artifact rebuilds its index here instead of failing.
         self.chunk_repo.load(path)
+        if has_native_vector_artifact(path):
+            self.vector_store.load(path / "vectors")
+        else:
+            self.rebuild_vector_plane()
 
     @classmethod
     def _validate_and_migrate_manifest(cls, manifest: dict[str, Any]) -> dict[str, Any]:

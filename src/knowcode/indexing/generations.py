@@ -459,6 +459,16 @@ class _StagedGenerationContext:
 # ----------------------------------------------------------------------
 
 
+def has_native_vector_artifact(directory: Path) -> bool:
+    """Whether ``directory`` carries a persisted vector index.
+
+    The index is derived from the durable embeddings in ``chunks.db``, so a
+    generation may legitimately omit it. Its absence selects a rebuild rather
+    than reporting a torn publication.
+    """
+    return any((directory / name).exists() for name in NATIVE_VECTOR_ARTIFACTS)
+
+
 def digest_ids(ids: Sequence[str]) -> str:
     """Return a stable digest over a set of identifiers.
 

@@ -3,7 +3,7 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any, Iterator, Optional, Union
 
 from knowcode.data_models import CodeChunk
 
@@ -130,3 +130,17 @@ class ChunkRepository(ABC):
     def get_all(self) -> list[CodeChunk]:
         """Get all chunks in the repository."""
         pass
+
+    def iter_embeddings(
+        self, *, batch_size: int = 512
+    ) -> Iterator[tuple[str, list[float]]]:
+        """Stream every durable embedding as ``(chunk_id, vector)`` pairs.
+
+        A derived vector index is rebuilt from this stream, so an
+        implementation that can page its rows should override this to bound
+        peak memory by ``batch_size``. The default materializes the corpus.
+        Rows with no durable vector are skipped.
+        """
+        for chunk in self.get_all():
+            if chunk.embedding is not None:
+                yield chunk.id, chunk.embedding
