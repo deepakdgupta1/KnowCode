@@ -20,45 +20,48 @@ roadmap workstream adopts it and the row points at that workstream.
 
 ## Open
 
-### BL-1 - Markdown documents are dropped from the index by an entity id collision
+### BL-9 - A symbol named after its own file shadows the file's module entity
 
-**Severity:** Critical. **Found:** 2026-08-29, while measuring the storage
-baseline for Phase D1.
+**Severity:** High. **Found:** 2026-08-29, writing the parser-contract
+uniqueness assertion that closed BL-1.
 
-`MarkdownParser` gives the document entity the id `<file>::<file-stem>` and each
-heading a section entity with the id `<file>::<heading-slug>`. When a document's
-H1 slugifies to its own filename, which is the ordinary convention, the two ids
-collide. The chunker then emits two chunks with the same id,
-`validate_prepared_chunks` rejects the whole file, and `replace_file` keeps the
-previous generation. On a first build there is no previous generation, so the
-document is absent from the index entirely and the only signal is a `WARNING`
-line.
+Every parser gives a file's MODULE entity the file stem as its qualified name.
+A top-level symbol whose name is also the stem therefore produces the same
+entity id, and the two entities silently overwrite each other in
+`knowledge.db`. This is BL-1's defect in a second place: identity derived
+without lexical scope. ADR 1's own example, `module.Type.method`, says a
+module-scoped symbol should carry the module prefix, and none does.
 
-Measured on this repository: **17 of 53 tracked markdown files, 259.9 KB, 32% of
-prose bytes, are not indexed at all.** That includes seven of the eight ADRs,
-`docs/engineering/architecture.md`, `docs/user/cli-reference.md`,
-`docs/user/getting-started.md`, `docs/user/configuration.md`, and
-`docs/user/rest-api.md`. An agent asking about any of them gets nothing.
+Unlike BL-1 the file is not rejected, because the chunker skips MODULE
+entities and so emits no duplicate chunk id. What breaks is the graph.
+
+Measured on this repository: **3 of 313 indexable tracked files**, one of them
+`src/knowcode/cli/cli.py`, where the MODULE entity spanning lines 1-1071 and
+the `cli()` function at lines 23-27 share
+`src/knowcode/cli/cli.py::cli`, and **48 relationships point at the ambiguous
+id**. The others are `scripts/fix_swallowed.py` and
+`tests/integration/test_golden_queries.py`.
+
+It is language-independent. Confirmed for Python, JavaScript, and TypeScript,
+and the mechanism holds for every parser that emits a MODULE entity. It is
+commoner in JavaScript and TypeScript, where `format.ts` exporting
+`function format()` is ordinary style.
 
 Reproduce:
 
 ```bash
-knowcode build . 2>&1 | grep "duplicate chunk id"
+pytest tests/unit/parsers/test_parser_contract.py -k named_after_its_file -rx
 ```
 
-This is not the coverage defect in `storage_optimization_2026_v4.md` §6.2. That
-one measured documents being truncated. These documents are absent. §6.2's
-"39% of prose is unreachable" was computed assuming these files were indexed and
-truncated, so the real figure is worse and the two must be fixed together.
+That test is a strict `xfail` carrying this item's id, so it fails loudly the
+day the defect is fixed and the marker has to come off.
 
-**Owner:** none. Phase B of the storage plan is the natural home, because it
-already rewrites markdown chunking. B3 would incidentally fix the chunk
-collision, but the entity id collision in `knowledge.db` would remain, so B needs
-an explicit item for it. Fix alongside BL-6 below, which is the same identity scheme failing a
-different way.
-
-**Not deferred on purpose.** It was found during Phase D1 and is out of that
-phase's scope, not out of scope generally.
+**Deferred on purpose.** The honest fix is to give module-scoped symbols the
+scope prefix ADR 1 already describes, which changes every entity id in the
+index and touches all nine parsers. Phase C already rewrites id encoding, so
+that is where it costs least. Do not paper over it with a reserved `::module`
+token; ADR 1 rules out ad hoc internal namespaces, and BL-6 is the evidence
+that inventing one produces ids nothing else agrees with.
 
 ### BL-6 - Module chunks point at an entity that does not exist
 
@@ -104,9 +107,11 @@ print(sorted({c.entity_id for c in Chunker().process_parse_result(res)} - ids))
 EOF
 ```
 
-Same area as BL-1 above. Both are markdown identity defects and both belong to the chunking phase of
-[P7](../roadmap.md), but they are independent: BL-1 rejects whole files, this
-one orphans chunks inside files that do index.
+The same identity scheme failing a third way, alongside BL-9 above and the
+closed BL-1. They are independent of each other: BL-1 rejected whole files,
+BL-9 merges two entities into one, and this one orphans chunks inside files
+that do index. This one belongs to the chunking phase of
+[P7](../roadmap.md).
 
 **Not deferred on purpose.** It was already written down once, in a research
 report nothing links to, and lost. That is the reason this backlog exists.
@@ -236,6 +241,7 @@ the anchors are re-verified as part of adopting a later phase.
 
 | Item | Resolution |
 | --- | --- |
+| Markdown documents dropped by an entity id collision (BL-1) | Fixed 2026-08-29. A section's qualified name now carries its heading path, so it cannot collide with its own document, and sibling headings sharing a title take an ordinal. Paired build over 55 markdown files: 17 rejected files to 0, prose bytes indexed 357,114 to 509,046. Entity id uniqueness is now asserted for all nine parsers, which is what found BL-9. |
 | `knowledge.db` carried unmeasured free-page slack (BL-4) | Phase A2, 2026-08-29. Both databases are vacuumed on the staged copy before the generation is digested. Measured at 3.79 MB over one corpus, against the plan's 2.03 MB estimate; nearly all of it is B-tree repacking rather than free pages. |
 | Every embedding stored twice, 28.5% of a generation | Phase D1, 2026-08-29. [ADR 9](adr/adr-0009-derived-vector-plane.md). |
 | BL-2, a full rebuild reverting a concurrent watch publication | Fixed 2026-08-29. `build_generation` compare-and-swaps on `expect_current` and re-derives on the generation published in between, bounded by `_REBUILD_REBASE_ATTEMPTS`. The flaky convergence test went from 13 failures in 40 runs to 0 in 40. |
