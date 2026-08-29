@@ -13,6 +13,7 @@ from knowcode.data_models import (
     Relationship,
     RelationshipKind,
 )
+from knowcode.parsers.prose_identity import HeadingScope
 
 
 class MarkdownParser:
@@ -50,13 +51,13 @@ class MarkdownParser:
 
         # Create document entity
         doc_name = file_path.stem
-        doc_id = f"{file_path}::{doc_name}"
+        scope = HeadingScope(str(file_path), doc_name)
 
         # Extract first paragraph as description (skip headings)
         description = self._extract_description(content)
 
         doc_entity = Entity(
-            id=doc_id,
+            id=scope.document_id,
             kind=EntityKind.DOCUMENT,
             name=doc_name,
             qualified_name=doc_name,
@@ -76,20 +77,18 @@ class MarkdownParser:
         headings = self._extract_headings(content_no_code, lines)
 
         # Build section hierarchy
-        section_stack: list[tuple[int, str]] = [(0, doc_id)]  # (level, entity_id)
-
         for heading in headings:
             level, title, line_num = heading
-            section_id = f"{file_path}::{self._slugify(title)}"
+            section = scope.enter(level, title)
 
             # Find line range for this section
             line_end = self._find_section_end(line_num, headings, len(lines))
 
             section_entity = Entity(
-                id=section_id,
+                id=section.entity_id,
                 kind=EntityKind.SECTION,
                 name=title,
-                qualified_name=title,
+                qualified_name=section.qualified_name,
                 location=Location(
                     file_path=str(file_path),
                     line_start=line_num,
@@ -99,21 +98,13 @@ class MarkdownParser:
             )
             entities.append(section_entity)
 
-            # Find parent (closest heading with lower level)
-            while section_stack and section_stack[-1][0] >= level:
-                section_stack.pop()
-
-            parent_id = section_stack[-1][1] if section_stack else doc_id
-
             relationships.append(
                 Relationship(
-                    source_id=parent_id,
-                    target_id=section_id,
+                    source_id=section.parent_id,
+                    target_id=section.entity_id,
                     kind=RelationshipKind.CONTAINS,
                 )
             )
-
-            section_stack.append((level, section_id))
 
         return ParseResult(
             file_path=str(file_path),
@@ -174,12 +165,3 @@ class MarkdownParser:
                 return para[:500]
 
         return ""
-
-    def _slugify(self, text: str) -> str:
-        """Convert text to a URL-friendly slug."""
-        # Lowercase and replace spaces with hyphens
-        slug = text.lower().strip()
-        slug = re.sub(r"[^\w\s-]", "", slug)
-        slug = re.sub(r"[\s_]+", "-", slug)
-        slug = re.sub(r"-+", "-", slug)
-        return slug.strip("-")

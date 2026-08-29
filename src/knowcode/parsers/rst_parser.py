@@ -10,7 +10,6 @@ retrieval index.
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 from knowcode.data_models import (
@@ -21,6 +20,7 @@ from knowcode.data_models import (
     Relationship,
     RelationshipKind,
 )
+from knowcode.parsers.prose_identity import HeadingScope
 from knowcode.indexing.prose_chunker import (
     _RST_DIRECTIVE_RE,
     _rst_is_adornment,
@@ -57,9 +57,9 @@ class RstParser:
         headings = _scan_rst_headings(lines, 1)
 
         doc_name = file_path.stem
-        doc_id = f"{file_path}::{doc_name}"
+        scope = HeadingScope(str(file_path), doc_name)
         doc_entity = Entity(
-            id=doc_id,
+            id=scope.document_id,
             kind=EntityKind.DOCUMENT,
             name=doc_name,
             qualified_name=doc_name,
@@ -73,19 +73,18 @@ class RstParser:
 
         entities: list[Entity] = [doc_entity]
         relationships: list[Relationship] = []
-        section_stack: list[tuple[int, str]] = [(0, doc_id)]  # (level, entity_id)
 
         for idx, (heading_start, level, title, _body_start) in enumerate(headings):
-            section_id = f"{file_path}::{self._slugify(title)}"
+            section = scope.enter(level, title)
             next_start = (
                 headings[idx + 1][0] if idx + 1 < len(headings) else len(lines) + 1
             )
             entities.append(
                 Entity(
-                    id=section_id,
+                    id=section.entity_id,
                     kind=EntityKind.SECTION,
                     name=title,
-                    qualified_name=title,
+                    qualified_name=section.qualified_name,
                     location=Location(
                         file_path=str(file_path),
                         line_start=heading_start,
@@ -95,17 +94,13 @@ class RstParser:
                 )
             )
 
-            while section_stack and section_stack[-1][0] >= level:
-                section_stack.pop()
-            parent_id = section_stack[-1][1] if section_stack else doc_id
             relationships.append(
                 Relationship(
-                    source_id=parent_id,
-                    target_id=section_id,
+                    source_id=section.parent_id,
+                    target_id=section.entity_id,
                     kind=RelationshipKind.CONTAINS,
                 )
             )
-            section_stack.append((level, section_id))
 
         return ParseResult(
             file_path=str(file_path),
@@ -133,11 +128,3 @@ class RstParser:
                 continue
             paragraph.append(stripped)
         return " ".join(paragraph)[:500]
-
-    def _slugify(self, text: str) -> str:
-        """Convert text to a URL-friendly slug (mirrors MarkdownParser)."""
-        slug = text.lower().strip()
-        slug = re.sub(r"[^\w\s-]", "", slug)
-        slug = re.sub(r"[\s_]+", "-", slug)
-        slug = re.sub(r"-+", "-", slug)
-        return slug.strip("-")
