@@ -451,10 +451,15 @@ def test_a_commit_without_a_published_generation_stays_in_place(
     assert any("alpha.py" in path for path in _indexed_files(service))
 
     service.flush()
-    assert (tmp_path / "knowcode_index" / "vectors.json").exists(), (
-        "the flat layout lost its vectors, which flush() is responsible for"
-    )
     service.close()
+
+    # The flat layout keeps its vectors because the chunk rows carry them; the
+    # plane is rebuilt on the next open rather than saved beside them.
+    restarted = _service(tmp_path, backend)
+    assert restarted.get_indexer().vector_store.count() >= 1, (
+        "the flat layout lost its vectors across a restart"
+    )
+    restarted.close()
 
 
 # ----------------------------------------------------------------------

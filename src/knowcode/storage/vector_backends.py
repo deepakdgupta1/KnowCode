@@ -52,19 +52,20 @@ VECTOR_BACKENDS: dict[str, VectorBackendSpec] = {
 }
 
 
-def create_vector_store(
-    backend: str,
-    *,
-    dimension: int,
-    index_dir: Path | None = None,
-) -> VectorStoreProtocol:
-    """Create a vector store for the configured backend."""
+def create_vector_store(backend: str, *, dimension: int) -> VectorStoreProtocol:
+    """Create an in-memory vector store for the configured backend.
+
+    The store is never pointed at a generation directory. The ANN index is
+    derived from the durable embeddings in ``chunks.db`` (ADR 3), so a store
+    that wrote into a bundle would publish, digest, and retain a second copy of
+    every vector. :meth:`~knowcode.indexing.indexer.Indexer.rebuild_vector_plane`
+    fills it from those rows instead.
+    """
     normalized = _normalize_backend(backend)
     if normalized == "lancedb":
         from knowcode.storage.lancedb_vector_store import LanceDBVectorStore
 
-        path = index_dir / "vectors.lancedb" if index_dir is not None else None
-        return LanceDBVectorStore(dimension=dimension, path=path)
+        return LanceDBVectorStore(dimension=dimension)
 
     from knowcode.storage.vector_store import VectorStore
 
@@ -84,14 +85,29 @@ def inspect_vector_index(
     metadata: dict[str, Any] = {}
 
     vectors_file = index_path / "vectors.json"
+    has_native = any(
+        (index_path / name).exists()
+        for name in ("vectors.lancedb", "vectors.index", "vectors.npy")
+    )
     if vectors_file.exists():
         try:
             raw_metadata = _read_json_object(vectors_file)
             metadata = _validate_vector_metadata(raw_metadata)
         except Exception as exc:
             failures.append(f"invalid vectors.json: {exc}")
-    else:
+    elif has_native:
+        # An artifact with no envelope describing it is a torn write.
         failures.append("missing vectors.json")
+    else:
+        # Neither half is present, which is the published shape: the plane is
+        # rebuilt from the durable embeddings in chunks.db.
+        return VectorIndexInspection(
+            backend=_normalize_backend(configured_backend),
+            raw_metadata={},
+            metadata={},
+            failures=(),
+            warnings=(),
+        )
 
     backend = _infer_backend(
         metadata=metadata or raw_metadata,

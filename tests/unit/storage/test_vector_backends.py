@@ -157,3 +157,32 @@ def test_schema_check_uses_selected_backend(tmp_path: Path) -> None:
 def test_create_vector_store_rejects_unknown_backend() -> None:
     with pytest.raises(ValueError, match="Unsupported vector backend"):
         create_vector_store("weaviate", dimension=1024)
+
+
+def test_inspect_accepts_a_generation_with_no_vector_plane(tmp_path: Path) -> None:
+    """A derived plane leaves nothing on disk, and that is not a fault.
+
+    The ANN index is rebuilt from the durable embeddings in ``chunks.db``, so a
+    generation with neither an envelope nor a native artifact is the normal
+    published shape rather than a torn publication.
+    """
+    inspection = inspect_vector_index(tmp_path, configured_backend="lancedb")
+
+    assert inspection.ok, inspection.failures
+
+
+def test_inspect_still_rejects_a_half_written_vector_plane(tmp_path: Path) -> None:
+    """An artifact without its envelope is a torn write, not a derived plane."""
+    (tmp_path / "vectors.lancedb").mkdir()
+
+    inspection = inspect_vector_index(tmp_path, configured_backend="lancedb")
+
+    assert not inspection.ok
+    assert any("vectors.json" in failure for failure in inspection.failures)
+
+
+def test_create_vector_store_never_persists_into_a_generation() -> None:
+    """The store is a cache, so it must not write inside a published bundle."""
+    store = create_vector_store("lancedb", dimension=4)
+
+    assert store.path.startswith("memory://")  # type: ignore[attr-defined]

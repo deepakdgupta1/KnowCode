@@ -221,11 +221,11 @@ def test_doctor_warns_about_the_pre_generation_flat_layout(tmp_path: Path) -> No
 def test_doctor_fails_a_generation_whose_artifact_was_tampered_with(
     tmp_path: Path,
 ) -> None:
-    """The generation check is what proves the four artifacts still match."""
+    """The generation check is what proves the digested artifacts still match."""
     config = tmp_path / "aimodels.yaml"
     _write_config(config)
     generation_path = _publish_generation(tmp_path / "knowcode_index")
-    (generation_path / "vectors.index").write_bytes(b"tampered")
+    (generation_path / "index_manifest.json").write_text("{}", encoding="utf-8")
 
     report = doctor_module.run_doctor(store_path=tmp_path, config_path=config)
 

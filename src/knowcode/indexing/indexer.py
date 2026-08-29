@@ -871,22 +871,22 @@ class Indexer:
         return total_chunks
 
     def save(self, path: str | Path) -> None:
-        """Persist vector index and chunk metadata to disk.
+        """Persist chunk metadata and the manifest that describes it.
 
-        Writes data before metadata: vectors, then chunks, then the manifest
-        that describes both (Step 13 publication ordering).
+        The vector index is not written. It is derived from the durable fp32
+        embeddings the chunk rows already carry (ADR 3), so publishing it would
+        store every vector twice and copy the second copy into each retained
+        generation. :meth:`rebuild_vector_plane` reconstructs it on load.
+
+        Writes data before metadata (Step 13 publication ordering).
 
         Args:
             path: Directory path to write index files into.
         """
-        import time
         from dataclasses import asdict
 
         path = Path(path)
         path.mkdir(parents=True, exist_ok=True)
-
-        # Save vector store
-        self.vector_store.save(path / "vectors")
 
         # Save chunk metadata via repository
         self.chunk_repo.save(path)

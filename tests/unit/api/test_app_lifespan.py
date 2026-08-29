@@ -22,7 +22,6 @@ from knowcode.api.main import create_app
 from knowcode.config import AppConfig
 from knowcode.indexing import generations
 from knowcode.service import KnowCodeService
-from knowcode.storage.vector_store import VectorStore
 
 TIMEOUT = 5.0
 
@@ -210,10 +209,12 @@ def test_service_flush_persists_watched_vector_updates(tmp_path: Path) -> None:
     """A watch session's vectors must survive the process that made them.
 
     Reproduced before Step 17 with the FAISS backend: a watched commit left
-    ``count() == 1`` in memory and no ``vectors.json``/``vectors.index`` on
-    disk at all, so a restart recovered 0 vectors while the chunks were durable
-    — the split-brain this plan exists to remove, reintroduced at the process
-    boundary.
+    ``count() == 1`` in memory and nothing on disk, so a restart recovered 0
+    vectors while the chunks were durable, the split-brain this plan exists to
+    remove reintroduced at the process boundary.
+
+    The assertion is on recovery, not on an artifact. The plane is rebuilt from
+    the embeddings the chunk rows already carry, so a restart cannot lose it.
     """
     _repo(tmp_path)
     service = _service(tmp_path, backend="faiss")
@@ -224,10 +225,10 @@ def test_service_flush_persists_watched_vector_updates(tmp_path: Path) -> None:
     )
 
     service.flush()
+    service.close()
 
-    restored = VectorStore(dimension=indexer.vector_store.dimension)
-    restored.load(tmp_path / "knowcode_index" / "vectors")
-    assert restored.count() == 1
+    restarted = _service(tmp_path, backend="faiss")
+    assert restarted.get_indexer().vector_store.count() == 1
 
 
 def test_service_flush_never_edits_a_published_generation(tmp_path: Path) -> None:

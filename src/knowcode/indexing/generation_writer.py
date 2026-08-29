@@ -146,7 +146,7 @@ class StagedGenerationWriter:
             self._assert_seeded(copied)
             chunk_repo = SqliteChunkRepository(self.path / generations.CHUNKS_DB)
             vector_store = create_vector_store(
-                backend, dimension=provider.config.dimension, index_dir=self.path
+                backend, dimension=provider.config.dimension
             )
             self.indexer = Indexer(
                 provider, chunk_repo=chunk_repo, vector_store=vector_store
@@ -203,10 +203,14 @@ class StagedGenerationWriter:
         self._assert_open()
         try:
             self.indexer.save(self.path)
-            vector_count = self.indexer.vector_store.count()
             self.indexer.chunk_repo.close()
 
             chunk_ids = generations.read_chunk_ids(self.path / generations.CHUNKS_DB)
+            # Counted from the durable rows, not from the in-memory store: the
+            # ANN index is derived from exactly these embeddings.
+            vector_count = generations.count_durable_embeddings(
+                self.path / generations.CHUNKS_DB
+            )
             manifest = build_semantic_manifest(
                 self.path,
                 generation_id=self.generation_id,
@@ -271,18 +275,9 @@ class StagedGenerationWriter:
         present = set(copied)
         missing = [
             f"missing artifact {name}"
-            for name in (
-                generations.KNOWLEDGE_DB,
-                generations.CHUNKS_DB,
-                generations.VECTOR_METADATA,
-            )
+            for name in (generations.KNOWLEDGE_DB, generations.CHUNKS_DB)
             if name not in present
         ]
-        if not present & set(generations.NATIVE_VECTOR_ARTIFACTS):
-            missing.append(
-                "missing a native vector artifact "
-                f"({', '.join(generations.NATIVE_VECTOR_ARTIFACTS)})"
-            )
         if missing:
             raise generations.GenerationValidationError(self.base.path, missing)
 

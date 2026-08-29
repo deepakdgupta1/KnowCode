@@ -100,17 +100,20 @@ CHUNKS_DB = "chunks.db"
 VECTOR_METADATA = "vectors.json"
 INDEX_MANIFEST = "index_manifest.json"
 
-#: Native vector artifacts, by backend. Exactly one must be present in a full
-#: generation; which one depends on the configured backend and engine.
+#: Native vector artifacts, by backend. None of these is published: the ANN
+#: index is derived from the durable embeddings in ``chunks.db`` (ADR 3) and is
+#: rebuilt on load. The names survive so a generation written by an older build
+#: can still be recognised and cleaned up.
 NATIVE_VECTOR_ARTIFACTS = ("vectors.lancedb", "vectors.index", "vectors.npy")
 
-#: The chunk/vector half of a generation: everything a successor inherits when
-#: it is derived from an existing generation rather than built from scratch.
+#: The chunk half of a generation: everything a successor inherits when it is
+#: derived from an existing generation rather than built from scratch. The
+#: vector plane is not in it, because copying a cache forward costs a third of
+#: a generation to save a rebuild measured in seconds.
 SEMANTIC_ARTIFACTS = (
     CHUNKS_DB,
     INDEX_MANIFEST,
-    VECTOR_METADATA,
-) + NATIVE_VECTOR_ARTIFACTS
+)
 
 _REBUILD_HINT = "Rebuild with `knowcode build`."
 
@@ -560,6 +563,19 @@ def read_chunk_ids(chunks_db: Path) -> list[str]:
     return _read_ids(chunks_db, "SELECT chunk_id FROM chunks")
 
 
+def count_durable_embeddings(chunks_db: Path) -> int:
+    """Return how many chunk rows carry a durable embedding.
+
+    This is the true size of the semantic plane. The ANN index is rebuilt from
+    exactly these rows, so a generation is self-consistent when this agrees
+    with the vector count its manifest records.
+    """
+    rows = _read_ids(
+        chunks_db, "SELECT COUNT(*) FROM chunks WHERE embedding IS NOT NULL"
+    )
+    return int(rows[0]) if rows else 0
+
+
 # ----------------------------------------------------------------------
 # Manifest construction and IO
 # ----------------------------------------------------------------------
@@ -581,8 +597,7 @@ def build_manifest(
     """Describe a staged generation, digesting its immutable artifacts."""
     artifact_names: list[str] = []
     if kind == KIND_FULL:
-        artifact_names.extend([VECTOR_METADATA, INDEX_MANIFEST])
-        artifact_names.extend(NATIVE_VECTOR_ARTIFACTS)
+        artifact_names.append(INDEX_MANIFEST)
 
     return GenerationManifest(
         schema_version=MANIFEST_SCHEMA_VERSION,
@@ -691,23 +706,26 @@ def validate_generation(
         if not chunks_db.exists():
             failures.append(f"missing artifact {CHUNKS_DB}. {_REBUILD_HINT}")
 
-        recorded = {artifact.name for artifact in manifest.artifacts}
-        if not recorded & set(NATIVE_VECTOR_ARTIFACTS):
-            failures.append(
-                "generation records no native vector artifact "
-                f"({', '.join(NATIVE_VECTOR_ARTIFACTS)}). {_REBUILD_HINT}"
-            )
         for artifact in manifest.artifacts:
             if not (path / artifact.name).exists():
                 failures.append(f"missing artifact {artifact.name}. {_REBUILD_HINT}")
 
-        chunks = manifest.counts.get("chunks", 0)
-        vectors = manifest.counts.get("vectors", 0)
-        if chunks != vectors:
-            failures.append(
-                f"chunk/vector count mismatch: chunks={chunks} vectors={vectors}. "
-                f"{_REBUILD_HINT}"
-            )
+        # The ANN index is derived, so the plane to check is the durable one.
+        # The old guard compared two counts inside the same manifest and could
+        # not see a chunks.db whose rows had lost their vectors.
+        if chunks_db.exists():
+            try:
+                embedded = count_durable_embeddings(chunks_db)
+            except sqlite3.Error as exc:
+                failures.append(f"unreadable {CHUNKS_DB}: {exc}. {_REBUILD_HINT}")
+            else:
+                recorded_vectors = manifest.counts.get("vectors", 0)
+                if embedded != recorded_vectors:
+                    failures.append(
+                        f"durable embedding count mismatch: {CHUNKS_DB} holds "
+                        f"{embedded}, manifest records {recorded_vectors}. "
+                        f"{_REBUILD_HINT}"
+                    )
 
     if verify_digests:
         failures.extend(_verify_digests(path, manifest))

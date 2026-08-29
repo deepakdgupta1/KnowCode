@@ -20,16 +20,14 @@ def _publish_stub_generation(index_root: Path) -> None:
     import sqlite3
 
     with generations.staged_generation(index_root) as staging:
-        for name, table, column in (
-            ("knowledge.db", "entities", "entity_id"),
-            ("chunks.db", "chunks", "chunk_id"),
-        ):
-            conn = sqlite3.connect(str(staging.path / name))
-            conn.execute(f"CREATE TABLE {table} ({column} TEXT PRIMARY KEY)")
-            conn.commit()
-            conn.close()
-        (staging.path / "vectors.index").write_bytes(b"")
-        (staging.path / "vectors.json").write_text("{}", encoding="utf-8")
+        conn = sqlite3.connect(str(staging.path / "knowledge.db"))
+        conn.execute("CREATE TABLE entities (entity_id TEXT PRIMARY KEY)")
+        conn.commit()
+        conn.close()
+        conn = sqlite3.connect(str(staging.path / "chunks.db"))
+        conn.execute("CREATE TABLE chunks (chunk_id TEXT PRIMARY KEY, embedding BLOB)")
+        conn.commit()
+        conn.close()
         (staging.path / "index_manifest.json").write_text("{}", encoding="utf-8")
 
         manifest = generations.build_manifest(

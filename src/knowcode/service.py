@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import re
-import shutil
 import logging
 import threading
 from contextlib import contextmanager
@@ -302,7 +301,6 @@ class KnowCodeService:
         vector_store = create_vector_store(
             self.app_config.vector_backend,
             dimension=provider.config.dimension,
-            index_dir=artifact_dir,
         )
         indexer = Indexer(provider, chunk_repo=chunk_repo, vector_store=vector_store)
         if artifact_dir.exists():
@@ -805,7 +803,6 @@ class KnowCodeService:
                 vector_store = create_vector_store(
                     self.app_config.vector_backend,
                     dimension=dimension,
-                    index_dir=staging.path,
                 )
                 indexer = Indexer(
                     provider, chunk_repo=chunk_repo, vector_store=vector_store
@@ -853,6 +850,11 @@ class KnowCodeService:
             try:
                 if kind == generations.KIND_FULL:
                     chunk_ids = generations.read_chunk_ids(staging.path / "chunks.db")
+                    # The published plane is the durable one: the ANN index is
+                    # rebuilt from these rows rather than shipped beside them.
+                    vector_count = generations.count_durable_embeddings(
+                        staging.path / "chunks.db"
+                    )
                     self._assert_chunk_vector_parity(chunk_ids, vector_count)
                 manifest = build_semantic_manifest(
                     staging.path,
@@ -985,20 +987,24 @@ class KnowCodeService:
 
     @staticmethod
     def _discard_semantic_artifacts(staging_dir: Path) -> None:
-        """Remove partial semantic artifacts from a graph-only generation."""
-        for name in ("chunks.db", "index_manifest.json", "vectors.json"):
+        """Remove partial semantic artifacts from a graph-only generation.
+
+        No native vector artifact can be here. The store writes in memory and
+        the plane is rebuilt from the chunk rows, so a failed semantic build
+        leaves only a chunk store and its manifest behind.
+        """
+        for name in ("chunks.db", "index_manifest.json"):
             for path in staging_dir.glob(f"{name}*"):
                 path.unlink(missing_ok=True)
-        for name in generations.NATIVE_VECTOR_ARTIFACTS:
-            path = staging_dir / name
-            if path.is_dir():
-                shutil.rmtree(path, ignore_errors=True)
-            elif path.exists():
-                path.unlink()
 
     @staticmethod
     def _assert_chunk_vector_parity(chunk_ids: list[str], vector_count: int) -> None:
-        """Fail a staged generation whose chunk and vector membership disagree."""
+        """Fail a staged generation whose chunk and vector membership disagree.
+
+        Every chunk carries its own durable embedding today, so the two counts
+        must match. An embedding-selection policy that deliberately leaves some
+        chunks out of the semantic plane replaces this with its own budget.
+        """
         if len(chunk_ids) != vector_count:
             raise generations.GenerationValidationError(
                 Path("<staged>"),
@@ -1038,17 +1044,20 @@ class KnowCodeService:
           drain could not publish is published — or reported — here.
         * The vector store's write buffer is drained into its table. LanceDB
           buffers; FAISS/NumPy does not, and its flush is a documented no-op.
-        * The vector *artifact* and the index manifest are written back to the
-          artifact directory, for the flat pre-generation layout where the
-          index is genuinely mutable. Step 15 commits keep chunks durable in
-          SQLite as they go, but with the FAISS backend the vectors live only
-          in memory until someone calls :meth:`Indexer.save`.
+        * The index manifest is written back to the artifact directory, for the
+          flat pre-generation layout where the index is genuinely mutable.
+
+        The vectors themselves need no flush to survive the process. Step 15
+        commits write each chunk's embedding into ``chunks.db`` as they go, and
+        the plane is rebuilt from those rows on the next load. That is what
+        closes the split-brain this once guarded against, structurally rather
+        than by remembering to save.
 
         A *published* generation is still deliberately left untouched: ADR 4
         makes it immutable and records artifact checksums over it, so rewriting
-        ``vectors.*`` or ``index_manifest.json`` inside it would invalidate the
-        manifest that describes it. Nothing is buffered there any more, because
-        watch commits no longer land there at all.
+        ``index_manifest.json`` inside it would invalidate the manifest that
+        describes it. Nothing is buffered there any more, because watch commits
+        no longer land there at all.
 
         Raises:
             Exception: The staged batch could not be published. It surfaces

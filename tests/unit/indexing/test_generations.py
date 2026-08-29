@@ -53,6 +53,36 @@ def _write_ids(path: Path, table: str, column: str, ids: list[str]) -> None:
         conn.close()
 
 
+def _write_chunks(path: Path, ids: list[str], *, embedded: int | None = None) -> None:
+    """Create a chunks artifact carrying durable embeddings, as a build does.
+
+    ``embedded`` is how many rows keep a non-NULL ``embedding``; the rest are
+    stored but absent from the semantic plane.
+    """
+    embedded = len(ids) if embedded is None else embedded
+    conn = sqlite3.connect(str(path))
+    try:
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS chunks "
+            "(chunk_id TEXT PRIMARY KEY, embedding BLOB, embedding_dim INTEGER)"
+        )
+        conn.execute("DELETE FROM chunks")
+        conn.executemany(
+            "INSERT INTO chunks (chunk_id, embedding, embedding_dim) VALUES (?, ?, ?)",
+            [
+                (
+                    cid,
+                    b"\x00\x00\x80?" if i < embedded else None,
+                    1 if i < embedded else None,
+                )
+                for i, cid in enumerate(ids)
+            ],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def _stage(
     root: Path,
     *,
@@ -67,12 +97,7 @@ def _stage(
     staging = stage_generation(root)
     _write_ids(staging / "knowledge.db", "entities", "entity_id", entity_ids)
     if kind == generations.KIND_FULL:
-        _write_ids(staging / "chunks.db", "chunks", "chunk_id", chunk_ids)
-        (staging / "vectors.index").write_bytes(b"native-index-bytes")
-        (staging / "vectors.json").write_text(
-            json.dumps({"schema_version": 3, "backend": "faiss", "dimension": 4}),
-            encoding="utf-8",
-        )
+        _write_chunks(staging / "chunks.db", chunk_ids)
         (staging / "index_manifest.json").write_text(
             json.dumps({"schema_version": 2, "embedding": {"dimension": 4}}),
             encoding="utf-8",
@@ -195,12 +220,12 @@ def test_pointer_write_failure_leaves_the_previous_generation_current(
 
 def test_publish_rejects_an_invalid_staged_generation(tmp_path: Path) -> None:
     staging, manifest = _stage(tmp_path)
-    (staging / "vectors.index").unlink()
+    (staging / "index_manifest.json").unlink()
 
     with pytest.raises(GenerationValidationError) as excinfo:
         publish_generation(tmp_path, staging, manifest)
 
-    assert "vectors.index" in str(excinfo.value)
+    assert "index_manifest.json" in str(excinfo.value)
     assert not pointer_path(tmp_path).exists()
 
 
@@ -224,14 +249,17 @@ def test_publish_of_an_invalid_generation_keeps_the_previous_one_searchable(
 # ----------------------------------------------------------------------
 
 
-def test_validation_rejects_a_chunk_vector_count_mismatch(tmp_path: Path) -> None:
+def test_validation_rejects_a_manifest_claiming_vectors_chunks_db_lacks(
+    tmp_path: Path,
+) -> None:
+    """The manifest's vector count must describe the durable rows on disk."""
     staging, manifest = _stage(tmp_path)
     broken = manifest.with_counts(vectors=manifest.counts["chunks"] + 1)
     generations.write_manifest(staging, broken)
 
     failures = validate_generation(staging, expected_id=broken.generation_id)
 
-    assert any("vector" in failure and "chunk" in failure for failure in failures)
+    assert any("durable embedding" in failure for failure in failures), failures
 
 
 def test_validation_rejects_a_chunk_id_digest_mismatch(tmp_path: Path) -> None:
@@ -259,7 +287,7 @@ def test_validation_rejects_an_entity_id_digest_mismatch(tmp_path: Path) -> None
 
 def test_validation_rejects_a_tampered_artifact_checksum(tmp_path: Path) -> None:
     staging, manifest = _stage(tmp_path)
-    (staging / "vectors.index").write_bytes(b"tampered")
+    (staging / "index_manifest.json").write_text("{}", encoding="utf-8")
 
     failures = validate_generation(
         staging, expected_id=manifest.generation_id, verify_digests=True
@@ -462,36 +490,6 @@ def test_read_manifest_rejects_a_non_object_payload(tmp_path: Path) -> None:
         generations.read_manifest(tmp_path)
 
 
-def test_validation_rejects_a_full_generation_with_no_native_vector_artifact(
-    tmp_path: Path,
-) -> None:
-    staging, manifest = _stage(tmp_path)
-    stripped = generations.GenerationManifest(
-        **{
-            **{
-                field: getattr(manifest, field)
-                for field in (
-                    "schema_version",
-                    "generation_id",
-                    "created_at",
-                    "kind",
-                    "counts",
-                    "digests",
-                    "embedding",
-                    "vector",
-                    "schema_versions",
-                )
-            },
-            "artifacts": (),
-        }
-    )
-    generations.write_manifest(staging, stripped)
-
-    failures = validate_generation(staging, expected_id=manifest.generation_id)
-
-    assert any("native vector artifact" in failure for failure in failures)
-
-
 def test_validation_reports_an_unreadable_chunk_store(tmp_path: Path) -> None:
     staging, manifest = _stage(tmp_path)
     (staging / "chunks.db").write_bytes(b"not a database")
@@ -616,3 +614,52 @@ def test_publication_protects_the_generations_it_is_given(tmp_path: Path) -> Non
     assert first.path.is_dir(), "a leased generation was removed by retention"
     assert not second.path.is_dir()
     assert third.path.is_dir()
+
+
+# ----------------------------------------------------------------------
+# The vector plane is derived, not published
+# ----------------------------------------------------------------------
+
+
+def test_manifest_digests_no_native_vector_artifact(tmp_path: Path) -> None:
+    """A published generation carries chunks and graph, never an ANN index.
+
+    The index is rebuildable from the durable embeddings in ``chunks.db``, so
+    publishing it costs a third of a generation for bytes already on disk.
+    """
+    staging, manifest = _stage(tmp_path)
+
+    digested = {artifact.name for artifact in manifest.artifacts}
+
+    assert digested.isdisjoint(set(generations.NATIVE_VECTOR_ARTIFACTS))
+    assert generations.VECTOR_METADATA not in digested
+
+
+def test_full_generation_validates_without_a_vector_artifact(tmp_path: Path) -> None:
+    staging, _ = _stage(tmp_path)
+
+    assert validate_generation(staging, verify_digests=True) == []
+
+
+def test_validation_fails_when_chunks_lost_their_durable_embeddings(
+    tmp_path: Path,
+) -> None:
+    """The guard now compares the manifest against the artifact, not itself.
+
+    ``chunks == vectors`` compared two numbers in the same file and could not
+    see a generation whose rows had lost their vectors.
+    """
+    chunk_ids = ["m.py::alpha::0", "m.py::beta::0", "m.py::gamma::0"]
+    staging, _ = _stage(tmp_path, chunk_ids=chunk_ids)
+    _write_chunks(staging / "chunks.db", chunk_ids, embedded=1)
+
+    failures = validate_generation(staging)
+
+    assert any("durable embedding" in failure for failure in failures), failures
+
+
+def test_semantic_artifacts_do_not_carry_a_vector_plane_forward(tmp_path: Path) -> None:
+    """Incremental builds seed from this set; copying 32 MB of cache is waste."""
+    assert set(generations.SEMANTIC_ARTIFACTS).isdisjoint(
+        set(generations.NATIVE_VECTOR_ARTIFACTS)
+    )

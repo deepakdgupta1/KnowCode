@@ -110,7 +110,7 @@ def test_failed_semantic_rebuild_preserves_the_previous_generation(
 # ----------------------------------------------------------------------
 
 
-def test_analyze_publishes_all_four_artifact_classes_together(
+def test_analyze_publishes_every_artifact_class_together(
     tmp_path: Path, backend: str
 ) -> None:
     src = _source_tree(tmp_path)
@@ -125,8 +125,11 @@ def test_analyze_publishes_all_four_artifact_classes_together(
     assert resolved.kind == generations.KIND_FULL
     assert resolved.knowledge_db.exists()
     assert resolved.chunks_db.exists()
-    assert (resolved.path / "vectors.json").exists()
     assert (resolved.path / generations.MANIFEST_FILENAME).exists()
+    # The ANN index is rebuilt from the chunk rows, so none of it ships.
+    published = {entry.name for entry in resolved.path.iterdir()}
+    assert published.isdisjoint(set(generations.NATIVE_VECTOR_ARTIFACTS))
+    assert "vectors.json" not in published
     assert resolved.manifest.counts["chunks"] == resolved.manifest.counts["vectors"]
     assert resolved.manifest.counts["entities"] >= 1
     assert stats["generation_id"] == resolved.generation_id
@@ -597,10 +600,10 @@ def test_a_graph_only_generation_is_not_searchable(
     assert not (reader.current_generation().path / "chunks.db").exists()
 
 
-def test_a_graph_only_generation_discards_partial_vector_artifacts(
+def test_a_graph_only_generation_discards_its_partial_chunk_store(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A LanceDB directory created before the failure must not survive staging."""
+    """A chunk store written before the failure must not survive staging."""
     src = _source_tree(tmp_path)
 
     def explode(self: Indexer, *args: Any, **kwargs: Any) -> int:
@@ -627,20 +630,35 @@ def test_a_graph_only_generation_discards_partial_vector_artifacts(
 def test_a_chunk_vector_membership_split_is_caught_before_publication(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The parity guard is what stops a half-embedded generation going live."""
+    """The parity guard is what stops a half-embedded generation going live.
+
+    The defect is injected where it now lives, in the durable rows: a chunk
+    that committed without its embedding. Diverging the in-memory store no
+    longer expresses it, because the published plane is read from chunks.db.
+    """
     src = _source_tree(tmp_path)
     service = _service(tmp_path, "faiss")
     service.analyze(directory=src, output=tmp_path)
     first = resolve_current_generation(tmp_path / "knowcode_index")
 
-    from knowcode.storage.vector_store import VectorStore
+    from knowcode.storage.sqlite_chunk_repository import SqliteChunkRepository
 
-    monkeypatch.setattr(VectorStore, "count", lambda self: 999)
+    real_encode = SqliteChunkRepository._encode_embedding
+    dropped: list[int] = []
+
+    def drop_one(self: Any, values: Any) -> Any:
+        if values is not None and not dropped:
+            dropped.append(1)
+            return None, None
+        return real_encode(self, values)
+
+    monkeypatch.setattr(SqliteChunkRepository, "_encode_embedding", drop_one)
 
     rebuilt = _service(tmp_path, "faiss")
     stats = rebuilt.analyze(directory=src, output=tmp_path)
     monkeypatch.undo()
 
+    assert dropped, "no embedding was dropped, so nothing was under test"
     assert stats["published"] is False
     assert "chunk/vector count mismatch" in stats["index_error"]
     assert (
@@ -683,37 +701,6 @@ def test_assert_index_exists_returns_the_generation_directory(tmp_path: Path) ->
 
     resolved = resolve_current_generation(tmp_path / "knowcode_index")
     assert _service(tmp_path, "faiss")._assert_index_exists() == resolved.path
-
-
-def test_graph_only_publication_discards_a_written_native_vector_file(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The FAISS artifact is a file, so it needs the unlink branch, not rmtree."""
-    src = _source_tree(tmp_path)
-
-    def explode(self: Indexer, *args: Any, **kwargs: Any) -> None:
-        raise OSError("manifest write failed")
-
-    # Fail *after* the vector artifact has been written to staging.
-    from knowcode.storage.vector_store import VectorStore
-
-    original_save = VectorStore.save
-
-    def save_then_fail(self: Any, path: Any) -> None:
-        original_save(self, path)
-        raise OSError("vector metadata write failed")
-
-    monkeypatch.setattr(VectorStore, "save", save_then_fail)
-
-    service = _service(tmp_path, "faiss")
-    stats = service.analyze(directory=src, output=tmp_path)
-    monkeypatch.undo()
-
-    assert stats["published"] is True
-    resolved = resolve_current_generation(tmp_path / "knowcode_index")
-    assert resolved.kind == generations.KIND_GRAPH_ONLY
-    assert not (resolved.path / "vectors.index").exists()
-    assert not (resolved.path / "vectors.json").exists()
 
 
 def test_pointer_json_is_human_readable(tmp_path: Path) -> None:

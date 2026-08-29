@@ -148,12 +148,19 @@ class TestLoadWithoutAVectorArtifact:
     def test_search_results_match_a_generation_that_kept_its_index(
         self, tmp_path: Path
     ) -> None:
-        """This is the acceptance test for dropping the published index."""
+        """This is the acceptance test for dropping the published index.
+
+        One arm loads the ANN index the old publication shape shipped. The
+        other rebuilds it from the durable rows. Their answers must agree, or
+        the saving costs recall.
+        """
         source = tmp_path / "published"
         writer = _indexer(source)
         writer.chunk_repo.add_batch(_chunks(40))
         writer.rebuild_vector_plane()
         writer.save(source)
+        # The old publication shape, written by hand: save() no longer emits it.
+        writer.vector_store.save(source / "vectors")
         writer.chunk_repo.close()
 
         probe = HashingProvider().embed_single("def fn7(): return 7")
@@ -200,6 +207,7 @@ class TestLoadWithoutAVectorArtifact:
         writer.chunk_repo.add_batch(_chunks(6))
         writer.rebuild_vector_plane()
         writer.save(source)
+        writer.vector_store.save(source / "vectors")
         writer.chunk_repo.close()
 
         reader = _indexer(source)
@@ -212,3 +220,18 @@ class TestLoadWithoutAVectorArtifact:
 
 def _forbidden() -> int:
     raise AssertionError("rebuild ran against a generation that kept its index")
+
+
+def test_save_writes_no_vector_artifact(tmp_path: Path) -> None:
+    """The saving is exactly this: nothing vector-shaped enters the bundle."""
+    source = tmp_path / "published"
+    indexer = _indexer(source)
+    indexer.chunk_repo.add_batch(_chunks(5))
+    indexer.rebuild_vector_plane()
+
+    indexer.save(source)
+    indexer.chunk_repo.close()
+
+    written = {entry.name for entry in source.iterdir()}
+    assert written.isdisjoint(set(NATIVE_VECTOR_ARTIFACTS))
+    assert "vectors.json" not in written

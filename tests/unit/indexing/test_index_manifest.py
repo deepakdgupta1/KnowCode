@@ -139,7 +139,11 @@ def test_manifest_write_failure_preserves_the_previous_manifest(
 def test_save_publishes_data_before_the_manifest(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """ADR 4 publication ordering: vectors and chunks, then the manifest last."""
+    """ADR 4 publication ordering: chunks, then the manifest that names them.
+
+    The vector plane is absent from the sequence because it is derived and no
+    longer published.
+    """
     out_dir = tmp_path / "idx"
     indexer = _indexer()
     order: list[str] = []
@@ -167,7 +171,7 @@ def test_save_publishes_data_before_the_manifest(
 
     indexer.save(out_dir)
 
-    assert order == ["vectors", "chunks", "manifest"]
+    assert order == ["chunks", "manifest"]
 
 
 def test_save_leaves_no_temporary_files(tmp_path: Path) -> None:
