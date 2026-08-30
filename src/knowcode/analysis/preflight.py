@@ -14,7 +14,7 @@ from __future__ import annotations
 import re
 import time
 from dataclasses import asdict, dataclass, field
-from typing import Any, Optional
+from typing import Any, Mapping, Optional
 
 from knowcode.data_models import Entity, EntityKind, Relationship, RelationshipKind
 from knowcode.indexing.scanner import FileInfo, Scanner
@@ -814,6 +814,45 @@ def _generate_summary(
 # ──────────────────────────────────────────────────────────────────────
 
 
+#: How far a weight set may sum from 1.0 and still be treated as normalised.
+#: Generous beside float noise -- the ten shipped defaults sum to
+#: 1.0000000000000002 -- and far tighter than any misconfiguration worth
+#: catching.
+WEIGHT_SUM_TOLERANCE = 1e-6
+
+
+def validate_preflight_weights(weights: Mapping[str, float]) -> None:
+    """Raise unless ``weights`` can normalise a composite score.
+
+    The composite divides by the sum of the weights, so a set that does not sum
+    to 1.0 silently rescales every dimension, and a set summing to zero used to
+    divide by a ``max(weight_sum, 1e-9)`` floor and clamp to a perfect score --
+    a codebase that parsed nothing graded A, clearing a ``min_score`` build
+    gate (BL-21). Negative weights are rejected outright: a dimension scoring
+    well can never make a codebase worse.
+
+    Args:
+        weights: The *effective* weight set, after any merge with the defaults.
+
+    Raises:
+        ValueError: If any weight is negative, or the set does not sum to 1.0
+            within ``WEIGHT_SUM_TOLERANCE``.
+    """
+    negative = sorted(key for key, value in weights.items() if value < 0)
+    if negative:
+        raise ValueError(
+            "Preflight weights must not be negative: " + ", ".join(negative) + "."
+        )
+
+    total = sum(weights.values())
+    if abs(total - 1.0) > WEIGHT_SUM_TOLERANCE:
+        raise ValueError(
+            f"Preflight weights must sum to 1.0, not {total:.6g}. Overriding one "
+            "weight rescales the whole composite, so rebalance the rest to "
+            "compensate."
+        )
+
+
 def assess_codebase(
     entities: dict[str, Entity],
     relationships: list[Relationship],
@@ -839,6 +878,7 @@ def assess_codebase(
         for key, value in weights.items():
             if key in effective_weights:
                 effective_weights[key] = value
+    validate_preflight_weights(effective_weights)
 
     # Compute each dimension
     dimensions: list[DimensionScore] = [
@@ -855,10 +895,12 @@ def assess_codebase(
     ]
 
     # Weighted composite
-    weight_sum = sum(effective_weights.values())
+    # Divided by the sum rather than by 1.0 so a future dimension added
+    # without a weight still normalises. Validated above, so no floor is
+    # needed -- and a floor here could only mask the bug it used to cause.
     overall_score = sum(
         d.score * effective_weights.get(d.dimension, 0.0) for d in dimensions
-    ) / max(weight_sum, 1e-9)
+    ) / sum(effective_weights.values())
     overall_score = max(0.0, min(1.0, overall_score))
     overall_grade = _score_to_grade(overall_score)
 

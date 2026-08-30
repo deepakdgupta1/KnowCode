@@ -30,44 +30,6 @@ measured reason not to build something is worth more than silence.
 
 ## Open
 
-### BL-21 - Preflight accepts a weight set that turns an F into an A
-
-**Severity:** High. **Found:** 2026-08-30, same audit.
-
-`docs/product/business-logic.md` states preflight weights "must sum to 1.0" and
-`assess_codebase`'s own docstring repeats it. `_parse_preflight_section`
-validates that each weight is a number and that its key is known
-(`config.py:447-454`) and nothing else — neither the sign nor the sum.
-`assess_codebase` then normalises by `max(weight_sum, 1e-9)`
-(`preflight.py:858-861`), so a set summing to zero divides by `1e-9` and the
-result clamps to 1.0.
-
-Reproduced end to end against the real `assess_codebase`, with
-`language_coverage: 0.5`, `documentation_density: -0.5` and every other weight
-zeroed:
-
-```
-parse errors     : 1, entities: 0, files scanned: 0
-parse_success_rate score : 0.0
-overall_score            : 1.0
-overall_grade            : A
-clears min_score = 0.9   : True
-```
-
-A codebase that parsed nothing is graded A and clears a hard build gate. The
-failure is silent and maximally wrong. It stands out because every other field
-in this parser is validated meticulously, down to rejecting `bool` where a
-number is expected; the weights are the one place a documented invariant is
-stated and never enforced.
-
-Fix in the parser: reject negative weights, and reject a set that does not sum
-to 1.0 within a stated tolerance. Add the same guard to `assess_codebase`,
-which is public and takes `weights` directly, and replace the `1e-9` floor —
-a silent wrong answer — with an explicit failure. Blast radius is small:
-`service.py:1064` is the only caller that passes `weights`, and it passes a
-complete dict built from the defaults, so the parser catches it at the source.
-No test passes `weights=`.
-
 ### BL-15 - The exact search mode treats `_` and `%` as wildcards
 
 **Severity:** High. **Found:** 2026-08-30, measuring what a replacement exact
@@ -445,3 +407,4 @@ to `None` like every other rejection in this class.
 | The retrieval ladder was gated on the fail-closed flag, so every LLM answer got rung one (BL-19) | Fixed 2026-08-30. Both broadening rungs were guarded by membership in `local_answer_task_types`, which `AppConfig._fail_closed` empties on every load and no blessed policy artifact repopulates, so retrieval always stopped at rung one and the model was asked to answer from one entity's signature and docstring -- no source, no dependencies, under 1,500 tokens. The three copy-pasted rung blocks are now one `LADDER_RUNGS` tuple and one loop that stops at the first rung clearing the threshold. The ladder is climbed only when stopping early is *possible* -- some task type may answer locally and the caller has not demanded the LLM; otherwise one retrieval runs at the widest rung. That is the same single attempt as before, at full breadth rather than minimal, so the fix costs no extra retrieval in today's universal case. `force_llm` no longer thins the bundle either: it means "do not answer locally", not "retrieve less". Pinned by two tests in `tests/integration/test_agent_retrieval_contract.py`, which assert the whole kwargs dict one attempt asks retrieval for rather than one field at a time -- a bundle is thin because of the *combination*. Three mutation probes, each reddening only its own test: giving the un-routable case the thinnest rung, removing the early stop, and letting `force_llm` climb. The existing `retrieve_calls == 1` and `== 3` assertions still hold, so the token saving on a populated allowlist is unchanged. `docs/product/business-logic.md` restates the ladder. Full suite 1,868 passed, 3 xfailed. |
 | Sufficiency saturated, and two task types cleared the routing gate with no source code (BL-20) | Fixed 2026-08-30. `_calculate_sufficiency` grew `max_score` inside the same branch that grew `score`, so the denominator described what the bundle happened to contain rather than what its task template asked for. Two consequences, both measured: every bundle holding everything its template named scored exactly 1.00 whatever the task type -- the number could not tell a rich `debug` bundle from a thin `locate` one -- and `extend` (0.91) and `locate` (1.00) cleared the 0.9 gate with no source code at all, `extend` while its own template asks for source. Both increments are now unconditional. With a fixed denominator the six task types land at 0.95-0.96 complete and 0.45-0.86 without source, so the gate discriminates in the direction it was built for. An entity with no docstring over 50 characters now tops out near 0.96 rather than 1.00, which is the honest reading. Pinned by `tests/unit/analysis/test_sufficiency_scoring.py`: source and docstring halves probed separately (each hoist reintroduced reddens one test and only one), an over-correction guard that a complete bundle still clears the gate, and an end-to-end EXTEND bundle through the real synthesizer that scored 0.91 before and blocks after. `docs/product/business-logic.md` now writes `max_score` out; leaving it undefined is what let the drift live. Full suite 1,881 passed, 3 xfailed. **Recalibrate the 0.9 floor** -- it was chosen against a formula that could only return 1.00 or block. |
 | Telemetry reported a routing decision the router did not make (BL-22) | Fixed 2026-08-30. `retrieve_context_for_query` annotated `local_or_escalated` from `score >= sufficiency_threshold` (0.8), while the gate that actually routes is `max(sufficiency_threshold, routing_quality_floor)` (0.9) *and* membership in the always-empty `local_answer_task_types` -- and it did so from a path that reaches no routing decision at all, which is where MCP and REST callers land. Every retrieval scoring 0.8 or better was tallied into the local-answer rate that substantiates the token-savings claim, while the true rate was zero. The verdict now comes from `Agent._smart_answer`, from the *same expression* that picks the branch, so the metric and the answer cannot disagree; retrieval annotates the sufficiency measurement and nothing else. Absent now means "nothing was answered", not "escalated". Pinned on both sides of the move: `tests/unit/service/test_telemetry_events.py` asserts a bare retrieval scoring 0.9 emits no verdict and leaves `local_routing_rate` at 0.0, and four parametrized rows in `tests/integration/test_agent_retrieval_contract.py` assert the logged verdict equals what `smart_answer` returned -- compared against the actual result, never against a recomputed threshold, which would have drifted the same way the metric did. Three mutation probes; the sharp one puts the old 0.8 expression in the *new* location and still reddens the two empty-allowlist rows. `docs/user/telemetry.md` documents the presence rule and guards its `jq` example with `has(...)`. Full suite 1,887 passed, 3 xfailed. |
+| Preflight accepted a weight set that turned an F into an A (BL-21) | Fixed 2026-08-30. `_parse_preflight_section` checked that each weight was a number and that its key was known, and nothing else -- neither sign nor sum -- while the composite normalised by `max(weight_sum, 1e-9)`. A set summing to zero therefore divided by `1e-9` and clamped to `overall_score = 1.0`, `overall_grade = A`, on a codebase whose `parse_success_rate` scored 0.0, clearing a `min_score` 0.9 build gate. One `validate_preflight_weights` rejects negative weights and any set that does not sum to 1.0 within `WEIGHT_SUM_TOLERANCE` (1e-6, generous beside the defaults' own 1.0000000000000002); the config parser calls it at load -- even when the section overrode nothing, so a drift in the defaults fails loudly -- and `assess_codebase` calls it too, being public and taking `weights` directly. The `1e-9` floor is gone: with validation it could only mask the bug it caused. Pinned by `tests/unit/analysis/test_preflight_weights.py`, both entry points, plus a guard that the two duplicate default tables in `config` and `preflight` have not drifted apart. Three mutation probes, each reddening only its own guard. **One existing test changed on purpose**: `test_custom_weights` passed partial overrides summing to 1.70, which is now rejected -- and it only asserted that both calls returned a float, so it could not have caught a composite that ignored the weights. It now puts the whole weight on one dimension and asserts the composite equals that dimension's score. Full suite 1,895 passed, 3 xfailed. |

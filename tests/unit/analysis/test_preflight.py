@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 
 from knowcode.analysis.preflight import (
+    DEFAULT_WEIGHTS,
     DimensionScore,
     PreflightReport,
     _score_to_grade,
@@ -527,32 +529,31 @@ class TestAssessCodebase:
         assert "language_breakdown" in d
 
     def test_custom_weights(self) -> None:
-        """Custom weights affect the overall score."""
-        entities = {
-            "a": _entity("func_a", docstring="Documented."),
-        }
+        """All the weight on one dimension makes the composite that dimension.
+
+        Rewritten twice over. It used to pass partial overrides -- weights that
+        summed to 1.70 -- which BL-21 now rejects, because a set that does not
+        normalise silently rescales every score. And it only asserted that both
+        calls returned a float, so it could not have detected a composite that
+        ignored the weights entirely. Concentrating the whole weight on one
+        dimension gives an exact expected value instead.
+        """
+        entities = {"a": _entity("func_a", docstring="Documented.")}
         files = [_file_info("a.py", ".py")]
 
-        # Heavy weight on documentation
-        report_doc_heavy = assess_codebase(
-            entities,
-            [],
-            files,
-            [],
-            weights={"documentation_density": 0.9},
-        )
-        # Heavy weight on naming (short name should lower it)
-        report_name_heavy = assess_codebase(
-            entities,
-            [],
-            files,
-            [],
-            weights={"naming_quality": 0.9},
-        )
-        # doc_heavy should score higher because func_a has a docstring
-        # but naming is also decent for func_a, so let's just check both run
-        assert isinstance(report_doc_heavy.overall_score, float)
-        assert isinstance(report_name_heavy.overall_score, float)
+        def _only(dimension: str) -> tuple[float, float]:
+            weights = {key: 0.0 for key in DEFAULT_WEIGHTS}
+            weights[dimension] = 1.0
+            report = assess_codebase(entities, [], files, [], weights=weights)
+            scored = {d.dimension: d.score for d in report.dimensions}
+            return report.overall_score, scored[dimension]
+
+        doc_overall, doc_dimension = _only("documentation_density")
+        name_overall, name_dimension = _only("naming_quality")
+
+        assert doc_overall == pytest.approx(doc_dimension)
+        assert name_overall == pytest.approx(name_dimension)
+        assert doc_overall != name_overall
 
     def test_empty_codebase(self) -> None:
         """Empty codebase produces a valid report with low scores."""

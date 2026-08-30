@@ -219,8 +219,13 @@ Grades: **A ≥ 0.90, B ≥ 0.75, C ≥ 0.55, D ≥ 0.35**, else F. Naming quali
 = 40% convention adherence + 30% not-single-char + 30% length factor;
 complexity penalizes functions with cyclomatic complexity > 20; type
 annotations and behavior analyzability are Python-only (neutral elsewhere).
-Weights are configurable and must sum to 1.0; `min_score` can turn the
-report into a hard gate.
+Weights are configurable and must sum to 1.0 — rejected at config load and
+again in `assess_codebase` if they do not, or if any is negative. That was
+unenforced until [BL-21](../engineering/backlog.md): the composite divides by
+the sum, so a set summing to zero divided by a `1e-9` floor and clamped to a
+perfect score, grading an F as an A. Overriding one weight rescales the whole
+composite, so a custom set has to rebalance the rest rather than name a single
+dimension. `min_score` can turn the report into a hard gate.
 
 **Why:** Sets honest expectations — retrieval is only as good as the
 structure in the code. **Pros:** Cheap (reads only the already-built

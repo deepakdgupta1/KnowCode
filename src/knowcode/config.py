@@ -453,6 +453,13 @@ class AppConfig:
                     raise ValueError(f"'preflight.weights.{key}' must be a number.")
                 weights[key] = float(value)
 
+        # Validated even when the section overrode nothing, so a drift in the
+        # defaults fails at load rather than silently rescaling every grade.
+        # Imported here rather than at module scope to keep config a leaf.
+        from knowcode.analysis.preflight import validate_preflight_weights
+
+        validate_preflight_weights(weights)
+
         return PreflightConfig(
             enabled=enabled,
             min_score=float(min_score),
