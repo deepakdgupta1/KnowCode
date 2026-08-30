@@ -30,6 +30,7 @@ from knowcode.data_models import (
 )
 from knowcode.errors import RepositoryClosedError
 from knowcode.storage.knowledge_store import KnowledgeStore
+from knowcode.storage.rewrite_witness import digest_rows, rows_preserved
 from knowcode.storage.sqlite_like import LIKE_ESCAPE_CLAUSE, like_contains
 from knowcode.utils.entity_identity import (
     absolutize_id,
@@ -941,17 +942,63 @@ class SqliteKnowledgeStore:
         is copied into every retained generation until it is squeezed out here.
 
         Mirrors :meth:`SqliteChunkRepository.compact`, including its ordering
-        constraint: a rewrite after the manifest is built breaks every digest.
+        constraint: a rewrite after the manifest is built breaks every digest,
+        and its losslessness bracket (BL-8).
         """
         with self._write_lock:
             if self._closed:
                 raise RepositoryClosedError(
                     "SqliteKnowledgeStore is closed; open a new instance."
                 )
-            # VACUUM refuses to run inside a transaction. Every write path here
-            # commits its own, so this only settles a stray one.
-            self._writer_conn.commit()
-            self._writer_conn.execute("VACUUM")
+            # The bracket opens before anything else this method does, so no
+            # step of it can lose a row where the witness cannot see it.
+            with rows_preserved(self._rewrite_witness, "knowledge.db"):
+                # VACUUM refuses to run inside a transaction. Every write path
+                # here commits its own, so this only settles a stray one.
+                self._writer_conn.commit()
+                self._rewrite()
+
+    def _rewrite(self) -> None:
+        """Rewrite the staged file. Every staged rewrite belongs here.
+
+        Separate from :meth:`compact` so that whatever this grows into stays
+        inside the losslessness bracket rather than beside it.
+        """
+        self._writer_conn.execute("VACUUM")
+
+    def _rewrite_witness(self) -> dict[str, str]:
+        """Digest the row sets a staged rewrite must leave alone.
+
+        Edges are digested as their raw integer triples, with the ``eid``
+        codebook witnessed separately, rather than joined into readable
+        endpoints. A join hides exactly the row worth seeing: two thirds of
+        endpoints are ``external::`` or ``unresolved::`` ids, and BL-17 found
+        that resolving an edge through a table it may not appear in makes an
+        orphan invisible on both sides of the comparison, so they agree.
+
+        The two text columns are hydrated because C1 re-encoded id text in
+        place. A rewrite that only changes how an id is stored is lossless, and
+        the witness has to survive it.
+        """
+        entity_ids = [
+            self._load_id(row[0])
+            for row in self._writer_conn.execute("SELECT entity_id FROM entities")
+        ]
+        edges = [
+            f"{source}\t{target}\t{kind}"
+            for source, target, kind in self._writer_conn.execute(
+                "SELECT source_id, target_id, kind FROM relationships"
+            )
+        ]
+        endpoints = [
+            self._load_id(row[0])
+            for row in self._writer_conn.execute("SELECT entity_id FROM eid")
+        ]
+        return {
+            "entity_ids": digest_rows(entity_ids),
+            "relationships": digest_rows(edges),
+            "edge_endpoints": digest_rows(endpoints),
+        }
 
     def close(self) -> None:
         """Close all connections idempotently after draining in-flight readers."""

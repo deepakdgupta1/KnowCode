@@ -47,6 +47,7 @@ from typing import Any, Iterator, Optional
 from knowcode.data_models import CodeChunk
 from knowcode.errors import RepositoryClosedError
 from knowcode.storage.chunk_repository import ChunkFileReplacement, ChunkRepository
+from knowcode.storage.rewrite_witness import digest_rows, rows_preserved
 from knowcode.storage.sqlite_like import LIKE_ESCAPE_CLAUSE, like_contains
 from knowcode.utils.entity_identity import (
     absolutize_id,
@@ -975,17 +976,52 @@ class SqliteChunkRepository(ChunkRepository):
 
         The rewrite lands in the write-ahead log and truncates the main file at
         once, so whoever closes afterwards publishes the compact copy. Nothing
-        a row holds changes, durable embedding BLOBs included.
+        a row holds changes, durable embedding BLOBs included, and the bracket
+        is what proves it rather than asserting it (BL-8).
         """
         with self._write_lock:
             if self._closed:
                 raise RepositoryClosedError(
                     "SqliteChunkRepository is closed; open a new instance."
                 )
-            # VACUUM refuses to run inside a transaction. Every write path here
-            # commits its own, so this only settles a stray one.
-            self._writer_conn.commit()
-            self._writer_conn.execute("VACUUM")
+            # The bracket opens before anything else this method does, so no
+            # step of it can lose a row where the witness cannot see it.
+            with rows_preserved(self._rewrite_witness, "chunks.db"):
+                # VACUUM refuses to run inside a transaction. Every write path
+                # here commits its own, so this only settles a stray one.
+                self._writer_conn.commit()
+                self._rewrite()
+
+    def _rewrite(self) -> None:
+        """Rewrite the staged file. Every staged rewrite belongs here.
+
+        Separate from :meth:`compact` so that whatever this grows into stays
+        inside the losslessness bracket rather than beside it.
+        """
+        self._writer_conn.execute("VACUUM")
+
+    def _rewrite_witness(self) -> dict[str, str]:
+        """Digest the row sets a staged rewrite must leave alone.
+
+        ``embedded_chunk_ids`` covers *which* chunks carry a durable embedding,
+        not how many. The count is what a manifest already records, and it is
+        derived from this same file, which is the blind spot D1's durable
+        embedding guard shares (BL-8).
+        """
+        chunk_ids = [
+            self._load_id(row[0])
+            for row in self._writer_conn.execute("SELECT chunk_id FROM chunks")
+        ]
+        embedded = [
+            self._load_id(row[0])
+            for row in self._writer_conn.execute(
+                "SELECT chunk_id FROM chunks WHERE embedding IS NOT NULL"
+            )
+        ]
+        return {
+            "chunk_ids": digest_rows(chunk_ids),
+            "embedded_chunk_ids": digest_rows(embedded),
+        }
 
     def close(self) -> None:
         """Close all connections idempotently after draining in-flight readers.

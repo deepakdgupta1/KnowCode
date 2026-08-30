@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Sequence
 
 
 class KnowCodePrerequisiteError(RuntimeError):
@@ -46,6 +47,31 @@ class RepositoryClosedError(RuntimeError):
     writer touching a connection torn down by ``close()``/``load()`` gets an
     actionable, typed error instead of a low-level ``sqlite3.ProgrammingError``.
     """
+
+
+class StagedRewriteError(RuntimeError):
+    """Raised when a rewrite of a staged artifact lost or altered rows.
+
+    A generation manifest describes ``chunks.db`` and ``knowledge.db`` with
+    counts and id digests read out of those files after the last step that
+    rewrites them, so a step dropping rows shrinks the artifact and the numbers
+    together and they agree (BL-8). The rewrite therefore has to witness its
+    own losslessness, and this is what it raises when it cannot.
+
+    Not a :class:`KnowCodePrerequisiteError`: the artifact is present, it is
+    the operation over it that failed. Every publication path discards its
+    staging directory on any exception, so raising here is what keeps the
+    damaged generation unpublished.
+    """
+
+    def __init__(self, artifact: str, changed: Sequence[str]) -> None:
+        self.artifact = artifact
+        self.changed = list(changed)
+        super().__init__(
+            f"rewriting staged {artifact} changed {', '.join(self.changed)}; "
+            "the generation was not published. "
+            "Rebuild with `knowcode build`."
+        )
 
 
 class VectorContractError(RuntimeError):

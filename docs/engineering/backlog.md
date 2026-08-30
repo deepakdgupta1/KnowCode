@@ -182,62 +182,6 @@ timeout converts a fast failure into a slow one.
 **Deferred on purpose.** It is test infrastructure, not product behaviour, and
 it was found while diagnosing something else.
 
-### BL-8 - A generation manifest cannot witness row loss in either database
-
-**Severity:** Medium. **Found:** 2026-08-29, mutation-probing Phase A2.
-
-`build_manifest` byte-digests only `index_manifest.json`. `chunks.db` and
-`knowledge.db` are described by logical id digests and counts, and
-`read_chunk_ids`, `count_durable_embeddings`, and `_assert_chunk_vector_parity`
-all read them out of the staged file at the end of the build. Every number in
-the manifest therefore derives from the artifact it is meant to check.
-
-Reproduce it by making `SqliteChunkRepository.compact` drop one row before it
-vacuums. The build publishes, and `validate_generation(..., verify_digests=True)`
-returns no failures, because the manifest recorded the post-deletion id list.
-Delete `WHERE rowid = (SELECT MIN(rowid) FROM chunks)` rather than every
-seventh row. A modulo probe deletes nothing on the small corpora the watch
-tests build, which reads as a clean run and is a false negative.
-
-Independently reproduced 2026-08-29 by a second session, on a scratch copy with
-the probe applied: a generation missing **1,003 of 7,025 chunks, 14% of the
-corpus, published successfully** and `validate_generation(..., verify_digests=True)`
-returned no failures. The manifest recorded 6,022 for both `counts.chunks` and
-`counts.vectors`. The D1 durable-embedding guard shares the blind spot for the
-same reason, and [ADR 9](adr/adr-0009-derived-vector-plane.md) now says so.
-
-A trap for anyone repeating this: the repository venv installs `knowcode`
-editable against `src/`, so running a scratch copy with the venv's interpreter
-executes the *shared* tree and the probe appears to do nothing. Set
-`PYTHONPATH=<scratch>/src`, and assert the loaded `__file__` is the scratch one
-before trusting a negative result.
-
-This was theoretical until Phase A2, which introduced the first step that
-rewrites an artifact between indexing and publication. All three publication
-paths now carry a witness taken before the rewrite.
-`test_compaction_does_not_lose_rows_between_indexing_and_publication` compares
-the published chunk count against the count `index_directory` reported, and
-`test_a_watch_publication_compacts_without_losing_chunks` compares it against
-the staged repository's own row count read before `publish`. Both fail on a
-single lost row, as do the store-level tests that compare raw row bytes.
-
-**Rejected fix: threading the indexer's chunk count into
-`_assert_chunk_vector_parity`.** Proposed as a two-line change that would catch
-every build-time loss rather than compaction's alone. It does not, because the
-count it would thread is only a corpus total on one of the three paths.
-`index_incremental` returns the chunks it touched in changed files, not the
-total, and the watch path has no total at all: it commits per-file
-transactions and never counts the corpus. A guard that holds on the full
-rebuild and silently means something else on the other two is worse than the
-three explicit tests.
-
-**Deferred on purpose.** Compaction is the only step that rewrites a staged
-database, and all three of its paths are covered. Adding the two databases to
-`artifact_names` is not the fix either; that digest would be computed from the
-damaged file for the same reason the counts are. Closing this needs a witness
-that survives every path, and the honest place to design one is Phase C, which
-is the next change that rewrites these files after the counts are taken.
-
 ### BL-5 - The storage plan's code anchors are stale
 
 **Severity:** Low. **Found:** 2026-08-29, executing Phase D1.
@@ -259,6 +203,7 @@ the anchors are re-verified as part of adopting a later phase.
 
 | Item | Resolution |
 | --- | --- |
+| A generation manifest could not witness row loss in either database (BL-8) | Fixed 2026-08-31. The witness is temporal, not structural: `compact()` reads one digest per row set from its own writer connection before it does anything, and compares after, so the comparison cannot be satisfied by the damage. Nothing is threaded in from the caller, which is what makes it hold on all three publication paths where the rejected chunk-count fix could not: a full rebuild knows its corpus total, `index_incremental` knows only the files it touched, and a watch batch counts nothing at all. `rows_preserved` in `storage/rewrite_witness.py` is the bracket, `_rewrite()` on both stores is the named place a future staged rewrite goes so it lands inside the bracket rather than beside it, and `StagedRewriteError` names which row set moved. **The item's premise was half wrong, found by probe.** On the full-build path `knowledge.db` was never blind: `entity_ids` comes from the in-memory `GraphBuilder` at `service.py:957`, so an entity-dropping probe was already caught as `entity id digest mismatch` and refused to publish. Only `StagedGenerationWriter.publish` reads entity ids back out of the artifact, so the watch path was blind where the rebuild was not. `chunks.db` was blind on every path. **Reproduced end to end and re-run under the fix**: a probe deleting `WHERE rowid = (SELECT MIN(rowid) FROM chunks)` inside `compact` published a 30-chunk corpus as 29 with `validate_generation(verify_digests=True)` returning no failures; the same probe now refuses, the damaged `chunks.db` is discarded, and the build reports `rewriting staged chunks.db changed chunk_ids, embedded_chunk_ids`. **Three choices carry it.** The digest is over a sorted *list*, not `digest_ids`' set, because `relationships` has no unique constraint and a set cannot see one of two identical edges go. Edges are digested as raw integer triples with the `eid` codebook witnessed separately rather than joined into readable endpoints, because two thirds of endpoints have no `entities` row and a join hides an orphan on both sides of the comparison, which is the false negative BL-17 hit. And the chunk witness covers *which* chunks carry a durable embedding, not how many, which is the blind spot [ADR 9](adr/adr-0009-derived-vector-plane.md) records the D1 guard sharing. **What it does not close**: this witnesses the rewrite, not the whole build. Compaction remains the only step that rewrites a staged artifact, and `_rewrite()` is where the next one has to go to inherit the guard. Pinned by `tests/unit/storage/test_rewrite_witness.py`. Three mutation probes, each reddening only its own guard: digesting the set reddens the identical-edges row alone, joining edges through `entities` reddens the two codebook rows, and pointing the embedding witness at every chunk reddens the embedding row. Measured on generation `20260830T061050304877Z-8abc9f11` with paired interleaved runs, the bracket costs 29 ms on a 39.1 MB `chunks.db` and 89 ms on a 9.8 MB `knowledge.db`, once per publication. Full suite 1,930 passed, 3 xfailed. |
 | The exact search mode treated `_` and `%` as wildcards (BL-15) | Fixed 2026-08-31. Both SQLite stores had it, not one. `SqliteKnowledgeStore.search` built the same unescaped `LIKE` pattern, and its in-memory twin `KnowledgeStore.search` is `pattern_lower in name.lower()`, so two implementations of one Protocol disagreed and the in-memory one states the contract. `store.search` is reached from `mcp/server.py:185` with a raw user query and from `:427` with a `trace_calls` target, which is an identifier and so full of underscores. **The row counts understate it.** On generation `20260830T061050304877Z-8abc9f11` the quoted query `"vector_"` served 927 chunks of which 264 held the literal, and now serves 278 of which all 278 do. But `search_exact` has no `ORDER BY`, so scan order decides what the limit keeps: at the orchestrator's own breadth of `max(10, limit_entities * 5)` = 15, **none of the 15 rows contained the string asked for**, every one scored 1.0. All 15 do now. `storage/sqlite_like.py` holds the pattern builder and the `ESCAPE` clause in one place, because an escaped pattern run without the clause matches the escape character itself. Case-insensitivity over ASCII was kept on purpose and is now written into the `ChunkRepository.search_exact` contract rather than left implicit. Pinned by `tests/unit/storage/test_like_escaping.py`; the entity half is differential against the in-memory store, so no relabelling satisfies it. Two mutation probes: dropping the `%` and `_` escaping reddens exactly the five rows that were red before the fix, and emptying `LIKE_ESCAPE_CLAUSE` reddens all ten, which is what proves the two halves are coupled. Full suite 1,920 passed, 3 xfailed. |
 | Module chunks point at an entity that does not exist (BL-6) | Fixed 2026-08-29. Module-header and imports chunks hang on the file's MODULE entity, or its DOCUMENT entity where that is what the parser emits; prose chunks hang on the section whose span their lines fall in. Paired build: 495,985 chunk bytes off the graph to 0. `no chunk points at an entity that does not exist` is now a chunker contract for seven languages. Left BL-10. |
 | Prose chunked by a Python header extractor, 39% unreachable | Phase B, 2026-08-29. `.md` and `.rst` route to `ProseChunker`. Prose coverage 41.6% to 95.7% over 55 files; the largest document went from 13% to 99%. |
