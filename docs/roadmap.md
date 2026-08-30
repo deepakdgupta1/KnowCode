@@ -103,12 +103,17 @@ even that ([BL-18](engineering/backlog.md), fixed). Every record collected
 before those two landed describes a bundle the product no longer builds, so
 none of it is calibration data. Re-collect.
 
-Two measurement defects still stand between a fresh run and a usable number:
-threshold selection in work item 3 reads sufficiency scores that saturate at
-1.00 for any complete bundle ([BL-20](engineering/backlog.md)), and the
-local-answer rate is computed against the wrong gate
-([BL-22](engineering/backlog.md)). Close both before re-collecting, or the new
-records will be as unusable as the old ones.
+The two measurement defects that stood between a fresh run and a usable number
+are closed as well: sufficiency no longer saturates at 1.00 for any complete
+bundle ([BL-20](engineering/backlog.md)) and the local-answer rate is no longer
+computed against the wrong gate ([BL-22](engineering/backlog.md)). Re-collecting
+is now worth doing.
+
+One input changed underneath work item 3. The `routing_quality_floor` of 0.90
+was selected against a formula that could only return 1.00 or block; with a
+fixed denominator, complete bundles land at 0.95–0.96 and source-less ones at
+0.45–0.86. Re-select the threshold over that range rather than carrying 0.90
+across — the sweep in work item 3 is where that happens.
 
 **Progress (2026-07-31):** the proof and validation harness has moved to the
 independent `knowcode-evals` repository. KnowCode now contains only a
