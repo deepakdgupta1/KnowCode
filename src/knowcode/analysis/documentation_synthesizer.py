@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from knowcode.data_models import Entity, EntityKind, RelationshipKind
+from knowcode.utils.language import language_for
 from knowcode.storage.knowledge_store import KnowledgeStore
 from knowcode.utils.entity_identity import ensure_entity_content_hash
 
@@ -431,24 +432,9 @@ class DocumentationSynthesizer:
 
     @staticmethod
     def _language_for(entity: Entity) -> str:
-        language = entity.metadata.get("language")
-        if isinstance(language, str) and language:
-            return language
-
-        suffix = Path(entity.location.file_path).suffix.lower()
-        return {
-            ".md": "markdown",
-            ".py": "python",
-            ".yaml": "yaml",
-            ".yml": "yaml",
-            ".js": "javascript",
-            ".jsx": "javascript",
-            ".ts": "typescript",
-            ".tsx": "typescript",
-            ".java": "java",
-            ".rs": "rust",
-            ".vue": "vue",
-        }.get(suffix, suffix.lstrip(".") or "unknown")
+        # Shared with ContextSynthesizer's code fences, which need the same
+        # answer and used to hardcode "python" for every entity (BL-24).
+        return language_for(entity)
 
     @staticmethod
     def _module_doc_path(file_path: str) -> str:

@@ -9,6 +9,7 @@ if TYPE_CHECKING:
 from knowcode.storage.knowledge_store import KnowledgeStore
 from knowcode.data_models import Entity, EntityKind, TaskType
 from knowcode.utils.token_counter import TokenCounter
+from knowcode.utils.language import fence_tag_for
 
 
 @dataclass
@@ -173,8 +174,10 @@ class ContextSynthesizer:
             desc = f"## Description\n\n{entity.docstring}"
 
         sig = ""
+        fence = fence_tag_for(entity)
+
         if entity.signature:
-            sig = f"## Signature\n\n```python\n{entity.signature}\n```"
+            sig = f"## Signature\n\n```{fence}\n{entity.signature}\n```"
 
         # Add high priority sections if they fit
         if desc:
@@ -199,7 +202,7 @@ class ContextSynthesizer:
         # Priority 2: Source Code (Huge consumer, often truncated)
         source_code = self._get_entity_source(entity)
         if source_code and not summarize:
-            code_header = "## Source Code\n\n```python\n"
+            code_header = f"## Source Code\n\n```{fence}\n"
             code_footer = "\n```"
             overhead = self.tokenizer.count_tokens(code_header + code_footer)
             remaining = self.max_tokens - current_tokens - overhead
@@ -466,10 +469,11 @@ class ContextSynthesizer:
 
         # Build content sections based on priority order
         content_sections = {}
+        fence = fence_tag_for(entity)
 
         if entity.signature:
             content_sections["signature"] = (
-                f"## Signature\n\n```python\n{entity.signature}\n```"
+                f"## Signature\n\n```{fence}\n{entity.signature}\n```"
             )
 
         if entity.docstring:
@@ -477,7 +481,7 @@ class ContextSynthesizer:
 
         source_code = self._get_entity_source(entity)
         if source_code and not summarize:
-            code_header = "## Source Code\n\n```python\n"
+            code_header = f"## Source Code\n\n```{fence}\n"
             code_footer = "\n```"
             code_body = source_code
             # Pre-truncate if too long
