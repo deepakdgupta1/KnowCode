@@ -30,6 +30,197 @@ measured reason not to build something is worth more than silence.
 
 ## Open
 
+### BL-18 - Dependency expansion relabels a ranked hit as non-evidence
+
+**Severity:** Critical. **Found:** 2026-08-30, auditing the retrieval heuristics
+in `docs/product/business-logic.md` against what the code computes.
+
+`SearchEngine.search_scored` expands each ranked hit through
+`expand_dependencies`, which returns `[chunk] + callees`, and de-duplicates the
+whole expansion through one `seen_ids` set:
+
+```python
+for scored in primary:
+    deps = expand_dependencies(scored.chunk, ...)   # [chunk] + callees
+    for dep in deps:
+        if dep.id in seen_ids:      # search_engine.py:100
+            continue
+```
+
+A chunk already emitted as a higher-ranked hit's callee is in `seen_ids` by the
+time it comes up as a primary hit in its own right. The guard skips it, so it
+never receives its `source="retrieved"` record and keeps the `score=0.0`,
+`source="dependency"` label it was given as a callee. The orchestrator then
+selects on `primary = [s for s in scored if s.source == "retrieved"]`
+(`orchestrator.py:193`), so the demoted entity is filtered out and no context
+bundle is synthesized for it.
+
+A caller and its callee both ranking is the most common shape of a code-search
+result, and it is the shape this drops. `limit_entities` is silently
+under-filled. Reproduced against the real `SearchEngine` with a three-link call
+chain, all three ranked, `limit=3`:
+
+| Entity | Retrieval ranked | `search_scored` returned |
+|---|---|---|
+| A | 0.90 retrieved | 0.90 retrieved |
+| B | 0.85 retrieved | **0.00 dependency** |
+| C | 0.80 retrieved | **0.00 dependency** |
+
+Context synthesized for `['A']` — one of the three asked for.
+
+Reproduce with `scripts/` fakes or inline: rank A, B, C; give the graph
+`A -> B -> C`; call `engine.search_scored("q", limit=3, expand_deps=True)`.
+`expand_deps=True` is the default on every reaching path — the MCP server, the
+REST API, and `KnowCodeService`. `ExactQueryEngine` has its own `search_scored`
+that never expands, so the exact plane is unaffected.
+
+The contract in `docs/product/business-logic.md` says dependencies are present
+for completeness and never as retrieval evidence. Here the inverse happens.
+
+Fix by emitting every primary as `retrieved` before expanding anything, then
+adding only unseen callees as `dependency`. That makes "a ranked hit is never
+relabelled" structural rather than a repair. It reorders the returned list from
+expansion-traversal order to rank order, which changes the `rank` field in
+`evidence` and the order `SearchEngine.search` returns chunks in — check
+`cli.py:438`, `mcp/server.py:343` and `api.py:195` before landing.
+
+### BL-19 - The retrieval ladder is gated on the fail-closed flag, so every LLM answer gets rung one
+
+**Severity:** Critical. **Found:** 2026-08-30, same audit.
+
+`Agent.smart_answer` computes `can_route_locally` from membership in
+`local_answer_task_types` (`agent.py:260`) and then guards *both* broadening
+rungs of the retrieval ladder with it (`agent.py:271`, `agent.py:286`). That
+list is emptied on every config load by `AppConfig._fail_closed`
+(`config.py:137`) and can only be repopulated from a machine-verified policy
+artifact that does not yet exist. So `can_route_locally` is always `False`,
+both rungs are unreachable, and retrieval stops at rung one.
+
+Rung one is `_retrieve_context`'s defaults (`agent.py:192`): `max_tokens=1500`,
+`limit_entities=1`, `expand_deps=False`, `verbosity="minimal"`. Minimal
+verbosity maps to `summarize=True`, which omits raw source entirely — the
+business-logic spec calls that the single largest token lever. `answer()`
+consumes that bundle verbatim and never re-retrieves.
+
+| | Documented ladder | Observed |
+|---|---|---|
+| retrieval attempts | up to 3 | **1** |
+| max_tokens | 3000 by rung 2 | 1500 |
+| limit_entities | 3 by rung 2 | **1** |
+| expand_deps | true by rung 2 | **false** |
+| raw source | present at rung 3 | **omitted** |
+
+Every `knowcode ask` question therefore reaches the LLM with one entity's
+signature and docstring, no source, no dependencies, under 1,500 tokens. A
+control designed to stop bad *local* answers is degrading the *LLM* answer path
+it was never meant to touch.
+
+The two conditions are answering different questions. "How much context do we
+need before answering?" is not "may we answer this locally?" — only the final
+routing decision at `agent.py:299` should consult the allowlist. Note that
+simply dropping `can_route_locally` from the rungs makes today's universal case
+climb all three rungs and then call the LLM anyway, which is three retrievals
+to reach a bundle we could have asked for directly. Prefer: when no local
+answer is possible for the task type, retrieve once at the widest rung and go
+to the LLM; when one is possible, climb as documented to find the cheapest
+sufficient bundle. That keeps the token-saving intent exactly and costs one
+retrieval, not three.
+
+`force_llm` guards the rungs too, so `--force-llm` currently gets a thinner
+bundle than a plain ask. Same class of error, same fix — it should gate the
+routing decision, not the breadth.
+
+**Sequencing: land BL-18 first.** The widest rung sets `expand_deps=True` and
+`limit_entities=3`, which is exactly where BL-18 collapses three entities to
+one. Fixing this one alone would deliver a bundle BL-18 then guts.
+
+This also biases the eval program: every sufficiency score logged to date was
+measured on the rung-one bundle, not the escalated one.
+
+### BL-20 - Sufficiency saturates, and two task types clear the routing gate with no source code
+
+**Severity:** High. **Found:** 2026-08-30, same audit.
+
+`_calculate_sufficiency` increments `max_score` inside the same branch that
+increments `score` (`context_synthesizer.py:600`, `:605`), so the source-code
+and docstring bonuses move the numerator and the denominator together. A bundle
+is measured against what it happened to contain rather than against what its
+task template asked for.
+
+Two consequences, both measured by calling the shipped `_calculate_sufficiency`
+directly. Gate is `max(sufficiency_threshold 0.8, routing_quality_floor 0.9)`:
+
+| Task | source in priority | shipped, no source | shipped, with source | fixed denominator, no source | fixed denominator, with source |
+|---|---|---:|---:|---:|---:|
+| explain | yes | 0.85 | 1.00 | 0.75 | 0.96 |
+| debug | yes | 0.56 | 1.00 | 0.50 | 0.96 |
+| extend | yes | **0.91** | 1.00 | 0.81 | 0.96 |
+| review | yes | 0.52 | 1.00 | 0.45 | 0.96 |
+| locate | no | **1.00** | 1.00 | 0.86 | 0.95 |
+| general | yes | 0.86 | 1.00 | 0.77 | 0.96 |
+
+First, `extend` and `locate` clear a 0.9 gate on a bundle containing no source
+code at all — the exact outcome the gate exists to prevent. `extend`'s template
+asks for source, does not get it, and passes anyway.
+
+Second, every complete bundle scores exactly 1.00 whatever its task type,
+because when everything the template asked for is present the numerator equals
+the denominator by construction. The score cannot distinguish a rich `debug`
+bundle from a thin `locate` one. Under a fixed denominator the six land between
+0.95 and 0.96 and the no-source column falls below the gate everywhere.
+
+Reproduce: build an `Entity` with `source_code=None`, mark every priority
+section included, pass a `context_text` over 100 characters with no
+`## Source Code` heading, and call `_calculate_sufficiency` for each `TaskType`.
+
+The fix is to hoist both `max_score` increments out of their conditionals. Note
+that it caps an entity with no docstring at 0.96 rather than 1.00, which is the
+honest reading — the bundle really is missing something. Confirm the 0.9 floor
+is still the number wanted once scores stop saturating; it was calibrated
+against a formula that could only ever return 1.00 or block.
+
+Latent for routing today because the allowlist is empty, but sufficiency is
+served to agents over MCP and REST, where it steers whether they fetch more,
+and it is the number the eval program will calibrate against. Compounds BL-22.
+
+### BL-21 - Preflight accepts a weight set that turns an F into an A
+
+**Severity:** High. **Found:** 2026-08-30, same audit.
+
+`docs/product/business-logic.md` states preflight weights "must sum to 1.0" and
+`assess_codebase`'s own docstring repeats it. `_parse_preflight_section`
+validates that each weight is a number and that its key is known
+(`config.py:447-454`) and nothing else — neither the sign nor the sum.
+`assess_codebase` then normalises by `max(weight_sum, 1e-9)`
+(`preflight.py:858-861`), so a set summing to zero divides by `1e-9` and the
+result clamps to 1.0.
+
+Reproduced end to end against the real `assess_codebase`, with
+`language_coverage: 0.5`, `documentation_density: -0.5` and every other weight
+zeroed:
+
+```
+parse errors     : 1, entities: 0, files scanned: 0
+parse_success_rate score : 0.0
+overall_score            : 1.0
+overall_grade            : A
+clears min_score = 0.9   : True
+```
+
+A codebase that parsed nothing is graded A and clears a hard build gate. The
+failure is silent and maximally wrong. It stands out because every other field
+in this parser is validated meticulously, down to rejecting `bool` where a
+number is expected; the weights are the one place a documented invariant is
+stated and never enforced.
+
+Fix in the parser: reject negative weights, and reject a set that does not sum
+to 1.0 within a stated tolerance. Add the same guard to `assess_codebase`,
+which is public and takes `weights` directly, and replace the `1e-9` floor —
+a silent wrong answer — with an explicit failure. Blast radius is small:
+`service.py:1064` is the only caller that passes `weights`, and it passes a
+complete dict built from the defaults, so the parser catches it at the source.
+No test passes `weights=`.
+
 ### BL-15 - The exact search mode treats `_` and `%` as wildcards
 
 **Severity:** High. **Found:** 2026-08-30, measuring what a replacement exact
@@ -316,6 +507,112 @@ whole corpus as §5 implies.
 
 **Deferred on purpose.** Line anchors go stale on every commit. Fix them only if
 the anchors are re-verified as part of adopting a later phase.
+
+### BL-22 - Telemetry reports a routing decision the router did not make
+
+**Severity:** Medium. **Found:** 2026-08-30, same audit.
+
+`retrieve_context_for_query` annotates its telemetry scope with
+
+```python
+threshold = self.app_config.sufficiency_threshold      # service.py:644, 0.8
+local_or_escalated="local" if score >= threshold else "escalated"   # :650
+```
+
+The gate that actually routes, in `Agent.smart_answer`, is
+`max(sufficiency_threshold, routing_quality_floor)` = 0.9 **and** membership in
+`local_answer_task_types`, which is always empty (BL-19). So the field is
+computed against the wrong threshold, does not consult the allowlist at all,
+and is emitted from a path that makes no routing decision. `telemetry.py:398`
+tallies it into the `local` count — the local-answer rate that substantiates
+the product's token-savings claim.
+
+Any retrieval scoring 0.8 or above is logged as answered locally when the true
+local-answer rate is exactly zero. BL-20 compounds it by driving complete
+bundles to 1.00.
+
+Not yet observed in the wild: the repository's historical query events all
+scored below 0.8 and were logged correctly as escalated. That is luck, not
+correctness, and it stops being luck the moment BL-19 widens the bundles.
+
+Fix by annotating the routing outcome where routing happens — `smart_answer`,
+using the same expression the branch uses — and having the retrieval path
+either stop asserting a verdict it did not reach or emit something honestly
+named. `Scope.annotate` is last-write-wins (`telemetry.py:278`), so verify the
+nesting order gives the outer decision the final write before relying on it.
+Renaming touches `telemetry.py:398`, the field table in `docs/user/telemetry.md`
+at line 35, and the `jq` example at line 135.
+
+This is the measurement the fail-closed gate depends on for its eventual
+opening, so it should be correct before the eval program reads it.
+
+### BL-23 - Freshness cannot see a deleted file
+
+**Severity:** Medium. **Found:** 2026-08-30, same audit.
+
+`get_freshness_metadata` derives staleness from
+
+```python
+latest_source_change = max(os.path.getmtime(f.path) for f in files)   # service.py:685
+```
+
+— the maximum mtime across files that *currently exist*. Deleting a source file
+raises no file's mtime, so `is_stale` stays `false` while the index keeps
+serving entities for a file that is gone. No file count or path set is
+compared, so nothing else can catch it either.
+
+The spec does call freshness "mtime-based and advisory", which covers the shape
+of this in spirit; the specific deletion blind spot is worth naming because the
+staleness banner is what tells a user their answer may be wrong.
+
+Partly backstopped by D3: under the default `entity_source: disk`,
+`LiveSourceLoader.load_verified_source` fails closed on a missing file, so no
+stale *body* is served for a deleted file — only its name, signature and
+relationships. Under `entity_source: stored` the body is served too.
+
+Fix by recording the indexed file count in the manifest and comparing it
+against the scan's count; a drop means a deletion. That is O(1) and
+proportionate to an advisory signal. It misses a same-count delete-plus-add,
+but the added file's mtime catches that case already.
+
+Separately, this runs `scanner.scan_all()` plus one `stat` per file on the
+retrieval path, on every call. Worth measuring before it is worth changing.
+
+### BL-24 - Every context bundle labels its source as Python
+
+**Severity:** Low. **Found:** 2026-08-30, same audit.
+
+All four signature and source-code fences in `ContextSynthesizer` are hardcoded
+to ` ```python ` (`context_synthesizer.py:177`, `:202`, `:472`, `:480`), so
+Rust, TypeScript, Java and Vue source reaches the LLM — and the user — declared
+as Python. Wrong syntax highlighting for the reader, and a false signal to the
+model about what it is being asked to reason over.
+
+The language is already on `entity.metadata["language"]`, and
+`documentation_synthesizer.py:434` already reads it. Extract the fence-tag
+lookup once and use it in both places rather than writing the mapping twice.
+
+### BL-25 - Live source reads are not bounded to the repository root
+
+**Severity:** Low. **Found:** 2026-08-30, same audit.
+
+`LiveSourceLoader._slice` builds its path as
+
+```python
+file_path = self.root_dir / entity.location.file_path    # live_source_loader.py:27
+```
+
+`pathlib` discards the left operand entirely when the right is absolute, and
+`utils/entity_identity.py` shows absolute paths are representable in entity ids.
+Digest verification bounds what can be *served* but not what is *read*.
+
+Defense in depth only: reaching it requires a foreign or tampered index, at
+which point more is already lost. Worth closing because the loader now runs on
+the default read path for every `get_context` call, not only stale ones — the
+BL-16 fix builds it unconditionally (`service.py:1533`).
+
+Fix with a `relative_to` containment check on the resolved path, failing closed
+to `None` like every other rejection in this class.
 
 ## Closed
 

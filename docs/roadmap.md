@@ -94,6 +94,18 @@ machine-adjudicated, externally benchmarked, versioned, and enforced by CI.
 Missing credentials, source or dataset drift, judge instability, BM25
 inferiority, and blessed-baseline regression all fail closed.
 
+**Blocked on BL-19 (2026-08-30).** Work item 1 says "run the real
+`Agent.smart_answer` escalation path". There is no escalation path to run: both
+broadening rungs are gated on the always-empty local-answer allowlist, so every
+question is measured on a one-entity, no-source, 1,500-token bundle
+([BL-19](engineering/backlog.md)), and BL-18 under-fills even that. Threshold
+selection in work item 3 reads sufficiency scores that saturate at 1.00 for any
+complete bundle ([BL-20](engineering/backlog.md)), and the local-answer rate it
+would report is computed against the wrong gate
+([BL-22](engineering/backlog.md)). Land those four before treating any number
+from this harness as calibration data — the 60 existing records were produced
+on the thin bundle.
+
 **Progress (2026-07-31):** the proof and validation harness has moved to the
 independent `knowcode-evals` repository. KnowCode now contains only a
 checksum-pinned, source-bound schema 1.1 policy consumer and runtime
@@ -382,8 +394,12 @@ The next trust release ships only when all of the following are true:
 4. Freshness and language-coverage checks report no unresolved correctness
    warnings for the target repository.
 5. No `Critical` item is open in the [engineering backlog](engineering/backlog.md).
-   None is open today. (This line named `BL-1` long after Phase B fixed it on
-   2026-08-29; check the backlog rather than trusting the name here.)
+   **Two are open as of 2026-08-30**: BL-18, dependency expansion relabelling a
+   ranked hit as non-evidence, and BL-19, the retrieval ladder gated on the
+   fail-closed flag. Both were found by the business-logic audit and both cost
+   answer quality directly, so this gate is shut until they land. (Read the
+   backlog rather than trusting the names here: this line named `BL-1` long
+   after Phase B fixed it on 2026-08-29.)
 
 P3 through P7 improve efficiency, adoption, and footprint, but they are not
 permitted to weaken these release gates.
