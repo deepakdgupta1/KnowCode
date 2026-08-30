@@ -47,6 +47,7 @@ from typing import Any, Iterator, Optional
 from knowcode.data_models import CodeChunk
 from knowcode.errors import RepositoryClosedError
 from knowcode.storage.chunk_repository import ChunkFileReplacement, ChunkRepository
+from knowcode.storage.sqlite_like import LIKE_ESCAPE_CLAUSE, like_contains
 from knowcode.utils.entity_identity import (
     absolutize_id,
     normalize_file_identity,
@@ -748,14 +749,20 @@ class SqliteChunkRepository(ChunkRepository):
             return []
 
     def search_exact(self, pattern: str, limit: int = 10) -> list[CodeChunk]:
-        """Search chunks by exact substring match using LIKE."""
+        """Search chunks whose content contains ``pattern`` as a literal substring.
+
+        Two semantics, both deliberate. The match is literal, so ``_`` and
+        ``%`` are ordinary characters rather than wildcards (BL-15). The match
+        is case-insensitive over ASCII, which is ``LIKE``'s own behaviour.
+        """
         if not pattern:
             return []
 
         with self._read_lease() as conn:
             cursor = conn.execute(
-                f"SELECT {_SELECT_COLUMNS} FROM chunks WHERE content LIKE ? LIMIT ?",
-                (f"%{pattern}%", limit),
+                f"SELECT {_SELECT_COLUMNS} FROM chunks "
+                f"WHERE content LIKE ? {LIKE_ESCAPE_CLAUSE} LIMIT ?",
+                (like_contains(pattern), limit),
             )
             rows = cursor.fetchall()
         return [self._row_to_chunk(row) for row in rows]

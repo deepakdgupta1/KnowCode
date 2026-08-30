@@ -30,68 +30,6 @@ measured reason not to build something is worth more than silence.
 
 ## Open
 
-### BL-15 - The exact search mode treats `_` and `%` as wildcards
-
-**Severity:** High. **Found:** 2026-08-30, measuring what a replacement exact
-plane would have to offer for BL-14.
-
-`SqliteChunkRepository.search_exact` interpolates the caller's string straight
-into a `LIKE` pattern with no `ESCAPE` clause:
-
-```python
-f"SELECT {_SELECT_COLUMNS} FROM chunks WHERE content LIKE ? LIMIT ?",
-(f"%{pattern}%", limit),
-```
-
-In SQLite `LIKE`, `_` matches any single character and `%` matches any run.
-Both are ordinary characters in source code, and `_` is in most Python and Rust
-identifiers. So the mode named `exact` silently answers a different query than
-the one asked, and `ExactQueryEngine.search_scored` scores every row it returns
-`1.0`, which says the match was exact.
-
-Measured against generation `20260830T061050304877Z-8abc9f11`, unbounded:
-
-| Quoted query | Rows served | Rows containing the literal | False |
-|---|---:|---:|---:|
-| `"vector_"` | 927 | 278 | **649, 70%** |
-| `"HOSTILE_CONTEX"` | 17 | 16 | 1 |
-| `"search_ex"` | 6 | 6 | 0 |
-
-Over 74 sampled queries containing `_` or `%`, 11 were answered differently
-from their literal reading. The size of the error tracks how common the
-neighbouring characters are, so it is largest exactly where the identifier is
-generic.
-
-`LIKE` is also case-insensitive over ASCII by default, which the mode does not
-state either. That one may well be wanted; it just is not written down
-anywhere.
-
-Reproduce:
-
-```python
-from knowcode.retrieval.exact_query_engine import ExactQueryEngine
-from knowcode.storage.sqlite_chunk_repository import SqliteChunkRepository
-
-engine = ExactQueryEngine(SqliteChunkRepository(GEN / "chunks.db"))
-len(engine.search_scored('"vector_"', limit=10000))
-```
-
-Compare against `content LIKE '%vector\_%' ESCAPE '\'` on the same database.
-
-**Not fixed here on purpose, and no longer waiting on anything.** It was
-deferred to the decision BL-14 said had to be made about what semantics the
-exact plane offers. That decision is made: BL-14 and Phase F are rejected, the
-`content` column stays, and `LIKE` stays the exact plane's implementation. So
-the question this item was waiting on has an answer, and the answer is that
-`exact` means the literal string.
-
-The change is one `ESCAPE` clause and an escape of `%`, `_` and the escape
-character in the pattern. Write down the two semantics the mode then offers —
-literal substring, ASCII-case-insensitive — and pin them with a test that
-asserts a `_` in the query does not match a different character. It narrows
-what a quoted query returns, which is the point: every row it stops serving is
-one that does not contain what was asked for.
-
 ### BL-9 - A symbol named after its own file shadows the file's module entity
 
 **Severity:** High. **Found:** 2026-08-29, writing the parser-contract
@@ -321,6 +259,7 @@ the anchors are re-verified as part of adopting a later phase.
 
 | Item | Resolution |
 | --- | --- |
+| The exact search mode treated `_` and `%` as wildcards (BL-15) | Fixed 2026-08-31. Both SQLite stores had it, not one. `SqliteKnowledgeStore.search` built the same unescaped `LIKE` pattern, and its in-memory twin `KnowledgeStore.search` is `pattern_lower in name.lower()`, so two implementations of one Protocol disagreed and the in-memory one states the contract. `store.search` is reached from `mcp/server.py:185` with a raw user query and from `:427` with a `trace_calls` target, which is an identifier and so full of underscores. **The row counts understate it.** On generation `20260830T061050304877Z-8abc9f11` the quoted query `"vector_"` served 927 chunks of which 264 held the literal, and now serves 278 of which all 278 do. But `search_exact` has no `ORDER BY`, so scan order decides what the limit keeps: at the orchestrator's own breadth of `max(10, limit_entities * 5)` = 15, **none of the 15 rows contained the string asked for**, every one scored 1.0. All 15 do now. `storage/sqlite_like.py` holds the pattern builder and the `ESCAPE` clause in one place, because an escaped pattern run without the clause matches the escape character itself. Case-insensitivity over ASCII was kept on purpose and is now written into the `ChunkRepository.search_exact` contract rather than left implicit. Pinned by `tests/unit/storage/test_like_escaping.py`; the entity half is differential against the in-memory store, so no relabelling satisfies it. Two mutation probes: dropping the `%` and `_` escaping reddens exactly the five rows that were red before the fix, and emptying `LIKE_ESCAPE_CLAUSE` reddens all ten, which is what proves the two halves are coupled. Full suite 1,920 passed, 3 xfailed. |
 | Module chunks point at an entity that does not exist (BL-6) | Fixed 2026-08-29. Module-header and imports chunks hang on the file's MODULE entity, or its DOCUMENT entity where that is what the parser emits; prose chunks hang on the section whose span their lines fall in. Paired build: 495,985 chunk bytes off the graph to 0. `no chunk points at an entity that does not exist` is now a chunker contract for seven languages. Left BL-10. |
 | Prose chunked by a Python header extractor, 39% unreachable | Phase B, 2026-08-29. `.md` and `.rst` route to `ProseChunker`. Prose coverage 41.6% to 95.7% over 55 files; the largest document went from 13% to 99%. |
 | Class bodies stored twice, and label-only chunks (6.1, 6.3) | Phase B, 2026-08-29. A class chunk stops at its first member; an entity with nothing but a name emits no chunk. 881,970 bytes of duplicated member text and 68 config-key chunks removed, worth 8.00 MB of `chunks.db`. |

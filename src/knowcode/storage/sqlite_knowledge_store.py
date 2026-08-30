@@ -30,6 +30,7 @@ from knowcode.data_models import (
 )
 from knowcode.errors import RepositoryClosedError
 from knowcode.storage.knowledge_store import KnowledgeStore
+from knowcode.storage.sqlite_like import LIKE_ESCAPE_CLAUSE, like_contains
 from knowcode.utils.entity_identity import (
     absolutize_id,
     ensure_entity_content_hash,
@@ -656,13 +657,19 @@ class SqliteKnowledgeStore:
         return self._row_to_entity(row) if row else None
 
     def search(self, pattern: str) -> list[Entity]:
-        """Search entities by name or qualified name pattern."""
-        like_pattern = f"%{pattern}%"
+        """Search entities whose name or qualified name contains ``pattern``.
+
+        This is the SQLite half of the contract the in-memory
+        ``KnowledgeStore.search`` states: a literal, case-insensitive substring.
+        ``_`` and ``%`` are ordinary characters rather than wildcards (BL-15).
+        """
+        like_pattern = like_contains(pattern)
         with self._read_lease() as conn:
             cursor = conn.execute(
-                """
+                f"""
                 SELECT * FROM entities
-                WHERE name LIKE ? OR qualified_name LIKE ?
+                WHERE name LIKE ? {LIKE_ESCAPE_CLAUSE}
+                   OR qualified_name LIKE ? {LIKE_ESCAPE_CLAUSE}
                 """,
                 (like_pattern, like_pattern),
             )

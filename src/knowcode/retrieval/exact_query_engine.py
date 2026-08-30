@@ -20,6 +20,10 @@ class ExactQueryEngine:
     ) -> list[ScoredChunk]:
         """Execute an exact match search.
 
+        Every returned chunk contains ``query`` as a literal substring, so the
+        uniform score of 1.0 is honest. Matching is case-insensitive over ASCII
+        and reads no character of the query as a wildcard (BL-15).
+
         Args:
             query: The exact string to search for. If wrapped in quotes, they will be stripped.
             limit: Maximum chunks to return.

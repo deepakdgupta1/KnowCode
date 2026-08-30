@@ -60,7 +60,12 @@ class ChunkRepository(ABC):
 
     @abstractmethod
     def search_exact(self, pattern: str, limit: int = 10) -> list[CodeChunk]:
-        """Search chunks by exact substring match."""
+        """Search chunks whose content contains ``pattern`` as a literal substring.
+
+        Literal means literal: an implementation may not read any character of
+        ``pattern`` as a wildcard (BL-15). Matching is case-insensitive over
+        ASCII.
+        """
         pass
 
     @abstractmethod
