@@ -143,12 +143,22 @@ why the routing gate below exists.
 
 ### Local-vs-LLM routing — fail-closed by design
 
-**What:** `ask`/`smart_answer` escalates through a ladder before touching
-an LLM: (1) minimal retrieval — 1500 tokens, 1 entity; (2) broaden — 3000
+**What:** `ask`/`smart_answer` climbs a ladder of retrieval attempts before
+touching an LLM: (1) minimal — 1500 tokens, 1 entity; (2) broaden — 3000
 tokens, 3 entities, with dependencies; (3) more detail — same breadth at
-`verbosity="standard"`; (4) answer locally **only if** the task type is
-enabled for local answering *and* sufficiency ≥ `max(sufficiency_threshold
-= 0.8, routing_quality_floor = 0.9)`; otherwise call the LLM.
+`verbosity="standard"`. It stops at the first rung whose sufficiency clears
+`max(sufficiency_threshold = 0.8, routing_quality_floor = 0.9)`, then answers
+locally **only if** the task type is also enabled for local answering;
+otherwise it calls the LLM.
+
+The climb is what buys the token saving, and the saving only exists if
+stopping early is possible. So the ladder is climbed **only when some task
+type may answer locally and the caller has not already demanded the LLM**.
+When neither holds, one retrieval runs at rung 3 and the LLM answers from
+that — the same single attempt, at full breadth rather than minimal. Gating
+the rungs themselves on the local-answer allowlist was
+[BL-19](../engineering/backlog.md): it starved the LLM path a control for the
+local path was never meant to touch.
 
 Crucially, `local_answer_task_types` is **emptied on every config load**.
 It can only be repopulated from a machine-verified policy artifact

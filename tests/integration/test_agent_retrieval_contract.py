@@ -46,10 +46,12 @@ class ContractService:
         self.sufficiency = sufficiency
         self.context_text = context_text
         self.retrieve_calls = 0
+        self.retrieve_kwargs: list[dict[str, Any]] = []
         self._retrieval_orchestrator = RetrievalOrchestrator(self)
 
     def retrieve_context_for_query(self, query: str, **kwargs: Any) -> dict[str, Any]:
         self.retrieve_calls += 1
+        self.retrieve_kwargs.append(dict(kwargs))
         return self._retrieval_orchestrator.retrieve_context_for_query(
             query=query,
             **kwargs,
@@ -185,3 +187,55 @@ def test_routing_quality_floor_overrides_a_lower_nominal_threshold(
 
     assert result["source"] == "llm"
     assert result["sufficiency_score"] == 0.90
+
+
+#: What the ladder's last rung asks retrieval for. Asserted as a whole dict,
+#: not key by key: a bundle is thin or wide because of the *combination*, and
+#: checking one field at a time cannot see a rung that got half of it right.
+WIDEST_RUNG = {
+    "max_tokens": 3000,
+    "limit_entities": 3,
+    "expand_deps": True,
+    "verbosity": "standard",
+    "include_metadata": True,
+}
+
+
+def test_a_question_that_cannot_route_locally_still_gets_the_widest_retrieval(
+    tmp_path: Path,
+) -> None:
+    """BL-19: an empty allowlist starved the LLM path instead of the local one.
+
+    ``local_answer_task_types`` is emptied on every config load and no blessed
+    policy artifact exists, so this -- not the populated allowlist the other
+    tests in this file construct -- is what ships. Both broadening rungs were
+    gated on it, so retrieval stopped at rung one and the model was asked to
+    answer from one entity's signature and docstring, no source, no
+    dependencies, under 1,500 tokens.
+
+    Nothing here can be answered locally, so there is no cheaper-bundle saving
+    to chase: ask once, at full breadth, and hand that to the LLM.
+    """
+    service = ContractService(tmp_path, sufficiency=0.5)
+    agent = _make_agent(service)
+    agent.config.local_answer_task_types = []
+
+    result = agent.smart_answer("Explain foo")
+
+    assert result["source"] == "llm"
+    assert service.retrieve_kwargs == [WIDEST_RUNG]
+
+
+def test_forcing_the_llm_does_not_thin_the_bundle_it_gets(tmp_path: Path) -> None:
+    """``force_llm`` means "do not answer locally", not "retrieve less".
+
+    It guarded the rungs as well as the routing decision, so ``--force-llm``
+    reached the model with a thinner bundle than a plain ask would have.
+    """
+    service = ContractService(tmp_path, sufficiency=0.95)
+    agent = _make_agent(service)
+
+    result = agent.smart_answer("Where is foo defined?", force_llm=True)
+
+    assert result["source"] == "llm"
+    assert service.retrieve_kwargs == [WIDEST_RUNG]

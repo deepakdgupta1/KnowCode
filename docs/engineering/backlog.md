@@ -30,59 +30,6 @@ measured reason not to build something is worth more than silence.
 
 ## Open
 
-### BL-19 - The retrieval ladder is gated on the fail-closed flag, so every LLM answer gets rung one
-
-**Severity:** Critical. **Found:** 2026-08-30, same audit.
-
-`Agent.smart_answer` computes `can_route_locally` from membership in
-`local_answer_task_types` (`agent.py:260`) and then guards *both* broadening
-rungs of the retrieval ladder with it (`agent.py:271`, `agent.py:286`). That
-list is emptied on every config load by `AppConfig._fail_closed`
-(`config.py:137`) and can only be repopulated from a machine-verified policy
-artifact that does not yet exist. So `can_route_locally` is always `False`,
-both rungs are unreachable, and retrieval stops at rung one.
-
-Rung one is `_retrieve_context`'s defaults (`agent.py:192`): `max_tokens=1500`,
-`limit_entities=1`, `expand_deps=False`, `verbosity="minimal"`. Minimal
-verbosity maps to `summarize=True`, which omits raw source entirely — the
-business-logic spec calls that the single largest token lever. `answer()`
-consumes that bundle verbatim and never re-retrieves.
-
-| | Documented ladder | Observed |
-|---|---|---|
-| retrieval attempts | up to 3 | **1** |
-| max_tokens | 3000 by rung 2 | 1500 |
-| limit_entities | 3 by rung 2 | **1** |
-| expand_deps | true by rung 2 | **false** |
-| raw source | present at rung 3 | **omitted** |
-
-Every `knowcode ask` question therefore reaches the LLM with one entity's
-signature and docstring, no source, no dependencies, under 1,500 tokens. A
-control designed to stop bad *local* answers is degrading the *LLM* answer path
-it was never meant to touch.
-
-The two conditions are answering different questions. "How much context do we
-need before answering?" is not "may we answer this locally?" — only the final
-routing decision at `agent.py:299` should consult the allowlist. Note that
-simply dropping `can_route_locally` from the rungs makes today's universal case
-climb all three rungs and then call the LLM anyway, which is three retrievals
-to reach a bundle we could have asked for directly. Prefer: when no local
-answer is possible for the task type, retrieve once at the widest rung and go
-to the LLM; when one is possible, climb as documented to find the cheapest
-sufficient bundle. That keeps the token-saving intent exactly and costs one
-retrieval, not three.
-
-`force_llm` guards the rungs too, so `--force-llm` currently gets a thinner
-bundle than a plain ask. Same class of error, same fix — it should gate the
-routing decision, not the breadth.
-
-**Sequencing: land BL-18 first.** The widest rung sets `expand_deps=True` and
-`limit_entities=3`, which is exactly where BL-18 collapses three entities to
-one. Fixing this one alone would deliver a bundle BL-18 then guts.
-
-This also biases the eval program: every sufficiency score logged to date was
-measured on the rung-one bundle, not the escalated one.
-
 ### BL-20 - Sufficiency saturates, and two task types clear the routing gate with no source code
 
 **Severity:** High. **Found:** 2026-08-30, same audit.
@@ -579,3 +526,4 @@ to `None` like every other rejection in this class.
 | A fresh index under the default `entity_source` serves context with no source code (BL-16) | Fixed 2026-08-30, the day it was filed. `ContextSynthesizer` now chooses the read by *why* the text is missing rather than by whether the index is stale: a stale index still gets an unverified live slice, because the drift is what the caller asked to see; a fresh index with no stored copy (D3's `disk` default) gets `load_verified_source`, which serves the span only while it hashes to the digest taken at build time and nothing at all otherwise. `KnowCodeService.get_context` builds the loader unconditionally — gating its construction on staleness was the defect. Pinned by four rows added to `tests/unit/service/test_entity_source_resolution.py`, which now covers `get_context` alongside `get_entity_details`; the fresh-`disk` row failed before the fix. Both new guards were mutation-probed: swapping the verified read for an unverified one reddens the fail-closed row, and deleting the stale branch reddens the stale row. Full suite 1,857 passed, 3 xfailed. |
 | A watched edit never advances the entity graph (BL-17) | Fixed 2026-08-30. A file transaction now rewrites the touched file's entity rows and the edges leaving them, from the same parse that produced its chunks: `PreparedFileUpdate` carries the parse's entities and relationships, `SqliteKnowledgeStore.replace_file` applies them in one writer transaction, and `StagedGenerationWriter` opens the staged `knowledge.db` and commits the graph half after the chunk half — that order makes a crash between the two land on the old behaviour rather than its worse inverse. The manifest's relationship count is read from the staged artifact instead of carried forward from the base. **Deliberately not fixed:** edges *arriving* from a file the transaction did not parse, which an incremental parse cannot re-derive; a rename still needs a full build to resolve everywhere. Five tests that pinned the old contract are inverted, not relaxed, including the e2e release-gate test that named the limitation — `knowcode doctor` stops reporting `store_stale_source_changed` after a watch commit, because the mtime that signal reads was the copied `knowledge.db`'s. Pinned by `tests/unit/service/test_watch_graph_updates.py`; all three production changes mutation-probed. The first probe of the edge deletion did *not* fire, because the assertion resolved edges through the `entities` table and so could not see an orphan — it now joins the `eid` codebook alone. Full suite 1,864 passed, 3 xfailed. |
 | Dependency expansion relabelled a ranked hit as non-evidence (BL-18) | Fixed 2026-08-30, the day the business-logic audit filed it. `SearchEngine.search_scored` now emits every ranked hit as `retrieved`, in rank order, *before* expanding anything, and only then adds unseen callees as `dependency` with a zero score. The de-duplication guard can no longer reach a primary hit, so being some other hit's callee cannot cost a chunk its own retrieval evidence -- the loop order is what enforces it, which the docstring now says. Pinned by two tests in `tests/unit/retrieval/test_search_engine.py`: a three-link call chain with all three links ranked returned one `retrieved` label before the fix and three after, and a second test holds the other half, that a callee retrieval never ranked stays a `dependency` -- the guard against "fix" by relabelling everything `retrieved`. Both mutation-probed: moving the seeding loop back after expansion reddens the first, relabelling callees `retrieved` reddens only the second. The returned list changes from expansion-traversal order to rank order; `cli.py:438`, `mcp/server.py:343` and `api.py:195` all just iterate it, and `evidence[].rank` in the orchestrator now means retrieval rank, which is what it claimed. Full suite 1,866 passed, 3 xfailed. |
+| The retrieval ladder was gated on the fail-closed flag, so every LLM answer got rung one (BL-19) | Fixed 2026-08-30. Both broadening rungs were guarded by membership in `local_answer_task_types`, which `AppConfig._fail_closed` empties on every load and no blessed policy artifact repopulates, so retrieval always stopped at rung one and the model was asked to answer from one entity's signature and docstring -- no source, no dependencies, under 1,500 tokens. The three copy-pasted rung blocks are now one `LADDER_RUNGS` tuple and one loop that stops at the first rung clearing the threshold. The ladder is climbed only when stopping early is *possible* -- some task type may answer locally and the caller has not demanded the LLM; otherwise one retrieval runs at the widest rung. That is the same single attempt as before, at full breadth rather than minimal, so the fix costs no extra retrieval in today's universal case. `force_llm` no longer thins the bundle either: it means "do not answer locally", not "retrieve less". Pinned by two tests in `tests/integration/test_agent_retrieval_contract.py`, which assert the whole kwargs dict one attempt asks retrieval for rather than one field at a time -- a bundle is thin because of the *combination*. Three mutation probes, each reddening only its own test: giving the un-routable case the thinnest rung, removing the early stop, and letting `force_llm` climb. The existing `retrieve_calls == 1` and `== 3` assertions still hold, so the token saving on a populated allowlist is unchanged. `docs/product/business-logic.md` restates the ladder. Full suite 1,868 passed, 3 xfailed. |

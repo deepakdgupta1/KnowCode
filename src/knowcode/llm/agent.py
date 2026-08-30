@@ -14,6 +14,41 @@ from knowcode.llm.prompt_contract import (
 )
 from knowcode.data_models import TaskType
 
+#: The retrieval ladder, cheapest rung first. Each rung is what one attempt
+#: asks retrieval for; the ladder climbs only while a *local* answer is still
+#: on the table, because stopping early is the only thing the extra rungs buy.
+#: Rung 1 omits raw source entirely (``verbosity="minimal"`` maps to
+#: ``summarize=True``), which the business-logic spec calls the single largest
+#: token lever -- fine as a first probe, never as what an LLM answers from.
+LADDER_RUNGS: tuple[dict[str, Any], ...] = (
+    {
+        "max_tokens": 1500,
+        "limit_entities": 1,
+        "expand_deps": False,
+        "verbosity": "minimal",
+    },
+    {
+        "max_tokens": 3000,
+        "limit_entities": 3,
+        "expand_deps": True,
+        "verbosity": "minimal",
+    },
+    {
+        "max_tokens": 3000,
+        "limit_entities": 3,
+        "expand_deps": True,
+        "verbosity": "standard",
+    },
+)
+
+#: Printed when climbing onto rung N. Index 0 is unused: the first attempt is
+#: not an escalation and says nothing.
+_RUNG_NOTES = (
+    "",
+    "  🔎 Expanding local retrieval breadth...",
+    "  🔎 Requesting standard retrieval detail...",
+)
+
 
 def _create_google_client(api_key: str) -> Any:
     """Create a Google GenAI client with an actionable dependency hint."""
@@ -253,49 +288,38 @@ class Agent:
                 - sufficiency_score: Context quality score
                 - context: The retrieved context
         """
-        retrieval = self._retrieve_context(query)
-        avg_sufficiency = float(retrieval.get("sufficiency_score", 0.0))
-        context_str = retrieval.get("context_text", "")
-        initial_task_type = TaskType(retrieval.get("task_type", TaskType.GENERAL.value))
-        can_route_locally = (
-            initial_task_type.value in self.config.local_answer_task_types
-        )
-
         threshold = max(
             self.config.sufficiency_threshold,
             self.config.routing_quality_floor,
         )
 
-        if (
-            not force_llm
-            and can_route_locally
-            and (avg_sufficiency < threshold or not context_str)
-        ):
-            print("  🔎 Expanding local retrieval breadth...")
-            retrieval = self._retrieve_context(
-                query,
-                max_tokens=3000,
-                limit_entities=3,
-                expand_deps=True,
-            )
-            avg_sufficiency = float(retrieval.get("sufficiency_score", 0.0))
-            context_str = retrieval.get("context_text", "")
+        # "How much context do we need before answering?" is not "may we
+        # answer this locally?". Gating the ladder's rungs on the second
+        # question -- which is always no, because `local_answer_task_types` is
+        # emptied on every config load and no blessed policy artifact exists
+        # -- starved the path it was never meant to touch: every question
+        # reached the LLM with rung 1's one entity, no source and no
+        # dependencies (BL-19).
+        #
+        # Climbing is worth it only when stopping early is possible, which
+        # needs a task type that may answer locally. When none may, or the
+        # caller has already demanded the LLM, there is no cheaper-bundle
+        # saving to chase: ask once at full breadth. That is the same single
+        # retrieval as before, for a far better bundle.
+        may_answer_locally = bool(self.config.local_answer_task_types) and not force_llm
+        rungs = LADDER_RUNGS if may_answer_locally else LADDER_RUNGS[-1:]
 
-        if (
-            not force_llm
-            and can_route_locally
-            and (avg_sufficiency < threshold or not context_str)
-        ):
-            print("  🔎 Requesting standard retrieval detail...")
-            retrieval = self._retrieve_context(
-                query,
-                max_tokens=3000,
-                limit_entities=3,
-                expand_deps=True,
-                verbosity="standard",
-            )
+        retrieval: dict[str, Any] = {}
+        avg_sufficiency = 0.0
+        context_str = ""
+        for index, rung in enumerate(rungs):
+            if index:
+                print(_RUNG_NOTES[index])
+            retrieval = self._retrieve_context(query, **rung)
             avg_sufficiency = float(retrieval.get("sufficiency_score", 0.0))
             context_str = retrieval.get("context_text", "")
+            if avg_sufficiency >= threshold and context_str:
+                break
 
         task_type = TaskType(retrieval.get("task_type", TaskType.GENERAL.value))
         routing_policy_allowed = task_type.value in self.config.local_answer_task_types
