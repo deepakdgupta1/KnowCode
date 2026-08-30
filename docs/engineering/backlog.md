@@ -30,60 +30,6 @@ measured reason not to build something is worth more than silence.
 
 ## Open
 
-### BL-18 - Dependency expansion relabels a ranked hit as non-evidence
-
-**Severity:** Critical. **Found:** 2026-08-30, auditing the retrieval heuristics
-in `docs/product/business-logic.md` against what the code computes.
-
-`SearchEngine.search_scored` expands each ranked hit through
-`expand_dependencies`, which returns `[chunk] + callees`, and de-duplicates the
-whole expansion through one `seen_ids` set:
-
-```python
-for scored in primary:
-    deps = expand_dependencies(scored.chunk, ...)   # [chunk] + callees
-    for dep in deps:
-        if dep.id in seen_ids:      # search_engine.py:100
-            continue
-```
-
-A chunk already emitted as a higher-ranked hit's callee is in `seen_ids` by the
-time it comes up as a primary hit in its own right. The guard skips it, so it
-never receives its `source="retrieved"` record and keeps the `score=0.0`,
-`source="dependency"` label it was given as a callee. The orchestrator then
-selects on `primary = [s for s in scored if s.source == "retrieved"]`
-(`orchestrator.py:193`), so the demoted entity is filtered out and no context
-bundle is synthesized for it.
-
-A caller and its callee both ranking is the most common shape of a code-search
-result, and it is the shape this drops. `limit_entities` is silently
-under-filled. Reproduced against the real `SearchEngine` with a three-link call
-chain, all three ranked, `limit=3`:
-
-| Entity | Retrieval ranked | `search_scored` returned |
-|---|---|---|
-| A | 0.90 retrieved | 0.90 retrieved |
-| B | 0.85 retrieved | **0.00 dependency** |
-| C | 0.80 retrieved | **0.00 dependency** |
-
-Context synthesized for `['A']` — one of the three asked for.
-
-Reproduce with `scripts/` fakes or inline: rank A, B, C; give the graph
-`A -> B -> C`; call `engine.search_scored("q", limit=3, expand_deps=True)`.
-`expand_deps=True` is the default on every reaching path — the MCP server, the
-REST API, and `KnowCodeService`. `ExactQueryEngine` has its own `search_scored`
-that never expands, so the exact plane is unaffected.
-
-The contract in `docs/product/business-logic.md` says dependencies are present
-for completeness and never as retrieval evidence. Here the inverse happens.
-
-Fix by emitting every primary as `retrieved` before expanding anything, then
-adding only unseen callees as `dependency`. That makes "a ranked hit is never
-relabelled" structural rather than a repair. It reorders the returned list from
-expansion-traversal order to rank order, which changes the `rank` field in
-`evidence` and the order `SearchEngine.search` returns chunks in — check
-`cli.py:438`, `mcp/server.py:343` and `api.py:195` before landing.
-
 ### BL-19 - The retrieval ladder is gated on the fail-closed flag, so every LLM answer gets rung one
 
 **Severity:** Critical. **Found:** 2026-08-30, same audit.
@@ -632,3 +578,4 @@ to `None` like every other rejection in this class.
 | Phase F cannot be built as specified, and would cost more than it saves (BL-14) | **Rejected** 2026-08-30 under [DR-4](../research/storage_optimization_2026_v4.md), and with it Phase F and its `chunk_source` escape hatch. Replacing `chunks.content` with byte-range descriptors leaves the exact plane with no implementation: `ExactQueryEngine` is `SELECT ... FROM chunks WHERE content LIKE ?` and nothing else. Measured over 300 mid-identifier fragments with LIKE as ground truth, the shipped `chunks_fts` plane answers them at **57.8% recall unbounded and 14.6% at the engine's limit of 10**, returning nothing at all for 109 of 300; a trigram index that would answer them exactly costs 10.00 MB against the 4.32 MB column it replaces. F also fails closed on an edited file, so the twelve paths touched in one working session would render **518 chunks, 7.6% of the index**, as empty hits while `chunks_fts` still matched their terms, and it takes away `rebuild_fts`'s only input, which is what makes the term index reproducible from the artifact alone. The saving is 3.50 MB, not §11's 6.39 MB. `zlib` level 6 on the same column saves 2.38 MB and `zstandard` level 10 with a trained dictionary saves 3.05 MB, both changing no plane, no semantics, and no freshness contract — take the bytes there. Reproduce either with `python scripts/exact_plane_recall.py --index knowcode_index` and `python scripts/storage_simulate.py --index knowcode_index --repo-root .`. The plan's "F stays gated on BL-14's prerequisites" now resolves to this row: F does not ship. |
 | A fresh index under the default `entity_source` serves context with no source code (BL-16) | Fixed 2026-08-30, the day it was filed. `ContextSynthesizer` now chooses the read by *why* the text is missing rather than by whether the index is stale: a stale index still gets an unverified live slice, because the drift is what the caller asked to see; a fresh index with no stored copy (D3's `disk` default) gets `load_verified_source`, which serves the span only while it hashes to the digest taken at build time and nothing at all otherwise. `KnowCodeService.get_context` builds the loader unconditionally — gating its construction on staleness was the defect. Pinned by four rows added to `tests/unit/service/test_entity_source_resolution.py`, which now covers `get_context` alongside `get_entity_details`; the fresh-`disk` row failed before the fix. Both new guards were mutation-probed: swapping the verified read for an unverified one reddens the fail-closed row, and deleting the stale branch reddens the stale row. Full suite 1,857 passed, 3 xfailed. |
 | A watched edit never advances the entity graph (BL-17) | Fixed 2026-08-30. A file transaction now rewrites the touched file's entity rows and the edges leaving them, from the same parse that produced its chunks: `PreparedFileUpdate` carries the parse's entities and relationships, `SqliteKnowledgeStore.replace_file` applies them in one writer transaction, and `StagedGenerationWriter` opens the staged `knowledge.db` and commits the graph half after the chunk half — that order makes a crash between the two land on the old behaviour rather than its worse inverse. The manifest's relationship count is read from the staged artifact instead of carried forward from the base. **Deliberately not fixed:** edges *arriving* from a file the transaction did not parse, which an incremental parse cannot re-derive; a rename still needs a full build to resolve everywhere. Five tests that pinned the old contract are inverted, not relaxed, including the e2e release-gate test that named the limitation — `knowcode doctor` stops reporting `store_stale_source_changed` after a watch commit, because the mtime that signal reads was the copied `knowledge.db`'s. Pinned by `tests/unit/service/test_watch_graph_updates.py`; all three production changes mutation-probed. The first probe of the edge deletion did *not* fire, because the assertion resolved edges through the `entities` table and so could not see an orphan — it now joins the `eid` codebook alone. Full suite 1,864 passed, 3 xfailed. |
+| Dependency expansion relabelled a ranked hit as non-evidence (BL-18) | Fixed 2026-08-30, the day the business-logic audit filed it. `SearchEngine.search_scored` now emits every ranked hit as `retrieved`, in rank order, *before* expanding anything, and only then adds unseen callees as `dependency` with a zero score. The de-duplication guard can no longer reach a primary hit, so being some other hit's callee cannot cost a chunk its own retrieval evidence -- the loop order is what enforces it, which the docstring now says. Pinned by two tests in `tests/unit/retrieval/test_search_engine.py`: a three-link call chain with all three links ranked returned one `retrieved` label before the fix and three after, and a second test holds the other half, that a callee retrieval never ranked stays a `dependency` -- the guard against "fix" by relabelling everything `retrieved`. Both mutation-probed: moving the seeding loop back after expansion reddens the first, relabelling callees `retrieved` reddens only the second. The returned list changes from expansion-traversal order to rank order; `cli.py:438`, `mcp/server.py:343` and `api.py:195` all just iterate it, and `evidence[].rank` in the orchestrator now means retrieval rank, which is what it claimed. Full suite 1,866 passed, 3 xfailed. |

@@ -66,6 +66,13 @@ class SearchEngine:
         This is similar to search(), but retains relevance scores and labels
         dependency-expanded chunks so callers can build evidence-aware outputs.
 
+        Ranked hits come first, in rank order, each labelled ``retrieved`` and
+        carrying its own score; expanded callees follow, labelled
+        ``dependency`` with a zero score. A chunk appears once. Being some
+        other hit's callee never costs a chunk its own retrieval evidence --
+        the ordering is what enforces that, so do not fold the two loops back
+        together (BL-18).
+
         Args:
             query: Natural language query string.
             limit: Maximum number of primary chunks to return (before expansion).
@@ -89,6 +96,20 @@ class SearchEngine:
         expanded: list[ScoredChunk] = []
         seen_ids: set[str] = set()
 
+        # Every ranked hit is evidence, and every ranked hit stays evidence.
+        # Emitting all of them before expanding anything is what stops the
+        # de-duplication guard below from skipping a hit that a higher-ranked
+        # hit already pulled in as a callee and leaving it labelled
+        # "dependency" with a zero score -- which the orchestrator then
+        # filters out of context synthesis entirely (BL-18). A caller and its
+        # callee both ranking is the commonest shape of a code-search result,
+        # so that path is the common case, not an edge.
+        for scored in primary:
+            if scored.chunk.id in seen_ids:
+                continue
+            seen_ids.add(scored.chunk.id)
+            expanded.append(scored)
+
         for scored in primary:
             deps = expand_dependencies(
                 scored.chunk,
@@ -100,15 +121,7 @@ class SearchEngine:
                 if dep.id in seen_ids:
                     continue
                 seen_ids.add(dep.id)
-                expanded.append(
-                    ScoredChunk(
-                        chunk=dep,
-                        score=scored.score if dep.id == scored.chunk.id else 0.0,
-                        source="retrieved"
-                        if dep.id == scored.chunk.id
-                        else "dependency",
-                    )
-                )
+                expanded.append(ScoredChunk(chunk=dep, score=0.0, source="dependency"))
 
         return expanded
 
