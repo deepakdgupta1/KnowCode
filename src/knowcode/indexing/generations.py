@@ -61,6 +61,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from knowcode.utils.atomic_write import atomic_write_json
+from knowcode.utils.entity_identity import absolutize_id
 from knowcode.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -553,14 +554,39 @@ def _read_ids(db_path: Path, sql: str) -> list[str]:
         conn.close()
 
 
+def _recorded_root(db_path: Path) -> str:
+    """Return the repository root a store anchored its ids at, or ``""``.
+
+    Ids are stored relative to it (ADR 10). Hydrating here keeps every id a
+    manifest digests in the absolute form callers hold, so the digest is
+    unchanged by how the artifact encodes them.
+    """
+    present = _read_ids(
+        db_path,
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='repo_root'",
+    )
+    if not present:
+        return ""
+    roots = _read_ids(db_path, "SELECT root FROM repo_root")
+    return roots[0] if roots else ""
+
+
 def read_entity_ids(knowledge_db: Path) -> list[str]:
     """Return every entity id in a generation's knowledge store."""
-    return _read_ids(knowledge_db, "SELECT entity_id FROM entities")
+    root = _recorded_root(knowledge_db)
+    return [
+        absolutize_id(value, root)
+        for value in _read_ids(knowledge_db, "SELECT entity_id FROM entities")
+    ]
 
 
 def read_chunk_ids(chunks_db: Path) -> list[str]:
     """Return every chunk id in a generation's chunk store."""
-    return _read_ids(chunks_db, "SELECT chunk_id FROM chunks")
+    root = _recorded_root(chunks_db)
+    return [
+        absolutize_id(value, root)
+        for value in _read_ids(chunks_db, "SELECT chunk_id FROM chunks")
+    ]
 
 
 def count_durable_embeddings(chunks_db: Path) -> int:

@@ -59,10 +59,12 @@ DROP_TRIGGERS = (
 )
 
 # Rebuild tokens_text into a contentless FTS5 table: the term index survives,
-# the text column does not.
+# the text column does not. contentless_delete=1 keeps plain DELETE working
+# against the contentless table (SQLite 3.43+); without it no row can ever be
+# removed and incremental re-indexing corrupts search (BL-13).
 CONTENTLESS_FTS = """
 DROP TABLE chunks_fts;
-CREATE VIRTUAL TABLE chunks_fts USING fts5(tokens_text, content='');
+CREATE VIRTUAL TABLE chunks_fts USING fts5(tokens_text, content='', contentless_delete=1);
 INSERT INTO chunks_fts(rowid, tokens_text) SELECT rowid, tokens_text FROM chunks;
 """
 
@@ -129,8 +131,23 @@ class Result:
 # ----------------------------------------------------------------------
 
 
-def _strip_prefix(con: sqlite3.Connection, table: str, columns: tuple[str, ...],
-                  prefix: str) -> None:
+def _has_table(con: sqlite3.Connection, name: str) -> bool:
+    """Whether ``name`` exists in the connected database."""
+    row = con.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (name,)
+    ).fetchone()
+    return row is not None
+
+
+def _has_column(con: sqlite3.Connection, table: str, column: str) -> bool:
+    """Whether ``table`` still carries ``column``."""
+    names = {row[1] for row in con.execute(f"PRAGMA table_info({table})").fetchall()}
+    return column in names
+
+
+def _strip_prefix(
+    con: sqlite3.Connection, table: str, columns: tuple[str, ...], prefix: str
+) -> None:
     """Rewrite absolute paths in ``columns`` as repo-relative paths."""
     assignments = ", ".join(f"{c} = REPLACE({c}, ?, '')" for c in columns)
     con.execute(f"UPDATE {table} SET {assignments}", (prefix,) * len(columns))
@@ -153,9 +170,7 @@ def _slim_metadata(con: sqlite3.Connection, table: str) -> None:
         for key in REDUNDANT_METADATA_KEYS:
             payload.pop(key, None)
         updates.append((json.dumps(payload, separators=(",", ":")), rowid))
-    con.executemany(
-        f"UPDATE {table} SET metadata_json = ? WHERE rowid = ?", updates
-    )
+    con.executemany(f"UPDATE {table} SET metadata_json = ? WHERE rowid = ?", updates)
 
 
 def _vacuum(db: Path) -> int:
@@ -192,8 +207,13 @@ class Simulator:
         shutil.copy(self.generation / artifact, dst)
         return dst
 
-    def run(self, label: str, tier: str, artifact: str,
-            apply: Optional[Callable[[sqlite3.Connection], None]]) -> Result:
+    def run(
+        self,
+        label: str,
+        tier: str,
+        artifact: str,
+        apply: Optional[Callable[[sqlite3.Connection], None]],
+    ) -> Result:
         """Apply ``apply`` to a copy of ``artifact`` and measure the result.
 
         Args:
@@ -221,8 +241,17 @@ class Simulator:
 def chunk_candidates(sim: Simulator) -> list[Result]:
     """Simulate every chunks.db candidate, individually and combined."""
     prefix = sim.prefix
+    probe = sqlite3.connect(f"file:{sim.generation / 'chunks.db'}?mode=ro", uri=True)
+    try:
+        fts_already_contentless = not _has_column(probe, "chunks", "tokens_text")
+    finally:
+        probe.close()
 
     def contentless_fts(con: sqlite3.Connection) -> None:
+        if fts_already_contentless:
+            # D2 already folded the column; re-running the fold would only
+            # drop and rebuild an identical index.
+            return
         con.executescript(DROP_TRIGGERS)
         con.executescript(CONTENTLESS_FTS)
         con.execute("ALTER TABLE chunks DROP COLUMN tokens_text")
@@ -274,40 +303,84 @@ def chunk_candidates(sim: Simulator) -> list[Result]:
 
     return [
         sim.run("VACUUM only", "free", "chunks.db", None),
-        sim.run("relative paths in chunk_id/entity_id/file_path", "lossless",
-                "chunks.db", relative_paths),
+        sim.run(
+            "relative paths in chunk_id/entity_id/file_path",
+            "lossless",
+            "chunks.db",
+            relative_paths,
+        ),
         sim.run("slim metadata_json", "lossless", "chunks.db", slim_metadata),
-        sim.run("drop tokens_text -> contentless FTS5", "derived",
-                "chunks.db", contentless_fts),
-        sim.run("drop content (resolve from source tree)", "derived",
-                "chunks.db", drop_content),
-        sim.run("drop durable fp32 embeddings", "policy",
-                "chunks.db", drop_embedding),
-        sim.run(f"stop embedding chunks <{PRUNE_MIN_CONTENT_BYTES}B and import "
-                "blocks", "policy", "chunks.db", prune_trivial),
-        sim.run("ALL lossless + derived, durable vectors kept", "combined",
-                "chunks.db", combined),
-        sim.run("ALL + embedding-planner pruning", "combined",
-                "chunks.db", combined_pruned),
-        sim.run("ALL + content resolved from source tree", "combined",
-                "chunks.db", combined_no_source),
-        sim.run("ALL + vectors moved out of SQLite", "combined",
-                "chunks.db", combined_no_vectors),
+        sim.run(
+            "fold tokens_text into contentless FTS5"
+            + (" — already applied (D2)" if fts_already_contentless else ""),
+            "derived",
+            "chunks.db",
+            contentless_fts,
+        ),
+        sim.run(
+            "drop content (resolve from source tree)",
+            "derived",
+            "chunks.db",
+            drop_content,
+        ),
+        sim.run("drop durable fp32 embeddings", "policy", "chunks.db", drop_embedding),
+        sim.run(
+            f"stop embedding chunks <{PRUNE_MIN_CONTENT_BYTES}B and import blocks",
+            "policy",
+            "chunks.db",
+            prune_trivial,
+        ),
+        sim.run(
+            "ALL lossless + derived, durable vectors kept",
+            "combined",
+            "chunks.db",
+            combined,
+        ),
+        sim.run(
+            "ALL + embedding-planner pruning", "combined", "chunks.db", combined_pruned
+        ),
+        sim.run(
+            "ALL + content resolved from source tree",
+            "combined",
+            "chunks.db",
+            combined_no_source,
+        ),
+        sim.run(
+            "ALL + vectors moved out of SQLite",
+            "combined",
+            "chunks.db",
+            combined_no_vectors,
+        ),
     ]
 
 
 def knowledge_candidates(sim: Simulator) -> list[Result]:
     """Simulate every knowledge.db candidate, individually and combined."""
     prefix = sim.prefix
+    probe = sqlite3.connect(f"file:{sim.generation / 'knowledge.db'}?mode=ro", uri=True)
+    try:
+        # C2 replaced the TEXT edge keys with integer codebook ids and an
+        # ``eid`` table; its root text is what relative paths must strip now.
+        edges_already_integer = _has_table(probe, "eid")
+    finally:
+        probe.close()
 
     def drop_source(con: sqlite3.Connection) -> None:
         con.execute("ALTER TABLE entities DROP COLUMN source_code")
 
     def relative_paths(con: sqlite3.Connection) -> None:
         _strip_prefix(con, "entities", ("entity_id", "file_path"), prefix)
-        _strip_prefix(con, "relationships", ("source_id", "target_id"), prefix)
+        if edges_already_integer:
+            _strip_prefix(con, "eid", ("entity_id",), prefix)
+        else:
+            _strip_prefix(con, "relationships", ("source_id", "target_id"), prefix)
 
     def integer_edges(con: sqlite3.Connection) -> None:
+        if edges_already_integer:
+            # INTEGER_EDGE_KEYS assumes TEXT keys; against integer columns its
+            # codebook joins match nothing and the rewrite below would empty
+            # the graph (BL-12).
+            return
         con.executescript(INTEGER_EDGE_KEYS)
 
     def slim_metadata(con: sqlite3.Connection) -> None:
@@ -329,16 +402,33 @@ def knowledge_candidates(sim: Simulator) -> list[Result]:
 
     return [
         sim.run("VACUUM only", "free", "knowledge.db", None),
-        sim.run("relative paths in entity ids and edge keys", "lossless",
-                "knowledge.db", relative_paths),
-        sim.run("integer-keyed relationships + kind codebook", "lossless",
-                "knowledge.db", integer_edges),
-        sim.run("slim metadata_json (drop duplicated content_hash)", "lossless",
-                "knowledge.db", slim_metadata),
-        sim.run("content_hash as 32-byte BLOB", "lossless",
-                "knowledge.db", hash_blob),
-        sim.run("drop source_code (resolve from source tree)", "derived",
-                "knowledge.db", drop_source),
+        sim.run(
+            "relative paths in entity ids and edge keys"
+            + (" — edge keys already integer (C2)" if edges_already_integer else ""),
+            "lossless",
+            "knowledge.db",
+            relative_paths,
+        ),
+        sim.run(
+            "integer-keyed relationships + kind codebook"
+            + (" — already applied (C2)" if edges_already_integer else ""),
+            "lossless",
+            "knowledge.db",
+            integer_edges,
+        ),
+        sim.run(
+            "slim metadata_json (drop duplicated content_hash)",
+            "lossless",
+            "knowledge.db",
+            slim_metadata,
+        ),
+        sim.run("content_hash as 32-byte BLOB", "lossless", "knowledge.db", hash_blob),
+        sim.run(
+            "drop source_code (resolve from source tree)",
+            "derived",
+            "knowledge.db",
+            drop_source,
+        ),
         sim.run("ALL lossless + derived", "combined", "knowledge.db", combined),
     ]
 
@@ -370,16 +460,31 @@ def vector_candidates(generation: Path) -> list[Result]:
             if p.is_file()
         )
         results.append(
-            Result("compact index, drop superseded versions", "free",
-                   "vectors.lancedb", total, data)
+            Result(
+                "compact index, drop superseded versions",
+                "free",
+                "vectors.lancedb",
+                total,
+                data,
+            )
         )
         results.append(
-            Result("rebuild from durable BLOBs, ship nothing", "derived",
-                   "vectors.lancedb", total, 0)
+            Result(
+                "rebuild from durable BLOBs, ship nothing",
+                "derived",
+                "vectors.lancedb",
+                total,
+                0,
+            )
         )
         results.append(
-            Result("int8 ANN plane (recall@10 ~0.995 on normalized vectors)",
-                   "policy", "vectors.lancedb", total, count * dim)
+            Result(
+                "int8 ANN plane (recall@10 ~0.995 on normalized vectors)",
+                "policy",
+                "vectors.lancedb",
+                total,
+                count * dim,
+            )
         )
     return results
 
@@ -394,11 +499,14 @@ def _mb(value: int) -> str:
     return f"{value / 1048576:8.2f} MB"
 
 
-def print_results(generation: Path, groups: dict[str, list[Result]],
-                  baseline: int) -> None:
+def print_results(
+    generation: Path, groups: dict[str, list[Result]], baseline: int
+) -> None:
     """Render simulated results grouped by artifact."""
     line = "=" * 92
-    print(f"\n{line}\nMeasured storage candidates - generation {generation.name}\n{line}")
+    print(
+        f"\n{line}\nMeasured storage candidates - generation {generation.name}\n{line}"
+    )
     print(f"\nbaseline generation size: {_mb(baseline)}\n")
 
     for artifact, results in groups.items():
@@ -416,6 +524,7 @@ def print_results(generation: Path, groups: dict[str, list[Result]],
 
 def print_endstates(groups: dict[str, list[Result]], baseline: int) -> None:
     """Render composed end-states built from the measured combinations."""
+
     def combined(artifact: str, needle: str) -> Optional[Result]:
         return next(
             (
@@ -428,11 +537,7 @@ def print_endstates(groups: dict[str, list[Result]], baseline: int) -> None:
 
     def vector(needle: str) -> Optional[Result]:
         return next(
-            (
-                r
-                for r in groups.get("vectors.lancedb", [])
-                if needle in r.label
-            ),
+            (r for r in groups.get("vectors.lancedb", []) if needle in r.label),
             None,
         )
 
@@ -487,22 +592,33 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Measure candidate KnowCode storage optimizations"
     )
-    parser.add_argument("--index", default="knowcode_index",
-                        help="Path to the knowcode_index/ directory")
-    parser.add_argument("--generation", default=None,
-                        help="Generation id to simulate (default: current pointer)")
-    parser.add_argument("--repo-root", default=".",
-                        help="Repository root whose path prefix is stripped")
-    parser.add_argument("--keep", action="store_true",
-                        help="Keep the simulated copies for inspection")
-    parser.add_argument("--json", action="store_true",
-                        help="Emit machine-readable JSON")
+    parser.add_argument(
+        "--index",
+        default="knowcode_index",
+        help="Path to the knowcode_index/ directory",
+    )
+    parser.add_argument(
+        "--generation",
+        default=None,
+        help="Generation id to simulate (default: current pointer)",
+    )
+    parser.add_argument(
+        "--repo-root", default=".", help="Repository root whose path prefix is stripped"
+    )
+    parser.add_argument(
+        "--keep", action="store_true", help="Keep the simulated copies for inspection"
+    )
+    parser.add_argument(
+        "--json", action="store_true", help="Emit machine-readable JSON"
+    )
     args = parser.parse_args()
 
     index_path = Path(args.index)
     if not index_path.is_dir():
-        print(f"Error: {index_path} not found. Run `knowcode build` first.",
-              file=sys.stderr)
+        print(
+            f"Error: {index_path} not found. Run `knowcode build` first.",
+            file=sys.stderr,
+        )
         sys.exit(1)
     try:
         generation = resolve_generation(index_path, args.generation)
@@ -510,9 +626,7 @@ def main() -> None:
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
 
-    baseline = sum(
-        p.stat().st_size for p in generation.rglob("*") if p.is_file()
-    )
+    baseline = sum(p.stat().st_size for p in generation.rglob("*") if p.is_file())
     workdir = Path(tempfile.mkdtemp(prefix="knowcode-storage-sim-"))
     try:
         sim = Simulator(generation, workdir, Path(args.repo_root))
@@ -522,20 +636,22 @@ def main() -> None:
             "vectors.lancedb": vector_candidates(generation),
         }
         if args.json:
-            print(json.dumps(
-                {
-                    "generation": generation.name,
-                    "baseline_bytes": baseline,
-                    "candidates": {
-                        artifact: [
-                            {**vars(r), "saved": r.saved, "pct": round(r.pct, 2)}
-                            for r in results
-                        ]
-                        for artifact, results in groups.items()
+            print(
+                json.dumps(
+                    {
+                        "generation": generation.name,
+                        "baseline_bytes": baseline,
+                        "candidates": {
+                            artifact: [
+                                {**vars(r), "saved": r.saved, "pct": round(r.pct, 2)}
+                                for r in results
+                            ]
+                            for artifact, results in groups.items()
+                        },
                     },
-                },
-                indent=2,
-            ))
+                    indent=2,
+                )
+            )
         else:
             print_results(generation, groups, baseline)
             print_endstates(groups, baseline)

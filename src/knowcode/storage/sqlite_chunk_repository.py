@@ -22,6 +22,12 @@ snapshot and can never see an in-flight writer transaction. ``close()`` and
 ``load()`` drain in-flight readers through a read gate before tearing down
 connections, so an active reader never observes a closed handle.
 
+The term index is a contentless FTS5 table (``content=''`` with
+``contentless_delete=1``, storage plan D2): ``tokens_text`` is not stored, every
+mutating path writes or deletes its FTS row explicitly in the same transaction,
+and index repair is :meth:`rebuild_fts`, a re-tokenization pass over ``content``
+that replaces the ``'rebuild'`` command a contentless table cannot run.
+
 See: docs/research/knowcode-architecture-synthesis.md §3.1
      docs/engineering/adr/ (ADR 1, 2, 3, 7)
 """
@@ -42,25 +48,47 @@ from knowcode.data_models import CodeChunk
 from knowcode.errors import RepositoryClosedError
 from knowcode.storage.chunk_repository import ChunkFileReplacement, ChunkRepository
 from knowcode.utils.entity_identity import (
+    absolutize_id,
     normalize_file_identity,
+    relativize_id,
     pack_content_hash,
     unpack_content_hash,
 )
 from knowcode.utils.logger import get_logger
+from knowcode.utils.tokenizer import tokenize_code
 
 logger = get_logger(__name__)
 
 # Columns selected for every CodeChunk hydration, in the order ``_row_to_chunk``
 # unpacks them. Keep the INSERT column list in the same relative order.
 _SELECT_COLUMNS = (
-    "chunk_id, entity_id, content, tokens_text, metadata_json, embedding, "
+    "chunk_id, entity_id, content, metadata_json, embedding, "
     "embedding_dim, content_hash"
 )
+_REPO_ROOT_DDL = "CREATE TABLE IF NOT EXISTS repo_root (root TEXT NOT NULL)"
+
 _INSERT_SQL = (
     "INSERT OR REPLACE INTO chunks "
-    "(chunk_id, entity_id, content, tokens_text, metadata_json, file_path, "
+    "(chunk_id, entity_id, content, metadata_json, file_path, "
     "embedding, embedding_dim, content_hash) "
-    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+)
+
+# The FTS row is written explicitly alongside each chunk write. Resolving the
+# rowid through the unique chunk_id — rather than trusting cursor.lastrowid —
+# keeps the index correct across INSERT OR REPLACE, which hands a rewritten
+# chunk a fresh rowid.
+_FTS_INSERT_SQL = (
+    "INSERT INTO chunks_fts(rowid, tokens_text) "
+    "SELECT rowid, ? FROM chunks WHERE chunk_id = ?"
+)
+_FTS_DELETE_BY_ID_SQL = (
+    "DELETE FROM chunks_fts WHERE rowid IN "
+    "(SELECT rowid FROM chunks WHERE chunk_id = ?)"
+)
+_FTS_DELETE_BY_FILE_SQL = (
+    "DELETE FROM chunks_fts WHERE rowid IN "
+    "(SELECT rowid FROM chunks WHERE file_path = ?)"
 )
 
 
@@ -77,11 +105,16 @@ class SqliteChunkRepository(ChunkRepository):
     — without exposing a writer's open transaction to readers.
     """
 
-    SCHEMA_VERSION = 3
-    # Baseline chunk schema had no durable embedding column; it cannot be
-    # losslessly migrated without an embedding provider, so legacy v1 stores
+    SCHEMA_VERSION = 4
+    # v1 predates durable embeddings; v3 still stored tokens_text to back an
+    # external-content FTS table. Neither migrates without a rebuild, so both
     # fail closed (ADR 3 compatibility).
     LEGACY_SCHEMA_VERSION = 1
+    # The contentless_delete FTS5 option arrived in SQLite 3.43. Below it the
+    # CREATE VIRTUAL TABLE fails with "unrecognized option", which is loud but
+    # names nothing a caller can act on; this floor states the requirement
+    # (BL-13).
+    MINIMUM_SQLITE_VERSION = (3, 43, 0)
 
     def __init__(
         self,
@@ -100,6 +133,14 @@ class SqliteChunkRepository(ChunkRepository):
         self._db_path = Path(db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._configured_dimension = int(dimension) if dimension is not None else None
+
+        if sqlite3.sqlite_version_info < self.MINIMUM_SQLITE_VERSION:
+            floor = ".".join(str(part) for part in self.MINIMUM_SQLITE_VERSION)
+            raise RuntimeError(
+                f"SqliteChunkRepository needs SQLite {floor} or newer for the "
+                "contentless_delete FTS5 option; this interpreter links "
+                f"SQLite {sqlite3.sqlite_version}."
+            )
 
         # An in-memory database (``:memory:``) is per-connection, so the
         # writer/reader split would hand readers an isolated empty database.
@@ -134,6 +175,11 @@ class SqliteChunkRepository(ChunkRepository):
         self._reader_epoch = 0
 
         self._generation_counter = 0
+
+        # Ids are stored relative to this root and hydrated back to absolute
+        # on the way out, so a generation's size does not depend on where
+        # it was built (ADR 1, ADR 10). Empty until set_repo_root binds it.
+        self._repo_root = ""
 
         self._init_schema()
 
@@ -302,16 +348,16 @@ class SqliteChunkRepository(ChunkRepository):
             # it, so validate explicitly and fail closed on legacy v1.
             self._validate_existing_schema()
             self._ensure_schema_meta()
+        self._load_repo_root()
 
     def _create_schema(self) -> None:
-        """Create the full v2 schema for a fresh database."""
+        """Create the full v4 schema for a fresh database."""
         self._writer_conn.execute("""
             CREATE TABLE chunks (
                 rowid      INTEGER PRIMARY KEY AUTOINCREMENT,
                 chunk_id   TEXT    NOT NULL UNIQUE,
                 entity_id  TEXT    NOT NULL,
                 content    TEXT    NOT NULL DEFAULT '',
-                tokens_text TEXT   NOT NULL DEFAULT '',
                 metadata_json TEXT NOT NULL DEFAULT '{}',
                 file_path  TEXT    NOT NULL DEFAULT '',
                 embedding  BLOB,
@@ -329,40 +375,26 @@ class SqliteChunkRepository(ChunkRepository):
             "CREATE INDEX idx_chunks_content_hash ON chunks (content_hash)"
         )
 
-        # FTS5 external-content table backed by chunks.tokens_text.
-        # Using unicode61 tokenizer — our Python tokenizer already
-        # handles camelCase/snake_case splitting, so FTS5 only needs
-        # to split on whitespace.
+        # D2: a contentless term index. The table holds the inverted index
+        # and nothing else — no content table to mirror, no tokens_text
+        # column. contentless_delete=1 is what makes a plain DELETE legal;
+        # without it an FTS row can never be removed and incremental
+        # re-indexing silently corrupts search (BL-13). Every FTS row is
+        # written and deleted by the repository, in the same transaction as
+        # its chunk row, so no sync triggers exist. unicode61 only splits on
+        # whitespace: the Python tokenizer has already handled
+        # camelCase/snake_case splitting.
         self._writer_conn.execute("""
             CREATE VIRTUAL TABLE chunks_fts
             USING fts5(
                 tokens_text,
-                content='chunks',
-                content_rowid='rowid',
+                content='',
+                contentless_delete=1,
                 tokenize='unicode61'
             )
         """)
 
-        # Triggers to keep the FTS index in sync with the content table.
-        self._writer_conn.executescript("""
-            CREATE TRIGGER chunks_ai AFTER INSERT ON chunks BEGIN
-                INSERT INTO chunks_fts(rowid, tokens_text)
-                VALUES (new.rowid, new.tokens_text);
-            END;
-
-            CREATE TRIGGER chunks_ad AFTER DELETE ON chunks BEGIN
-                INSERT INTO chunks_fts(chunks_fts, rowid, tokens_text)
-                VALUES ('delete', old.rowid, old.tokens_text);
-            END;
-
-            CREATE TRIGGER chunks_au AFTER UPDATE ON chunks BEGIN
-                INSERT INTO chunks_fts(chunks_fts, rowid, tokens_text)
-                VALUES ('delete', old.rowid, old.tokens_text);
-                INSERT INTO chunks_fts(rowid, tokens_text)
-                VALUES (new.rowid, new.tokens_text);
-            END;
-        """)
-
+        self._writer_conn.execute(_REPO_ROOT_DDL)
         self._writer_conn.execute("CREATE TABLE schema_meta (version INTEGER NOT NULL)")
         self._writer_conn.execute(
             "INSERT INTO schema_meta (version) VALUES (?)",
@@ -382,6 +414,13 @@ class SqliteChunkRepository(ChunkRepository):
                 "semantic index with `knowcode build`; embeddings cannot be "
                 "migrated without an embedding provider."
             )
+        if "tokens_text" in columns:
+            raise ValueError(
+                f"SQLite chunk schema at {self._db_path} still stores "
+                "tokens_text (v3, before the contentless FTS index). Rebuild "
+                "the index with `knowcode build`; the term index cannot be "
+                "recreated from a column this build no longer writes."
+            )
         if "content_hash" not in columns:
             raise ValueError(
                 f"SQLite chunk schema at {self._db_path} predates the "
@@ -392,6 +431,7 @@ class SqliteChunkRepository(ChunkRepository):
 
     def _ensure_schema_meta(self) -> None:
         """Record the current schema version for an already-valid database."""
+        self._writer_conn.execute(_REPO_ROOT_DDL)
         self._writer_conn.execute(
             "CREATE TABLE IF NOT EXISTS schema_meta (version INTEGER NOT NULL)"
         )
@@ -403,6 +443,48 @@ class SqliteChunkRepository(ChunkRepository):
                 "INSERT INTO schema_meta (version) VALUES (?)",
                 (self.SCHEMA_VERSION,),
             )
+
+    # ------------------------------------------------------------------
+    # Repository root (ADR 10)
+    # ------------------------------------------------------------------
+
+    def _load_repo_root(self) -> None:
+        """Adopt the root already recorded in this database, if any."""
+        row = self._writer_conn.execute("SELECT root FROM repo_root").fetchone()
+        self._repo_root = row[0] if row else ""
+
+    def set_repo_root(self, root: str | Path) -> None:
+        """Bind this database to the repository root its ids are anchored at.
+
+        Rows written before the bind keep their absolute ids, which read back
+        unchanged: the codec strips only what it can re-add. Rebinding a
+        populated database to a different root would silently re-anchor those
+        rows, so it is refused, matching ADR 1's rule that a moved repository
+        is rebuilt rather than rewritten.
+        """
+        normalized = normalize_file_identity(root)
+        with self._write_lock:
+            current = self._writer_conn.execute("SELECT root FROM repo_root").fetchone()
+            if current and current[0] != normalized:
+                raise ValueError(
+                    f"{self._db_path} is already bound to repository root "
+                    f"{current[0]!r}; rebuild the index to anchor it at "
+                    f"{normalized!r}."
+                )
+            if not current:
+                with self._writer_conn:
+                    self._writer_conn.execute(
+                        "INSERT INTO repo_root (root) VALUES (?)", (normalized,)
+                    )
+            self._repo_root = normalized
+
+    def _store_id(self, value: str) -> str:
+        """Render a caller's absolute id in its stored, root-relative form."""
+        return relativize_id(value, self._repo_root)
+
+    def _load_id(self, value: str) -> str:
+        """Render a stored id back as the absolute id callers hold."""
+        return absolutize_id(value, self._repo_root)
 
     # ------------------------------------------------------------------
     # Embedding codec (ADR 3)
@@ -480,6 +562,23 @@ class SqliteChunkRepository(ChunkRepository):
         idx = entity_id.find("::")
         return entity_id[:idx] if idx >= 0 else entity_id
 
+    @staticmethod
+    def _fts_tokens(chunk: CodeChunk) -> str:
+        """Render a chunk's tokens in the whitespace-joined form FTS5 indexes."""
+        return " ".join(chunk.tokens) if chunk.tokens else ""
+
+    def _purge_fts_rows(self, stored_ids: list[str]) -> None:
+        """Delete the FTS rows of chunk ids about to be rewritten.
+
+        ``INSERT OR REPLACE`` hands a rewritten chunk a fresh rowid, so its
+        previous FTS row is left pointing at nothing and would keep matching
+        the old terms forever — the silent half of BL-13. Runs on the writer
+        inside the caller's transaction, before the replacement rows land.
+        """
+        self._writer_conn.executemany(
+            _FTS_DELETE_BY_ID_SQL, [(stored_id,) for stored_id in stored_ids]
+        )
+
     def _chunk_to_row(
         self,
         chunk: CodeChunk,
@@ -490,7 +589,6 @@ class SqliteChunkRepository(ChunkRepository):
         ``file_path`` defaults to the entity-id prefix; ``replace_file`` passes
         the canonical identity so a file's rows share one lookup key.
         """
-        tokens_text = " ".join(chunk.tokens) if chunk.tokens else ""
         stored_metadata = {
             key: value for key, value in chunk.metadata.items() if key != "content_hash"
         }
@@ -502,12 +600,11 @@ class SqliteChunkRepository(ChunkRepository):
         )
         embedding_blob, embedding_dim = self._encode_embedding(chunk.embedding)
         return (
-            chunk.id,
-            chunk.entity_id,
+            self._store_id(chunk.id),
+            self._store_id(chunk.entity_id),
             chunk.content,
-            tokens_text,
             metadata_json,
-            stored_path,
+            self._store_id(stored_path),
             embedding_blob,
             embedding_dim,
             pack_content_hash(chunk.metadata.get("content_hash")),
@@ -517,20 +614,21 @@ class SqliteChunkRepository(ChunkRepository):
         """Convert a database row to a CodeChunk.
 
         Expected column order:
-            chunk_id, entity_id, content, tokens_text, metadata_json,
-            embedding, embedding_dim, content_hash
+            chunk_id, entity_id, content, metadata_json, embedding,
+            embedding_dim, content_hash
+
+        ``tokens`` is an indexing-time derivation of ``content``; its durable
+        form is the FTS row itself, so a hydrated chunk carries none.
         """
         (
             chunk_id,
             entity_id,
             content,
-            tokens_text,
             metadata_json,
             embedding_blob,
             embedding_dim,
             content_hash,
         ) = row
-        tokens = tokens_text.split() if tokens_text else []
         try:
             metadata = json.loads(metadata_json) if metadata_json else {}
         except (json.JSONDecodeError, TypeError):
@@ -541,10 +639,10 @@ class SqliteChunkRepository(ChunkRepository):
             metadata["content_hash"] = unpack_content_hash(content_hash)
         embedding = self._decode_embedding(embedding_blob, embedding_dim)
         return CodeChunk(
-            id=chunk_id,
-            entity_id=entity_id,
+            id=self._load_id(chunk_id),
+            entity_id=self._load_id(entity_id),
             content=content,
-            tokens=tokens,
+            tokens=[],
             embedding=embedding,
             metadata=metadata,
         )
@@ -562,27 +660,36 @@ class SqliteChunkRepository(ChunkRepository):
                     "SqliteChunkRepository is closed; open a new instance."
                 )
             with self._writer_conn:
+                self._purge_fts_rows([row[0]])
                 self._writer_conn.execute(_INSERT_SQL, row)
+                self._writer_conn.execute(
+                    _FTS_INSERT_SQL, (self._fts_tokens(chunk), row[0])
+                )
 
     def add_batch(self, chunks: list[CodeChunk]) -> None:
         """Insert multiple chunks in a single transaction."""
         if not chunks:
             return
         rows = [self._chunk_to_row(chunk) for chunk in chunks]
+        fts_rows = [
+            (self._fts_tokens(chunk), row[0]) for chunk, row in zip(chunks, rows)
+        ]
         with self._write_lock:
             if self._closed:
                 raise RepositoryClosedError(
                     "SqliteChunkRepository is closed; open a new instance."
                 )
             with self._writer_conn:
+                self._purge_fts_rows([row[0] for row in rows])
                 self._writer_conn.executemany(_INSERT_SQL, rows)
+                self._writer_conn.executemany(_FTS_INSERT_SQL, fts_rows)
 
     def get(self, chunk_id: str) -> Optional[CodeChunk]:
         """Fetch a single chunk by ID (lazy, single-row SELECT)."""
         with self._read_lease() as conn:
             cursor = conn.execute(
                 f"SELECT {_SELECT_COLUMNS} FROM chunks WHERE chunk_id = ?",
-                (chunk_id,),
+                (self._store_id(chunk_id),),
             )
             row = cursor.fetchone()
         if row is None:
@@ -594,7 +701,7 @@ class SqliteChunkRepository(ChunkRepository):
         with self._read_lease() as conn:
             cursor = conn.execute(
                 f"SELECT {_SELECT_COLUMNS} FROM chunks WHERE entity_id = ?",
-                (entity_id,),
+                (self._store_id(entity_id),),
             )
             rows = cursor.fetchall()
         return [self._row_to_chunk(row) for row in rows]
@@ -662,15 +769,23 @@ class SqliteChunkRepository(ChunkRepository):
                     "SqliteChunkRepository is closed; open a new instance."
                 )
             with self._writer_conn:
+                stored_path = self._store_id(file_identity)
                 cursor = self._writer_conn.execute(
                     "SELECT chunk_id FROM chunks WHERE file_path = ?",
-                    (file_identity,),
+                    (stored_path,),
                 )
-                removed_ids = [row[0] for row in cursor]
+                removed_ids = [self._load_id(row[0]) for row in cursor]
 
+                # The FTS rows go first: they resolve their rowids through
+                # the chunk rows they belong to. A plain DELETE is legal only
+                # under contentless_delete=1 (BL-13).
+                self._writer_conn.execute(
+                    _FTS_DELETE_BY_FILE_SQL,
+                    (stored_path,),
+                )
                 self._writer_conn.execute(
                     "DELETE FROM chunks WHERE file_path = ?",
-                    (file_identity,),
+                    (stored_path,),
                 )
                 return removed_ids
 
@@ -683,11 +798,14 @@ class SqliteChunkRepository(ChunkRepository):
 
         Runs as one writer transaction: the previous chunks for the normalized
         ``file_path`` are deleted and the new ``chunks`` inserted together, so
-        a failure between the two leaves the prior generation searchable. FTS
-        triggers keep the sparse index consistent within the same transaction.
+        a failure between the two leaves the prior generation searchable. Each
+        chunk write carries its FTS row explicitly, in the same transaction.
         """
         file_identity = normalize_file_identity(file_path)
         rows = [self._chunk_to_row(chunk, file_identity) for chunk in chunks]
+        fts_rows = [
+            (self._fts_tokens(chunk), row[0]) for chunk, row in zip(chunks, rows)
+        ]
 
         with self._write_lock:
             if self._closed:
@@ -695,20 +813,26 @@ class SqliteChunkRepository(ChunkRepository):
                     "SqliteChunkRepository is closed; open a new instance."
                 )
             with self._writer_conn:
+                stored_path = self._store_id(file_identity)
                 previous = [
-                    row[0]
+                    self._load_id(row[0])
                     for row in self._writer_conn.execute(
                         "SELECT chunk_id FROM chunks WHERE file_path = ?",
-                        (file_identity,),
+                        (stored_path,),
                     )
                 ]
                 self._writer_conn.execute(
+                    _FTS_DELETE_BY_FILE_SQL,
+                    (stored_path,),
+                )
+                self._writer_conn.execute(
                     "DELETE FROM chunks WHERE file_path = ?",
-                    (file_identity,),
+                    (stored_path,),
                 )
                 if rows:
                     self._commit_rows(rows)
-                committed = tuple(row[0] for row in rows)
+                    self._writer_conn.executemany(_FTS_INSERT_SQL, fts_rows)
+                committed = tuple(self._load_id(row[0]) for row in rows)
 
             self._generation_counter += 1
             generation_metadata: dict[str, Any] = {
@@ -744,7 +868,7 @@ class SqliteChunkRepository(ChunkRepository):
                 (pack_content_hash(content_hash),),
             )
             row = cursor.fetchone()
-        return row[0] if row else None
+        return self._load_id(row[0]) if row else None
 
     def get_all_file_paths(self) -> set[str]:
         """Return a set of all file paths currently in the repository."""
@@ -753,7 +877,7 @@ class SqliteChunkRepository(ChunkRepository):
                 "SELECT DISTINCT file_path FROM chunks WHERE file_path != ''"
             )
             rows = cursor.fetchall()
-        return {row[0] for row in rows}
+        return {self._load_id(row[0]) for row in rows}
 
     def clear(self) -> None:
         """Remove all chunks and reset the FTS index."""
@@ -764,9 +888,39 @@ class SqliteChunkRepository(ChunkRepository):
                 )
             with self._writer_conn:
                 self._writer_conn.execute("DELETE FROM chunks")
-                # Rebuild FTS index after bulk delete.
-                self._writer_conn.execute(
-                    "INSERT INTO chunks_fts(chunks_fts) VALUES ('rebuild')"
+                # A plain DELETE, not the 'rebuild' command the external-content
+                # design used: a contentless table cannot run 'rebuild', and
+                # after clearing the chunks there is nothing left to rebuild
+                # from anyway.
+                self._writer_conn.execute("DELETE FROM chunks_fts")
+
+    def rebuild_fts(self) -> None:
+        """Rebuild the term index by re-tokenizing stored content.
+
+        The replacement for the one-statement ``'rebuild'`` command a
+        contentless FTS5 table cannot run: clears the index and re-derives
+        every row from ``chunks.content`` through ``tokenize_code`` — the same
+        derivation the chunker used, so the rebuilt index matches the one the
+        write path produced. One tokenization pass over the corpus, no source
+        tree access, no network. Holds until Phase F removes ``content``;
+        after that, repair is a re-index.
+        """
+        with self._write_lock:
+            if self._closed:
+                raise RepositoryClosedError(
+                    "SqliteChunkRepository is closed; open a new instance."
+                )
+            with self._writer_conn:
+                self._writer_conn.execute("DELETE FROM chunks_fts")
+                rows = self._writer_conn.execute(
+                    "SELECT rowid, content FROM chunks"
+                ).fetchall()
+                self._writer_conn.executemany(
+                    "INSERT INTO chunks_fts(rowid, tokens_text) VALUES (?, ?)",
+                    (
+                        (rowid, " ".join(tokenize_code(content)))
+                        for rowid, content in rows
+                    ),
                 )
 
     def count(self) -> int:
@@ -784,7 +938,7 @@ class SqliteChunkRepository(ChunkRepository):
         with self._read_lease() as conn:
             cursor = conn.execute(
                 "SELECT rowid FROM chunks WHERE chunk_id = ?",
-                (chunk_id,),
+                (self._store_id(chunk_id),),
             )
             row = cursor.fetchone()
         return row[0] if row is not None else None
@@ -797,7 +951,7 @@ class SqliteChunkRepository(ChunkRepository):
                 (faiss_idx,),
             )
             row = cursor.fetchone()
-        return row[0] if row is not None else None
+        return self._load_id(row[0]) if row is not None else None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -934,7 +1088,8 @@ class SqliteChunkRepository(ChunkRepository):
                 ).fetchall()
             if not rows:
                 return
-            for rowid, chunk_id, blob, dimension in rows:
+            for rowid, stored_chunk_id, blob, dimension in rows:
+                chunk_id = self._load_id(stored_chunk_id)
                 after = rowid
                 embedding = self._decode_embedding(blob, dimension)
                 if embedding is not None:

@@ -797,7 +797,7 @@ corrected corpus — not 19.9 MB. Plan against the composed figures in §12.
 | Item | Change | Measured in isolation |
 |---|---|---:|
 | **D1** | Vector index becomes a rebuildable cache: not published, not retained, built on first semantic query or lazily at load | 28.43 MB |
-| **D2** | `tokens_text` folded into a contentless FTS5 table (`content=''`) | 5.64 MB |
+| **D2** | `tokens_text` folded into a contentless FTS5 table (`content=''`, `contentless_delete=1`; BL-13) | 4.64 MB re-measured |
 | **D3** | `entities.source_code` resolved from disk via `file_path` + `line_start`/`line_end`, verified against `content_hash` | 4.77 MB |
 
 **`entities.metadata_json` is retained (DR-1). Do not strip `behavior` or
@@ -813,9 +813,12 @@ corrected corpus — not 19.9 MB. Plan against the composed figures in §12.
   copies it. `src/knowcode/retrieval/search_engine.py` — for corpora under the
   exhaustive-scan threshold, skip the ANN index entirely (§5.3).
 - D2: `src/knowcode/storage/sqlite_chunk_repository.py` — the three triggers
-  (`chunks_ai`, `chunks_ad`, `chunks_au`) currently mirror `tokens_text` into
-  the FTS table; with `content=''` they must insert the tokenized text directly
-  and the column is dropped. DDL in §15.
+  (`chunks_ai`, `chunks_ad`, `chunks_au`) are removed; every mutating path
+  writes or deletes its FTS row explicitly in the same transaction, a plain
+  `DELETE` being exactly what `contentless_delete=1` buys (BL-13). The column
+  is dropped, schema v4 fails closed on v3 databases, a runtime guard declares
+  the SQLite 3.43 floor, and `rebuild_fts()` re-tokenizes from `content` as
+  the replacement for the retired `'rebuild'` statement. DDL in §15.
 - D3: `src/knowcode/storage/sqlite_knowledge_store.py` (drop the column),
   `src/knowcode/service.py:1657` (the one reader), and a new source resolver.
   `src/knowcode/analysis/live_source_loader.py` already exists — check whether
@@ -838,6 +841,9 @@ corrected corpus — not 19.9 MB. Plan against the composed figures in §12.
   rebuild, returning the same top-10 as one with the index present.
 - Unit: FTS query results are identical before and after D2 across a corpus
   exercising identifier splitting (`snake_case`, `camelCase`, dotted paths).
+- Unit (the BL-13 pin): a deleted chunk's terms stop matching, and a replaced
+  file's old terms stop matching while its new terms start. Asserting only
+  that new chunks are findable passes on a broken build.
 - Unit: D3 returns identical source for an unmodified file; returns `None` and
   logs when the file is modified (hash mismatch) or absent.
 - Integration: `knowcode build` → published generation contains no
@@ -1078,19 +1084,29 @@ UPDATE chunks SET content_hash = unhex(json_extract(metadata_json, '$.content_ha
 CREATE INDEX idx_chunks_content_hash ON chunks(content_hash);
 -- then strip '$.content_hash' from every metadata_json payload
 
--- D2: contentless FTS5; tokens_text stops being stored.
+-- D2: contentless FTS5; tokens_text stops being stored. contentless_delete=1
+-- (SQLite 3.43+) is not optional: without it a contentless table refuses a
+-- plain DELETE, and the 'delete' command needs the exact original tokens,
+-- which this very migration removes (BL-13).
 DROP TABLE chunks_fts;
-CREATE VIRTUAL TABLE chunks_fts USING fts5(tokens_text, content='');
+CREATE VIRTUAL TABLE chunks_fts USING fts5(tokens_text, content='', contentless_delete=1);
 INSERT INTO chunks_fts(rowid, tokens_text) SELECT rowid, tokens_text FROM chunks;
 ALTER TABLE chunks DROP COLUMN tokens_text;
 ```
 
-The three triggers (`chunks_ai`, `chunks_ad`, `chunks_au`) currently read
-`new.tokens_text` / `old.tokens_text` from the table. With the column gone they
-must be rewritten to tokenize on the fly, or the FTS row must be written
-explicitly by the repository alongside each chunk write. Prefer the latter —
-explicit writes are easier to reason about than triggers that call into
-application tokenization.
+The three triggers (`chunks_ai`, `chunks_ad`, `chunks_au`) are dropped rather
+than rewritten. With the column gone they can neither read `old.tokens_text`
+for a delete nor call into application tokenization for an insert, so the FTS
+row is written explicitly by the repository alongside each chunk write and
+removed with a plain `DELETE FROM chunks_fts WHERE rowid ...` — legal only
+under `contentless_delete=1` — inside the same transaction as the chunk
+delete. Every mutating repository path owns its FTS row.
+
+`INSERT INTO chunks_fts(chunks_fts) VALUES ('rebuild')` is not available
+against a contentless table, so index repair becomes an explicit
+re-tokenization pass over `chunks.content`, carried by the repository as
+`rebuild_fts()`. While `content` is still stored — until Phase F — that pass
+reconstructs the whole term index without touching the source tree.
 
 C1 rewrites `chunk_id`, `entity_id`, and `file_path` to repo-relative form. It
 is a data change, not a DDL change.
@@ -1230,6 +1246,82 @@ record the result here.
 ---
 
 ## 17. Execution Log
+
+### Phase C1 — shipped 2026-08-29
+
+Repo-relative id storage. Phase C is complete.
+
+**The design departs from §11, and the departure is the point.** §11 calls C1 a
+cross-cutting rename reaching every parser, `GraphBuilder`, and retrieval. ADR
+0001 chose absolute ids precisely to avoid that, and a relative id inverts the
+`Path(file_identity).is_absolute()` test `classify_endpoint_id` uses to
+recognise an internal endpoint. C2 had already set a better precedent: integers
+never leave the store. C1 follows it. Ids are absolute everywhere above the
+storage layer, and the two stores encode them relative to a root they record.
+The bytes are on disk, so the saving is the same. ADR 0010 has the decision.
+
+**C1 is worth 3.15 MB at a real root, not the 3.86 MB recorded after C2.** The
+`knowledge.db` half reproduced exactly, at 1.63 MB against the recorded 1.62.
+The `chunks.db` half is 1.52 MB, not 2.24. The recorded figure was measured
+where the root was long enough to make each stripped occurrence worth several
+times what it is worth at a 29-character root.
+
+**A simulated UPDATE fires the FTS triggers, and that hid two thirds of the
+saving.** `chunks_fts` is an external-content FTS5 table over `chunks`, so
+rewriting an id column makes the three sync triggers delete and reinsert every
+row. `chunks_fts_data` grew 1,327,104 bytes and the measurement read 0.25 MB.
+`tokens_text` holds no paths, so the real change never touches FTS. Suspending
+the triggers for the rewrite moved the same measurement to 1.52 MB. A
+simulation must not perturb a structure the real change leaves alone.
+
+**`scripts/storage_simulate.py` is stale for post-C2 artifacts.** Its
+`relative_paths` candidate for `knowledge.db` still strips
+`relationships.source_id` and `relationships.target_id`, which C2 turned into
+integer codebook keys, and it never touches `eid.entity_id`, where 17,024 of
+the 22,374 rows holding root text now live. Anyone planning D or E from its
+output is reading a number that no longer describes the artifact. Filed as
+BL-12.
+
+**Measured by paired build, same `git archive HEAD` extraction, two roots:**
+
+| | 29-char root | 134-char root |
+|---|---:|---:|
+| `knowledge.db` before | 15,167,488 | 21,000,192 |
+| `knowledge.db` after | 13,459,456 | 13,459,456 |
+| `chunks.db` before | 44,494,848 | 50,053,120 |
+| `chunks.db` after | 42,950,656 | 43,114,496 |
+| generation before | 59,662,336 | 71,053,312 |
+| generation after | **56,410,112** | **56,573,952** |
+
+**Build location no longer sets the price.** The two roots differed by
+11,390,976 bytes, 19.1% of a generation, on identical content. They now differ
+by 163,840, or 0.29%. `knowledge.db` is byte-identical between them. The
+residue is `metadata_json`, which carries a path in 1,017 chunk rows and is
+data rather than identity, so the codec leaves it alone. This, not the 3.15 MB,
+is what C1 was for.
+
+**The manifest proves the encoding is lossless.** `read_entity_ids` and
+`read_chunk_ids` hydrate through the recorded root, so a manifest digests ids
+in the absolute form callers hold. Rebuilding the shallow extraction produced
+the same `entity_ids` digest, the same `chunk_ids` digest, and the same counts
+as the build before the change. A digest that survives a re-encoding is a
+stronger witness than any row count, and unlike a count it cannot agree with
+itself the way BL-8 describes.
+
+**Two mutation probes, both verified live and verified removed.** The first
+stopped relativizing the `eid` codebook only, which is the miss C2's shape
+invites, and 11 of 12 pins went red. The second stopped relativizing
+`chunks.file_path`, a third of that artifact's saving, and three pins went red
+including the one that reads the stored column directly. Each probe was grepped
+for in the file before the run and grepped for again after restoring from a
+scratch copy, because a probe verified only by its own diff is not verified.
+
+**Verified against the built artifact, not only the fixtures.** Every id column
+in the published generation is relative, all 17,217 `eid` rows included, and
+the graph reads back with 5,350 entities and 23,858 edges across seven kinds.
+All three endpoint shapes round-trip, including the 14,480 `unresolved::` ids
+whose percent-encoded path sits in the middle of the id rather than at its
+front.
 
 ### Phase C2 — shipped 2026-08-29
 

@@ -115,6 +115,50 @@ def classify_endpoint_id(endpoint_id: str) -> EndpointKind:
     return EndpointKind.INTERNAL
 
 
+def _root_prefix(root: str) -> str:
+    """Render ``root`` as the exact prefix an anchored id carries."""
+    return root.rstrip("/") + "/" if root else ""
+
+
+def relativize_id(value: str, root: str) -> str:
+    """Strip ``root`` from the file component of a canonical id.
+
+    The inverse of :func:`absolutize_id`. Ids anchored outside ``root`` keep
+    their absolute path, which is what makes the pair total: a stored
+    component is relative exactly when it is not absolute.
+    """
+    prefix = _root_prefix(root)
+    if not prefix:
+        return value
+    if value.startswith("external::"):
+        return value
+    if value.startswith("unresolved::"):
+        parts = value.split("::")
+        if len(parts) >= 3:
+            encoded = quote(prefix, safe="/._-")
+            if parts[2].startswith(encoded):
+                parts[2] = parts[2][len(encoded) :]
+                return "::".join(parts)
+        return value
+    return value[len(prefix) :] if value.startswith(prefix) else value
+
+
+def absolutize_id(value: str, root: str) -> str:
+    """Restore ``root`` onto the file component of a stored id."""
+    prefix = _root_prefix(root)
+    if not prefix:
+        return value
+    if value.startswith("external::"):
+        return value
+    if value.startswith("unresolved::"):
+        parts = value.split("::")
+        if len(parts) >= 3 and not Path(parts[2]).is_absolute():
+            parts[2] = quote(prefix, safe="/._-") + parts[2]
+            return "::".join(parts)
+        return value
+    return value if Path(value).is_absolute() else prefix + value
+
+
 def canonicalize_source_snippet(source: str) -> str:
     """Normalize source text so semantically identical snippets hash consistently."""
     normalized = source.replace("\r\n", "\n").replace("\r", "\n")

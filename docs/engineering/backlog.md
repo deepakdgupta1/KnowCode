@@ -58,10 +58,16 @@ day the defect is fixed and the marker has to come off.
 
 **Deferred on purpose.** The honest fix is to give module-scoped symbols the
 scope prefix ADR 1 already describes, which changes every entity id in the
-index and touches all nine parsers. Phase C already rewrites id encoding, so
-that is where it costs least. Do not paper over it with a reserved `::module`
-token; ADR 1 rules out ad hoc internal namespaces, and BL-6 is the evidence
-that inventing one produces ids nothing else agrees with.
+index and touches all nine parsers. Do not paper over it with a reserved
+`::module` token; ADR 1 rules out ad hoc internal namespaces, and BL-6 is the
+evidence that inventing one produces ids nothing else agrees with.
+
+**This item no longer has a carrier.** It was deferred to Phase C on the
+premise that Phase C rewrites id encoding anyway. C1 shipped instead as a
+storage-layer codec (ADR 0010): ids are unchanged above the store, and only
+their stored form is relative. Nothing in Phase C touches how a qualified name
+is built, so BL-9 now costs what it costs on its own. Size it as a parser
+change, not as a rider on storage work.
 
 ### BL-10 - A Vue file has no entity standing for the file itself
 
@@ -136,6 +142,212 @@ every generation must rebuild. Phase C already bumped `Indexer.SCHEMA_VERSION`
 once for C5, and Phase E revisits embedding policy, which is the same reuse
 path. Doing it there costs one rebuild instead of two. `pack_content_hash`
 already packs both widths, so the storage layer needs no further change.
+
+### BL-12 - The storage simulator models a pre-C2 knowledge.db
+
+**Severity:** Medium. **Found:** 2026-08-29, measuring what C1 was worth before
+implementing it.
+
+`scripts/storage_simulate.py` is the tool the storage plan's per-item estimates
+come from, and its `knowledge.db` candidates no longer describe the artifact.
+`knowledge_candidates.relative_paths` strips a root prefix from
+`relationships.source_id` and `relationships.target_id`, which C2 turned into
+integer codebook keys, and it never touches `eid.entity_id`. In the current
+graph `eid` holds 17,024 of the 22,374 rows carrying root text, so the
+candidate misses three quarters of what it claims to measure while running a
+`REPLACE` against two integer columns.
+
+Its `chunks.db` candidates have a second problem. Rewriting an id column with
+`UPDATE` fires the three `chunks_fts` sync triggers, which rebuild FTS segments
+and grew `chunks_fts_data` by 1,327,104 bytes in the C1 measurement. Any
+candidate that rewrites a `chunks` column reports a saving reduced by that
+growth. `chunking_projection.py` already drops the triggers before composing;
+the simulator does not.
+
+Reproduce: run the simulator against a post-C2 generation and compare its
+`relative paths in entity ids and edge keys` row against a rewrite that strips
+`entities.entity_id`, `entities.file_path`, and `eid.entity_id` with the FTS
+triggers suspended. The Phase C1 execution log records both numbers.
+
+**Consequence.** D and E have not been re-measured since C2, C3, C4, C5, and C1
+landed, and §11's estimates for them predate all five. Fix the simulator before
+sizing either.
+
+### BL-14 - Phase F removes the only backing store for exact search
+
+**Severity:** Medium today, because F has not shipped. High the day it does.
+**Found:** 2026-08-30, tracing what D2 and F cost search and retrieval.
+
+§11 scopes Phase F as replacing `chunks.content` with byte-range descriptors,
+and names two consumers to migrate, `reranker.py:154` and `:217`. Both parts
+understate it. BL-13 covers the separate defect in D2; the two phases also
+interact, and that interaction is recorded there.
+
+**Exact search has no other implementation.**
+`ExactQueryEngine.search_scored` (`src/knowcode/retrieval/exact_query_engine.py`)
+calls `ChunkRepository.search_exact`, which is
+`SELECT ... FROM chunks WHERE content LIKE ?`. Remove the column and the mode
+has nothing behind it. It is not a corner feature: a quoted query routes to it
+in `src/knowcode/retrieval/orchestrator.py`, which sets
+`retrieval_mode = "exact"`.
+
+**FTS is not a drop-in replacement.** `chunks_fts` uses the `unicode61`
+tokenizer, so it matches whole tokens. `LIKE '%...%'` matches a literal
+substring anywhere, including inside an identifier. A search for a fragment such
+as `repo.search_ex` is answerable today and is not answerable by a phrase query.
+Any replacement plane has to state which of the two semantics it offers.
+
+**The blast radius is five repository methods, not two call sites.**
+`_SELECT_COLUMNS` in `src/knowcode/storage/sqlite_chunk_repository.py` includes
+`content`, and it is shared by `get`, `get_by_entity`, `search_by_tokens`,
+`search_exact`, and `get_all`. Every chunk read path selects the column, so
+each one needs the resolver, not only the two reranker lines.
+
+Reproduce, against any generation:
+
+```python
+import shutil, sqlite3
+from pathlib import Path
+from knowcode.storage.sqlite_chunk_repository import SqliteChunkRepository
+from knowcode.retrieval.exact_query_engine import ExactQueryEngine
+
+shutil.copy(GEN / "chunks.db", DST)
+con = sqlite3.connect(DST)
+with con:
+    for (n,) in con.execute(
+            "SELECT name FROM sqlite_master WHERE type='trigger'").fetchall():
+        con.execute(f"DROP TRIGGER {n}")
+    con.execute("ALTER TABLE chunks DROP COLUMN content")
+con.close()
+
+engine = ExactQueryEngine(SqliteChunkRepository(DST))
+engine.search_scored('"def rebuild_vector_plane"', limit=5)
+```
+
+Returns one hit before the column is dropped. Afterwards it raises
+`sqlite3.OperationalError: no such column: content`. The failure is at least
+loud, which is the one piece of good news here.
+
+**It weakens the argument Phase E rests on.** §7 justifies dropping vectors for
+small chunks by saying they stay reachable through the exact, path, and FTS
+planes. F removes the exact plane. E and F therefore have to be argued together
+rather than sized independently, because together they take two of the three
+legs out from under a small chunk.
+
+**A second failure mode arrives with the resolver.** F fails closed, returning
+nothing when a file has changed. The FTS index still holds that chunk's terms,
+so a modified file yields search hits whose content resolves to nothing. Search
+reports a hit and display has nothing to show. Today the same case returns a
+stale snippet, which §11 argues is worse. Both are defects; the trade should be
+stated rather than assumed.
+
+**Measured retrieval cost, so the tradeoff is not guessed.** Resolving chunk
+text from disk with hash verification, warm page cache, against the current
+column read:
+
+| Candidates | Distinct files | Column | From disk | Multiple |
+|---:|---:|---:|---:|---:|
+| 10 | 10 | 0.01 ms | 0.15 ms | 15x |
+| 50 | 43 | 0.03 ms | 0.61 ms | 21x |
+| 100 | 79 | 0.07 ms | 1.21 ms | 18x |
+
+The multiple is large and the absolute cost is small, so latency is not the
+argument against F on a warm cache. The cost is dominated by `open`, not by
+bytes read: seeking to a byte range rather than reading whole files moved 100
+candidates only from 1.57 ms to 1.21 ms, because the query still opens 79
+files. A cold page cache and a network filesystem were **not** measured, and
+both are strictly worse.
+
+**Before F ships it needs:** a replacement exact-match plane with stated
+semantics, a decision on what a hit with unresolvable content renders as, a
+cold-cache and network-filesystem measurement, and the resolver threaded
+through all five read paths rather than the two the plan names. Sequence it
+after that work, not before, or quoted queries stop working in the window
+between.
+
+### BL-13 - Phase D2's contentless FTS table cannot delete a chunk
+
+**Severity:** Medium today, because D2 has not shipped. High the day it ships as
+§15 specifies. **Found:** 2026-08-30, listing the downsides of the pending
+storage phases.
+
+§15's DDL for D2 creates the replacement index as
+`fts5(tokens_text, content='')` and then drops `chunks.tokens_text`. A
+contentless FTS5 table declared that way cannot delete a row. A plain `DELETE`
+is refused, and the `'delete'` command requires the caller to supply the exact
+original tokens. D2 removes the column those tokens live in, so no caller can
+supply them.
+
+That breaks `remove_by_file` and `replace_file` in
+`src/knowcode/storage/sqlite_chunk_repository.py`, which are the watch and
+incremental-build paths, not a rare corner.
+
+**The failure is silent in one direction, which is the part that matters.** A
+`'delete'` carrying the wrong tokens is accepted without error and leaves the
+row matching its old terms. A stale chunk therefore keeps answering FTS queries
+after the file that produced it has been re-indexed, and nothing raises.
+
+§15 anticipates half of this. It notes the three triggers read
+`new.tokens_text`/`old.tokens_text` and says to tokenize on the fly or have the
+repository write the FTS row explicitly. Both answers address INSERT. Neither
+addresses DELETE, because the problem there is not where the text comes from,
+it is that the text is gone.
+
+Reproduce, on the SQLite this project already ships against (3.50.4):
+
+```python
+import sqlite3
+
+con = sqlite3.connect(":memory:")
+con.execute("CREATE VIRTUAL TABLE t USING fts5(txt, content='')")
+con.execute("INSERT INTO t(rowid, txt) VALUES (1, 'alpha beta')")
+try:
+    con.execute("DELETE FROM t WHERE rowid = 1")
+except sqlite3.OperationalError as exc:
+    print("DELETE:", exc)
+con.execute("INSERT INTO t(t, rowid, txt) VALUES ('delete', 1, 'wrong text')")
+print("still matching after a wrong-text delete:",
+      con.execute("SELECT count(*) FROM t WHERE t MATCH 'alpha'").fetchone()[0])
+```
+
+Prints `DELETE: cannot DELETE from contentless fts5 table: t` and then
+`still matching after a wrong-text delete: 1`.
+
+**The fix is one option in the DDL.** `contentless_delete=1`, added in SQLite
+3.43, makes a plain `DELETE` work and makes the `'delete'` command an error
+rather than a silent no-op. Declare the table as
+`fts5(tokens_text, content='', contentless_delete=1)` and let the delete
+triggers issue an ordinary `DELETE`.
+
+That raises the minimum SQLite this project needs, and nothing declares one
+today. No shipped code under `src/` uses a version-gated feature: `DROP COLUMN`
+appears only in `scripts/storage_simulate.py`,
+`scripts/chunking_projection.py`, and the plan's own DDL for D2 and D3, which
+would imply 3.35 once those ship. `contentless_delete=1` needs 3.43. Whoever
+ships D2 should declare that floor explicitly. The good news is that this one
+fails loudly: FTS5 rejects an option it does not know at
+`CREATE VIRTUAL TABLE` time with `unrecognized option: "contentless_delete"`,
+so an older runtime refuses to build the index rather than quietly building a
+broken one.
+
+**Also note what contentless mode costs beyond deletion.** Repairing a damaged
+FTS index today is one statement, `INSERT INTO chunks_fts(chunks_fts) VALUES
+('rebuild')`, measured at **0.04 s** over 6,620 chunks and 3.2 MB of tokens. A
+contentless table cannot do that, so recovery would re-tokenize every chunk
+from `content` instead.
+
+Phase F then removes `content` as well, and the two together are worse than
+either alone. With both landed the text lives in neither column, so repairing
+the term index means re-reading, re-parsing, re-chunking and re-tokenizing every
+source file, which is the whole indexing pipeline minus embeddings. The change
+that matters is not the extra seconds. **Recovery becomes partial.** Only files
+that still exist and still match their stored hash can be reconstructed, and
+nothing in the schema can represent a chunk that is known to have existed and
+cannot be rebuilt. Sequence D2 and F with that in mind, and see BL-14.
+
+Verifying D2 needs a pin that deletes a chunk and then asserts the FTS index no
+longer matches its terms. Asserting only that the insert path still finds new
+chunks passes on a broken build.
 
 ### BL-7 - Timing-sensitive tests flake under concurrent load
 

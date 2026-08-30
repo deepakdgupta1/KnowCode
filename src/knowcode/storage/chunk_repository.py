@@ -116,6 +116,15 @@ class ChunkRepository(ABC):
         """
         pass
 
+    def set_repo_root(self, root: str | Path) -> None:
+        """Anchor stored ids at ``root`` so they need not carry it.
+
+        Called once, before the first write, by whoever knows which tree is
+        being indexed. The default is a no-op: a repository that keeps no file
+        of its own saves nothing by shortening what it holds in memory.
+        """
+        pass
+
     def compact(self) -> None:
         """Squeeze the stored form down to what the rows actually need.
 

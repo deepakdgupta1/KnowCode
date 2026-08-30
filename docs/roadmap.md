@@ -249,7 +249,7 @@ its §17 is the running execution log.
 depends on P1, because it narrows the semantic candidate set and may only ship
 behind a measured recall gate.
 
-**Status:** Phases D1, A2 and B shipped 2026-08-29. D1 stopped publishing the
+**Status:** Phases D1, A2, B and all of C shipped 2026-08-29. D1 stopped publishing the
 ANN index and made it a plane rebuilt from the durable embeddings in
 `chunks.db`, worth 32.31 MB, with retrieval verified unchanged on 6,874 vectors
 as identical results, identical top-25 vector ids, and a maximum score delta of
@@ -259,7 +259,10 @@ B-tree repacking rather than free pages, which is why the plan's free-page
 estimate read 87% low. B fixed the retrieval defects: prose coverage went from
 41.6% to 95.7%, all 55 markdown files now index where 17 were absent, no chunk
 points at an entity that does not exist where 495,985 bytes did, and the
-generation fell 2.18 MB despite indexing 2.3 times as much prose.
+generation fell 2.18 MB despite indexing 2.3 times as much prose. C
+re-encoded the artifacts without changing what they hold, worth 10.0 MB, and
+its last item made a generation's size independent of the directory it was
+built in.
 
 **Work, in order:**
 
@@ -279,9 +282,19 @@ generation fell 2.18 MB despite indexing 2.3 times as much prose.
 2. ~~**`VACUUM` before the manifest is digested.**~~ Shipped 2026-08-29 as
    Phase A2, 3.79 MB. Sizing it revealed that the manifest cannot witness row
    loss in either database, filed as [BL-8](engineering/backlog.md).
-3. **Lossless encoding.** Repository-relative ids, integer-keyed relationships
-   with a kind codebook, and binary content hashes. This also makes a generation
-   portable, so a CI-cached index can be opened from a different checkout path.
+3. ~~**Lossless encoding.**~~ Shipped 2026-08-29 as Phase C, 10.0 MB across
+   both artifacts. Edges hold three integers against two codebooks (C2, 6.0 MB),
+   an entity digest is 32 raw bytes in a column rather than hex inside JSON
+   (C3, C4), a chunk digest is a first-class column (C5), and ids are stored
+   relative to a recorded repository root (C1, 3.10 MB). C1 is the reason a
+   generation no longer costs more when it is built at a deeper path: two builds
+   of one corpus differed by 10.9 MB, 19%, and now differ by 0.16 MB. It does
+   not make a generation portable. Ids stay absolute above the storage layer and
+   resolve against the root recorded in the database, so moving a repository
+   still requires a rebuild, as ADR 1 has always said. Sizing C1 found that the
+   storage simulator no longer models a post-C2 `knowledge.db`
+   ([BL-12](engineering/backlog.md)), and it removed the carrier BL-9 had been
+   deferred onto.
 4. **Stop persisting the rest of the derived data.** `tokens_text` folds into a
    contentless FTS table; `entities.source_code` resolves from disk against a
    verified content hash, failing closed rather than serving stale source.

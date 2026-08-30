@@ -56,6 +56,7 @@ from storage_simulate import (  # noqa: E402
     CONTENTLESS_FTS,
     DROP_TRIGGERS,
     PRUNE_MIN_CONTENT_BYTES,
+    _has_column,
     _slim_metadata,
     _strip_prefix,
 )
@@ -133,8 +134,7 @@ def read_corpus(chunks_db: Path) -> Corpus:
     con = sqlite3.connect(f"file:{chunks_db}?mode=ro&immutable=1", uri=True)
     try:
         rows = con.execute(
-            "SELECT chunk_id, entity_id, file_path, content, metadata_json "
-            "FROM chunks"
+            "SELECT chunk_id, entity_id, file_path, content, metadata_json FROM chunks"
         ).fetchall()
     finally:
         con.close()
@@ -147,8 +147,14 @@ def read_corpus(chunks_db: Path) -> Corpus:
             metadata = {}
         kind = metadata.get("kind") or metadata.get("type") or "(untyped)"
         corpus.chunks.append(
-            Chunk(chunk_id, entity_id, file_path, content or "", str(kind),
-                  metadata_json or "{}")
+            Chunk(
+                chunk_id,
+                entity_id,
+                file_path,
+                content or "",
+                str(kind),
+                metadata_json or "{}",
+            )
         )
     return corpus
 
@@ -192,8 +198,14 @@ def project(published: Corpus, repo_root: Path) -> Corpus:
         shell = _class_shell(text)
         if shell:
             projected.chunks.append(
-                Chunk(f"{entity_id}::0", entity_id, class_file[entity_id],
-                      shell, "class", class_metadata[entity_id])
+                Chunk(
+                    f"{entity_id}::0",
+                    entity_id,
+                    class_file[entity_id],
+                    shell,
+                    "class",
+                    class_metadata[entity_id],
+                )
             )
 
     prose_files = sorted(
@@ -208,12 +220,22 @@ def project(published: Corpus, repo_root: Path) -> Corpus:
             continue
         for prose in chunker.chunk_file(path):
             projected.chunks.append(
-                Chunk(prose.id, prose.section_id, file_path, prose.content,
-                      "prose", json.dumps(
-                          {"type": "prose", "content_hash": prose.content_hash,
-                           "parent_id": prose.parent_id,
-                           "context_header": prose.context_header},
-                          separators=(",", ":")))
+                Chunk(
+                    prose.id,
+                    prose.section_id,
+                    file_path,
+                    prose.content,
+                    "prose",
+                    json.dumps(
+                        {
+                            "type": "prose",
+                            "content_hash": prose.content_hash,
+                            "parent_id": prose.parent_id,
+                            "context_header": prose.context_header,
+                        },
+                        separators=(",", ":"),
+                    ),
+                )
             )
     return projected
 
@@ -236,8 +258,7 @@ def prose_coverage(corpus: Corpus, repo_root: Path) -> tuple[int, int]:
     return indexed, on_disk
 
 
-def write_projected(source: Path, target: Path, corpus: Corpus,
-                    width: int) -> int:
+def write_projected(source: Path, target: Path, corpus: Corpus, width: int) -> int:
     """Write ``corpus`` into a copy of ``source`` and return its size.
 
     Args:
@@ -259,29 +280,59 @@ def write_projected(source: Path, target: Path, corpus: Corpus,
         )
         con.execute("DELETE FROM chunks")
         blob = bytes(width)
-        con.executemany(
-            "INSERT INTO chunks(chunk_id, entity_id, content, tokens_text, "
-            "metadata_json, file_path, embedding, embedding_dim) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            [
-                (
-                    c.chunk_id,
-                    c.entity_id,
-                    c.content,
-                    " ".join(tokenize_code(c.content)),
-                    c.metadata_json,
-                    c.file_path,
-                    blob,
-                    width // 4,
-                )
-                for c in corpus.chunks
-            ],
-        )
-        con.execute("DELETE FROM chunks_fts")
-        con.execute(
-            "INSERT INTO chunks_fts(rowid, tokens_text) "
-            "SELECT rowid, tokens_text FROM chunks"
-        )
+        if _has_column(con, "chunks", "tokens_text"):
+            con.executemany(
+                "INSERT INTO chunks(chunk_id, entity_id, content, tokens_text, "
+                "metadata_json, file_path, embedding, embedding_dim) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                [
+                    (
+                        c.chunk_id,
+                        c.entity_id,
+                        c.content,
+                        " ".join(tokenize_code(c.content)),
+                        c.metadata_json,
+                        c.file_path,
+                        blob,
+                        width // 4,
+                    )
+                    for c in corpus.chunks
+                ],
+            )
+            con.execute("DELETE FROM chunks_fts")
+            con.execute(
+                "INSERT INTO chunks_fts(rowid, tokens_text) "
+                "SELECT rowid, tokens_text FROM chunks"
+            )
+        else:
+            # D2 folded the column into a contentless index; the projected
+            # rows carry their terms explicitly instead.
+            con.executemany(
+                "INSERT INTO chunks(chunk_id, entity_id, content, "
+                "metadata_json, file_path, embedding, embedding_dim) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                [
+                    (
+                        c.chunk_id,
+                        c.entity_id,
+                        c.content,
+                        c.metadata_json,
+                        c.file_path,
+                        blob,
+                        width // 4,
+                    )
+                    for c in corpus.chunks
+                ],
+            )
+            con.execute("DELETE FROM chunks_fts")
+            con.executemany(
+                "INSERT INTO chunks_fts(rowid, tokens_text) "
+                "SELECT rowid, ? FROM chunks WHERE chunk_id = ?",
+                [
+                    (" ".join(tokenize_code(c.content)), c.chunk_id)
+                    for c in corpus.chunks
+                ],
+            )
         con.commit()
         con.execute("VACUUM")
     finally:
@@ -309,10 +360,10 @@ def compose(db: Path, prefix: str, *, prune: bool) -> int:
     con = sqlite3.connect(db)
     try:
         con.executescript(DROP_TRIGGERS)
-        con.executescript(CONTENTLESS_FTS)
-        con.execute("ALTER TABLE chunks DROP COLUMN tokens_text")
-        _strip_prefix(con, "chunks", ("file_path", "chunk_id", "entity_id"),
-                      prefix)
+        if _has_column(con, "chunks", "tokens_text"):
+            con.executescript(CONTENTLESS_FTS)
+            con.execute("ALTER TABLE chunks DROP COLUMN tokens_text")
+        _strip_prefix(con, "chunks", ("file_path", "chunk_id", "entity_id"), prefix)
         _slim_metadata(con, "chunks")
         if prune:
             con.execute(
@@ -337,7 +388,8 @@ def policy_plane(corpus: Corpus, width: int) -> list[tuple[int, int, int]]:
     rows = []
     for threshold in POLICY_THRESHOLDS:
         kept = [
-            c for c in corpus.chunks
+            c
+            for c in corpus.chunks
             if len(c.content) >= threshold and c.kind not in SKIP_KINDS
         ]
         rows.append((threshold, len(kept), len(kept) * width))
@@ -351,8 +403,7 @@ def vector_width(generation: Path) -> int:
     )
     try:
         row = con.execute(
-            "SELECT LENGTH(embedding) FROM chunks "
-            "WHERE embedding IS NOT NULL LIMIT 1"
+            "SELECT LENGTH(embedding) FROM chunks WHERE embedding IS NOT NULL LIMIT 1"
         ).fetchone()
     finally:
         con.close()
@@ -369,35 +420,51 @@ def _kb(value: float) -> str:
     return f"{value / 1024:9.1f} KB"
 
 
-def render(generation: Path, published: Corpus, projected: Corpus,
-           width: int, sizes: dict[str, int], repo_root: Path) -> None:
+def render(
+    generation: Path,
+    published: Corpus,
+    projected: Corpus,
+    width: int,
+    sizes: dict[str, int],
+    repo_root: Path,
+) -> None:
     """Print the projection as a human-readable report."""
     rule = "=" * 88
     print(rule)
     print(f"Chunk corpus projection - generation {generation.name}")
     print(rule)
 
-    print(f"\n{'':26}{'chunks':>8}{'content':>12}{'vector plane':>15}"
-          f"{'amplification':>15}")
+    print(
+        f"\n{'':26}{'chunks':>8}{'content':>12}{'vector plane':>15}"
+        f"{'amplification':>15}"
+    )
     for corpus in (published, projected):
         amp = corpus.vector_bytes(width) / max(corpus.text_bytes, 1)
-        print(f"{corpus.label:<26}{corpus.count:>8}{_kb(corpus.text_bytes):>12}"
-              f"{_mb(corpus.vector_bytes(width)):>15}{amp:>14.1f}x")
+        print(
+            f"{corpus.label:<26}{corpus.count:>8}{_kb(corpus.text_bytes):>12}"
+            f"{_mb(corpus.vector_bytes(width)):>15}{amp:>14.1f}x"
+        )
 
     pub_indexed, pub_disk = prose_coverage(published, repo_root)
     proj_indexed, proj_disk = prose_coverage(projected, repo_root)
     print("\nprose coverage (share of document bytes reachable by retrieval)")
-    print(f"  published        {_kb(pub_indexed)} of {_kb(pub_disk)}"
-          f"  ({pub_indexed / max(pub_disk, 1) * 100:3.0f}%)")
-    print(f"  corrected        {_kb(proj_indexed)} of {_kb(proj_disk)}"
-          f"  ({proj_indexed / max(proj_disk, 1) * 100:3.0f}%)")
+    print(
+        f"  published        {_kb(pub_indexed)} of {_kb(pub_disk)}"
+        f"  ({pub_indexed / max(pub_disk, 1) * 100:3.0f}%)"
+    )
+    print(
+        f"  corrected        {_kb(proj_indexed)} of {_kb(proj_disk)}"
+        f"  ({proj_indexed / max(proj_disk, 1) * 100:3.0f}%)"
+    )
 
     print("\ncorrected corpus by kind")
     for kind, (count, size) in sorted(
         projected.by_kind().items(), key=lambda kv: -kv[1][1]
     ):
-        print(f"  {kind:<18}{count:>6} chunks {_kb(size)} "
-              f"avg {size // max(count, 1):>5} B")
+        print(
+            f"  {kind:<18}{count:>6} chunks {_kb(size)} "
+            f"avg {size // max(count, 1):>5} B"
+        )
 
     print("\nchunks.db measured against the projected corpus")
     print(f"  published                     {_mb(sizes['published'])}")
@@ -406,11 +473,15 @@ def render(generation: Path, published: Corpus, projected: Corpus,
         ("composed", "  + lossless + derived"),
         ("composed_pruned", "  + embedding policy"),
     ):
-        print(f"  {caption:<30}{_mb(sizes[label])}"
-              f"   saved {_mb(sizes['published'] - sizes[label])}")
+        print(
+            f"  {caption:<30}{_mb(sizes[label])}"
+            f"   saved {_mb(sizes['published'] - sizes[label])}"
+        )
 
-    print("\nembedding-selection policy on the corrected corpus "
-          "(one budget, code + prose)")
+    print(
+        "\nembedding-selection policy on the corrected corpus "
+        "(one budget, code + prose)"
+    )
     for threshold, kept, vector_bytes in policy_plane(projected, width):
         label = "no threshold" if threshold == 0 else f">= {threshold} B"
         print(f"  {label:<18}{kept:>6} vectors {_mb(vector_bytes)}")
@@ -423,8 +494,9 @@ def main() -> None:
     parser.add_argument("--generation", type=str, default=None)
     parser.add_argument("--repo-root", type=Path, default=Path("."))
     parser.add_argument("--json", action="store_true")
-    parser.add_argument("--keep", action="store_true",
-                        help="keep the projected chunks.db copy")
+    parser.add_argument(
+        "--keep", action="store_true", help="keep the projected chunks.db copy"
+    )
     args = parser.parse_args()
 
     generation = resolve_generation(args.index.resolve(), args.generation)
@@ -439,8 +511,10 @@ def main() -> None:
         sizes = {
             "published": (generation / "chunks.db").stat().st_size,
             "projected": write_projected(
-                generation / "chunks.db", workdir / "projected-chunks.db",
-                projected, width
+                generation / "chunks.db",
+                workdir / "projected-chunks.db",
+                projected,
+                width,
             ),
         }
         prefix = f"{repo_root}/"
@@ -449,26 +523,31 @@ def main() -> None:
             write_projected(generation / "chunks.db", copy, projected, width)
             sizes[label] = compose(copy, prefix, prune=prune)
         if args.json:
-            print(json.dumps({
-                "generation": generation.name,
-                "vector_width_bytes": width,
-                "published": {
-                    "chunks": published.count,
-                    "content_bytes": published.text_bytes,
-                    "vector_bytes": published.vector_bytes(width),
-                },
-                "corrected": {
-                    "chunks": projected.count,
-                    "content_bytes": projected.text_bytes,
-                    "vector_bytes": projected.vector_bytes(width),
-                    "by_kind": projected.by_kind(),
-                },
-                "chunks_db_bytes": sizes,
-                "policy": [
-                    {"min_content_bytes": t, "vectors": k, "vector_bytes": b}
-                    for t, k, b in policy_plane(projected, width)
-                ],
-            }, indent=2))
+            print(
+                json.dumps(
+                    {
+                        "generation": generation.name,
+                        "vector_width_bytes": width,
+                        "published": {
+                            "chunks": published.count,
+                            "content_bytes": published.text_bytes,
+                            "vector_bytes": published.vector_bytes(width),
+                        },
+                        "corrected": {
+                            "chunks": projected.count,
+                            "content_bytes": projected.text_bytes,
+                            "vector_bytes": projected.vector_bytes(width),
+                            "by_kind": projected.by_kind(),
+                        },
+                        "chunks_db_bytes": sizes,
+                        "policy": [
+                            {"min_content_bytes": t, "vectors": k, "vector_bytes": b}
+                            for t, k, b in policy_plane(projected, width)
+                        ],
+                    },
+                    indent=2,
+                )
+            )
         else:
             render(generation, published, projected, width, sizes, repo_root)
             if args.keep:

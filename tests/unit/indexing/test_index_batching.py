@@ -422,9 +422,7 @@ def test_incremental_isolates_a_rejected_file(git_harness: Harness) -> None:
     git_harness.indexer.index_directory(git_harness.root)
     before = sorted(git_harness.chunk_ids())
 
-    (git_harness.root / "mod0.py").write_text(
-        _source("m0_POISON"), encoding="utf-8"
-    )
+    (git_harness.root / "mod0.py").write_text(_source("m0_POISON"), encoding="utf-8")
     (git_harness.root / "mod1.py").write_text(_source("m1_v2"), encoding="utf-8")
     _git(git_harness.root, "add", ".")
     _git(git_harness.root, "commit", "-m", "second")

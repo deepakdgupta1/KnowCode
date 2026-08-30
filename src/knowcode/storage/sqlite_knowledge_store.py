@@ -31,8 +31,11 @@ from knowcode.data_models import (
 from knowcode.errors import RepositoryClosedError
 from knowcode.storage.knowledge_store import KnowledgeStore
 from knowcode.utils.entity_identity import (
+    absolutize_id,
     ensure_entity_content_hash,
+    normalize_file_identity,
     pack_content_hash,
+    relativize_id,
     unpack_content_hash,
 )
 
@@ -95,6 +98,11 @@ class SqliteKnowledgeStore:
     """SQLite-backed knowledge store with recursive query support."""
 
     SCHEMA_VERSION = 1
+
+    # Ids are stored relative to this root and hydrated back to absolute on
+    # the way out, so a generation's size does not depend on where it was
+    # built (ADR 1, ADR 10). Empty until set_repo_root binds it.
+    _repo_root = ""
 
     def __init__(self, db_path: str | Path) -> None:
         """Initialize SQLite knowledge store."""
@@ -241,6 +249,13 @@ class SqliteKnowledgeStore:
             )
             conn.execute(
                 """
+                CREATE TABLE IF NOT EXISTS repo_root (
+                    root TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS eid (
                     id INTEGER PRIMARY KEY,
                     entity_id TEXT UNIQUE NOT NULL
@@ -284,6 +299,45 @@ class SqliteKnowledgeStore:
                 "ON relationships(target_id, kind)"
             )
             self._reject_string_keyed_edges(conn)
+        self._load_repo_root()
+
+    def _load_repo_root(self) -> None:
+        """Adopt the root already recorded in this database, if any."""
+        row = self._writer_conn.execute("SELECT root FROM repo_root").fetchone()
+        self._repo_root = row[0] if row else ""
+
+    def set_repo_root(self, root: str | Path) -> None:
+        """Bind this database to the repository root its ids are anchored at.
+
+        Rows written before the bind keep their absolute ids, which read back
+        unchanged: the codec strips only what it can re-add. Rebinding a
+        populated database to a different root would silently re-anchor those
+        rows, so it is refused, matching ADR 1's rule that a moved repository
+        is rebuilt rather than rewritten.
+        """
+        normalized = normalize_file_identity(root)
+        with self._write_lock:
+            current = self._writer_conn.execute("SELECT root FROM repo_root").fetchone()
+            if current and current[0] != normalized:
+                raise ValueError(
+                    f"{self._db_path} is already bound to repository root "
+                    f"{current[0]!r}; rebuild the index to anchor it at "
+                    f"{normalized!r}."
+                )
+            if not current:
+                with self._writer_conn:
+                    self._writer_conn.execute(
+                        "INSERT INTO repo_root (root) VALUES (?)", (normalized,)
+                    )
+            self._repo_root = normalized
+
+    def _store_id(self, value: str) -> str:
+        """Render a caller's absolute id in its stored, root-relative form."""
+        return relativize_id(value, self._repo_root)
+
+    def _load_id(self, value: str) -> str:
+        """Render a stored id back as the absolute id callers hold."""
+        return absolutize_id(value, self._repo_root)
 
     @staticmethod
     def _reject_string_keyed_edges(conn: sqlite3.Connection) -> None:
@@ -308,8 +362,7 @@ class SqliteKnowledgeStore:
     # Mutation (writer connection, serialized by _write_lock)
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _insert_entity_row(conn: sqlite3.Connection, entity: Entity) -> None:
+    def _insert_entity_row(self, conn: sqlite3.Connection, entity: Entity) -> None:
         """Insert one entity row on the caller's open transaction.
 
         Same SQL as :meth:`add_entity`. Private so :meth:`bulk_insert` can use
@@ -330,11 +383,11 @@ class SqliteKnowledgeStore:
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                entity.id,
+                self._store_id(entity.id),
                 entity.kind.value,
                 entity.name,
                 entity.qualified_name,
-                entity.location.file_path,
+                self._store_id(entity.location.file_path),
                 entity.location.line_start,
                 entity.location.line_end,
                 entity.docstring,
@@ -345,8 +398,9 @@ class SqliteKnowledgeStore:
             ),
         )
 
-    @staticmethod
-    def _insert_relationship_row(conn: sqlite3.Connection, rel: Relationship) -> None:
+    def _insert_relationship_row(
+        self, conn: sqlite3.Connection, rel: Relationship
+    ) -> None:
         """Insert one relationship row on the caller's open transaction.
 
         The endpoints and the kind are interned first, so the edge row itself
@@ -355,7 +409,7 @@ class SqliteKnowledgeStore:
         """
         conn.execute(
             "INSERT OR IGNORE INTO eid (entity_id) VALUES (?), (?)",
-            (rel.source_id, rel.target_id),
+            (self._store_id(rel.source_id), self._store_id(rel.target_id)),
         )
         conn.execute(
             "INSERT OR IGNORE INTO relkind (kind) VALUES (?)", (rel.kind.value,)
@@ -366,8 +420,8 @@ class SqliteKnowledgeStore:
             VALUES ({_EID_OF}, {_EID_OF}, {_KIND_OF}, ?)
             """,
             (
-                rel.source_id,
-                rel.target_id,
+                self._store_id(rel.source_id),
+                self._store_id(rel.target_id),
                 rel.kind.value,
                 json.dumps(rel.metadata) if rel.metadata else None,
             ),
@@ -471,12 +525,12 @@ class SqliteKnowledgeStore:
             metadata["content_hash"] = unpack_content_hash(row["content_hash"])
 
         location = Location(
-            file_path=row["file_path"],
+            file_path=self._load_id(row["file_path"]),
             line_start=row["line_start"],
             line_end=row["line_end"],
         )
         return Entity(
-            id=row["entity_id"],
+            id=self._load_id(row["entity_id"]),
             kind=EntityKind(row["kind"]),
             name=row["name"],
             qualified_name=row["qualified_name"],
@@ -491,8 +545,8 @@ class SqliteKnowledgeStore:
         """Convert a database row to a Relationship."""
         metadata = json.loads(row["metadata_json"]) if row["metadata_json"] else {}
         return Relationship(
-            source_id=row["source_id"],
-            target_id=row["target_id"],
+            source_id=self._load_id(row["source_id"]),
+            target_id=self._load_id(row["target_id"]),
             kind=RelationshipKind(row["kind"]),
             metadata=metadata,
         )
@@ -503,6 +557,7 @@ class SqliteKnowledgeStore:
 
     def get_entity(self, entity_id: str) -> Optional[Entity]:
         """Fetch an entity by ID."""
+        entity_id = self._store_id(entity_id)
         with self._read_lease() as conn:
             cursor = conn.execute(
                 "SELECT * FROM entities WHERE entity_id = ?", (entity_id,)
@@ -526,6 +581,7 @@ class SqliteKnowledgeStore:
 
     def get_callers(self, entity_id: str) -> list[Entity]:
         """Return caller entities."""
+        entity_id = self._store_id(entity_id)
         with self._read_lease() as conn:
             cursor = conn.execute(
                 _CALLERS_SQL,
@@ -536,6 +592,7 @@ class SqliteKnowledgeStore:
 
     def get_callees(self, entity_id: str) -> list[Entity]:
         """Return callee entities."""
+        entity_id = self._store_id(entity_id)
         with self._read_lease() as conn:
             cursor = conn.execute(
                 _CALLEES_SQL,
@@ -546,6 +603,7 @@ class SqliteKnowledgeStore:
 
     def get_dependencies(self, entity_id: str) -> list[Entity]:
         """Return entities this entity depends on."""
+        entity_id = self._store_id(entity_id)
         with self._read_lease() as conn:
             cursor = conn.execute(
                 _DEPENDENCIES_SQL,
@@ -560,6 +618,7 @@ class SqliteKnowledgeStore:
 
     def get_dependents(self, entity_id: str) -> list[Entity]:
         """Return entities depending on this entity."""
+        entity_id = self._store_id(entity_id)
         with self._read_lease() as conn:
             cursor = conn.execute(
                 _DEPENDENTS_SQL,
@@ -578,7 +637,8 @@ class SqliteKnowledgeStore:
         with self._read_lease() as conn:
             cursor = conn.execute("SELECT * FROM entities")
             rows = cursor.fetchall()
-        return {row["entity_id"]: self._row_to_entity(row) for row in rows}
+        loaded = [self._row_to_entity(row) for row in rows]
+        return {entity.id: entity for entity in loaded}
 
     @property
     def relationships(self) -> list[Relationship]:
@@ -590,6 +650,7 @@ class SqliteKnowledgeStore:
 
     def get_parent(self, entity_id: str) -> Optional[Entity]:
         """Get the parent entity (container) of an entity."""
+        entity_id = self._store_id(entity_id)
         with self._read_lease() as conn:
             cursor = conn.execute(
                 _PARENT_SQL,
@@ -600,6 +661,7 @@ class SqliteKnowledgeStore:
 
     def get_children(self, entity_id: str) -> list[Entity]:
         """Get entities contained by the given entity."""
+        entity_id = self._store_id(entity_id)
         with self._read_lease() as conn:
             cursor = conn.execute(
                 _CHILDREN_SQL,
@@ -610,16 +672,18 @@ class SqliteKnowledgeStore:
 
     def get_imports(self, entity_id: str) -> list[str]:
         """Get imports for a module entity."""
+        entity_id = self._store_id(entity_id)
         with self._read_lease() as conn:
             cursor = conn.execute(
                 _IMPORTS_SQL,
                 (entity_id, RelationshipKind.IMPORTS.value),
             )
             rows = cursor.fetchall()
-        return [row["target_id"] for row in rows]
+        return [self._load_id(row["target_id"]) for row in rows]
 
     def get_outgoing_relationships(self, entity_id: str) -> list[Relationship]:
         """Return relationships where the entity is the source."""
+        entity_id = self._store_id(entity_id)
         with self._read_lease() as conn:
             cursor = conn.execute(
                 _OUTGOING_EDGES_SQL,
@@ -630,6 +694,7 @@ class SqliteKnowledgeStore:
 
     def get_incoming_relationships(self, entity_id: str) -> list[Relationship]:
         """Return relationships where the entity is the target."""
+        entity_id = self._store_id(entity_id)
         with self._read_lease() as conn:
             cursor = conn.execute(
                 _INCOMING_EDGES_SQL,
@@ -661,6 +726,7 @@ class SqliteKnowledgeStore:
         max_results: int = 50,
     ) -> list[dict[str, Any]]:
         """Multi-hop call graph traversal using Recursive CTE."""
+        entity_id = self._store_id(entity_id)
         if direction not in ("callers", "callees"):
             raise ValueError(
                 f"direction must be 'callers' or 'callees', got {direction}"
@@ -706,7 +772,7 @@ class SqliteKnowledgeStore:
             for row in cursor:
                 results.append(
                     {
-                        "entity_id": row["entity_id"],
+                        "entity_id": self._load_id(row["entity_id"]),
                         "name": row["name"],
                         "qualified_name": row["qualified_name"],
                         "kind": row["kind"],

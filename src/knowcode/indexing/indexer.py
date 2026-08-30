@@ -104,7 +104,11 @@ class Indexer:
     # 4: Phase C. The chunk digest moved out of metadata_json into a
     # first-class content_hash column, so a generation built before this has
     # no column for the reuse lookup to read and must be rebuilt.
-    SCHEMA_VERSION = 4
+    # 5: Phase C1. Ids are stored relative to a recorded repository root, so a
+    # reader that predates the codec would hand callers relative ids and
+    # resolve nothing. New artifacts read correctly under old code only by
+    # accident, so the version refuses them outright.
+    SCHEMA_VERSION = 5
     LEGACY_MANIFEST_VERSION = 1
     SUPPORTED_SCHEMA_VERSIONS = {SCHEMA_VERSION}
 
@@ -735,6 +739,7 @@ class Indexer:
             Total number of chunks added to the index.
         """
         root_path = Path(root_dir)
+        self.chunk_repo.set_repo_root(root_path)
 
         if builder is None:
             builder = GraphBuilder()
@@ -793,6 +798,7 @@ class Indexer:
             Number of new chunks added.
         """
         root_path = Path(root_dir).resolve()
+        self.chunk_repo.set_repo_root(root_path)
 
         # Determine last indexed commit
         last_commit = self.manifest.get("last_indexed_commit")

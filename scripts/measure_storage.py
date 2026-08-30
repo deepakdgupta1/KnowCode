@@ -391,6 +391,7 @@ def measure_source(repo_root: Path) -> dict[str, int]:
         Mapping with tracked-file and Python-only byte totals. Values are 0
         when ``repo_root`` is not a git repository.
     """
+
     def _bytes(patterns: list[str]) -> int:
         try:
             out = subprocess.run(
@@ -442,8 +443,11 @@ def build_report(index_path: Path, generation: Path, repo_root: Path) -> Report:
         **measure_tables(knowledge_db),
         **measure_tables(chunks_db),
     }
-    for db, table in ((knowledge_db, "entities"), (knowledge_db, "relationships"),
-                      (chunks_db, "chunks")):
+    for db, table in (
+        (knowledge_db, "entities"),
+        (knowledge_db, "relationships"),
+        (chunks_db, "chunks"),
+    ):
         columns, count = measure_columns(db, table)
         if columns:
             report.columns[table] = columns
@@ -463,7 +467,9 @@ def _mb(value: int) -> str:
 def print_report(report: Report) -> None:
     """Render the human-readable report to stdout."""
     line = "=" * 78
-    print(f"\n{line}\nKnowCode storage footprint - generation {report.generation}\n{line}")
+    print(
+        f"\n{line}\nKnowCode storage footprint - generation {report.generation}\n{line}"
+    )
 
     print("\n1. ARTIFACTS")
     for name, size in sorted(report.artifacts.items(), key=lambda kv: -kv[1]):
@@ -505,10 +511,16 @@ def print_report(report: Report) -> None:
                 else ""
             )
         )
-        print(f"   durable fp32 BLOBs in chunks.db   {_mb(vector.get('durable_fp32_bytes', 0))}")
+        print(
+            f"   durable fp32 BLOBs in chunks.db   {_mb(vector.get('durable_fp32_bytes', 0))}"
+        )
         if "derived_index_bytes" in vector:
-            print(f"   derived on-disk vector index      {_mb(vector['derived_index_bytes'])}")
-            print(f"      vector data                    {_mb(vector['derived_data_bytes'])}")
+            print(
+                f"   derived on-disk vector index      {_mb(vector['derived_index_bytes'])}"
+            )
+            print(
+                f"      vector data                    {_mb(vector['derived_data_bytes'])}"
+            )
             print(
                 f"      bookkeeping                    "
                 f"{_mb(vector['derived_bookkeeping_bytes'])}"
@@ -521,7 +533,9 @@ def print_report(report: Report) -> None:
     profile = report.chunk_profile
     if profile:
         print("\n5. CHUNK TEXT vs VECTOR COST")
-        print(f"   {'bucket':<12} {'chunks':>7} {'content':>11} {'vectors':>11}  amplif")
+        print(
+            f"   {'bucket':<12} {'chunks':>7} {'content':>11} {'vectors':>11}  amplif"
+        )
         for bucket in profile["size_buckets"]:
             content = bucket["content_bytes"]
             amp = bucket["vector_bytes"] / content if content else 0
@@ -530,7 +544,9 @@ def print_report(report: Report) -> None:
                 f"{content / 1024:>8.0f} KB {bucket['vector_bytes'] / 1048576:>8.2f} MB"
                 f"  {amp:>5.0f}x"
             )
-        print(f"\n   {'chunk type':<16} {'chunks':>7} {'content':>11} {'vectors':>11}  amplif")
+        print(
+            f"\n   {'chunk type':<16} {'chunks':>7} {'content':>11} {'vectors':>11}  amplif"
+        )
         for entry in profile["by_type"]:
             content = entry["content_bytes"]
             amp = entry["vector_bytes"] / content if content else 0
@@ -546,8 +562,10 @@ def print_report(report: Report) -> None:
                 f"{band['chunks_kept']:>6,} chunks  {_mb(band['vector_bytes'])}"
             )
 
-    print("\nFor measured savings per candidate optimization, run "
-          "scripts/storage_simulate.py")
+    print(
+        "\nFor measured savings per candidate optimization, run "
+        "scripts/storage_simulate.py"
+    )
     print(f"\n{line}\n")
 
 

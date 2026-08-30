@@ -896,7 +896,7 @@ class KnowCodeService:
         with generations.staged_generation(index_root) as staging:
             entity_ids = list(builder.entities)
             try:
-                self._write_staged_knowledge_store(staging.path, builder)
+                self._write_staged_knowledge_store(staging.path, builder, directory)
             except Exception as exc:  # noqa: BLE001 - classified, not swallowed
                 logger.exception("Failed to write the staged knowledge store")
                 return GenerationBuildResult(
@@ -1092,11 +1092,12 @@ class KnowCodeService:
         return self._run_preflight(builder)
 
     def _write_staged_knowledge_store(
-        self, staging_dir: Path, builder: GraphBuilder
+        self, staging_dir: Path, builder: GraphBuilder, root: str | Path
     ) -> None:
         """Write ``knowledge.db`` into a staging generation and close it."""
         store = SqliteKnowledgeStore(staging_dir / "knowledge.db")
         try:
+            store.set_repo_root(root)
             # bulk_insert owns its connection, lock, and transaction (ADR 2):
             # callers must not drive a manual BEGIN/COMMIT around individually
             # locking methods.
