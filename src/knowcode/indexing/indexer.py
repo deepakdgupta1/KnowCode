@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterable, Iterator, Optional, Sequence
 
-from knowcode.data_models import CodeChunk, ParseResult
+from knowcode.data_models import CodeChunk, Entity, ParseResult, Relationship
 from knowcode.storage.chunk_repository import ChunkRepository
 from knowcode.storage.sqlite_chunk_repository import SqliteChunkRepository
 from knowcode.indexing.chunker import Chunker
@@ -70,6 +70,10 @@ class _PlannedFile:
     pending: list[CodeChunk] = field(default_factory=list)
     parse_errors: tuple[str, ...] = ()
     reused: int = 0
+    #: The parse's own entities and edges, carried so the caller that commits
+    #: the chunks can advance the graph from the same parse (BL-17).
+    entities: list[Entity] = field(default_factory=list)
+    relationships: list[Relationship] = field(default_factory=list)
     #: Set when this file alone could not be embedded, so the window commits
     #: its healthy neighbours and reports this one as kept back.
     failure: Optional[FileUpdatePreparationError] = None
@@ -256,6 +260,8 @@ class Indexer:
             pending=[chunk for chunk in chunks if chunk.embedding is None],
             parse_errors=parse_errors,
             reused=reused,
+            entities=list(parse_result.entities),
+            relationships=list(parse_result.relationships),
         )
 
     def _finish_plan(self, plan: _PlannedFile) -> PreparedFileUpdate:
@@ -273,6 +279,8 @@ class Indexer:
             reused_embeddings=plan.reused,
             embedded_chunks=len(plan.pending),
             parse_errors=plan.parse_errors,
+            entities=tuple(plan.entities),
+            relationships=tuple(plan.relationships),
         )
 
     def commit_file_update(self, update: PreparedFileUpdate) -> FileUpdateCommit:

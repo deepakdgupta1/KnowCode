@@ -589,6 +589,17 @@ def read_chunk_ids(chunks_db: Path) -> list[str]:
     ]
 
 
+def count_relationships(knowledge_db: Path) -> int:
+    """Return how many edges a generation's knowledge store holds.
+
+    Read from the artifact rather than carried forward from the base manifest:
+    a watch commit now rewrites the edges leaving the file it touched, so the
+    two numbers are no longer the same (BL-17).
+    """
+    rows = _read_ids(knowledge_db, "SELECT COUNT(*) FROM relationships")
+    return int(rows[0]) if rows else 0
+
+
 def count_durable_embeddings(chunks_db: Path) -> int:
     """Return how many chunk rows carry a durable embedding.
 

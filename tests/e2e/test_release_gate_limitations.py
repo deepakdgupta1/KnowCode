@@ -145,16 +145,22 @@ def test_flush_never_writes_an_index_nobody_built(tmp_path: Path) -> None:
 # ----------------------------------------------------------------------
 
 
-def test_a_watched_edit_refreshes_retrieval_but_the_graph_needs_a_rebuild(
+def test_a_watched_edit_refreshes_retrieval_and_the_graph(
     tmp_path: Path,
 ) -> None:
-    """Chunks/vectors follow a watched edit; ``knowledge.db`` does not.
+    """Chunks, vectors, *and* the file's graph rows follow a watched edit.
 
-    This is the accepted watch-mode limitation for this release. The retrieval
-    path (the MCP/CLI entry point) is fresh immediately; the graph query path is
-    stale until a rebuild; ``knowcode doctor`` warns via ``store_stale_source_changed``;
-    and a full ``analyze()`` refreshes the graph. Fixing it needs incremental
-    ``GraphBuilder`` work and is scoped as future product work, not patched here.
+    This was the accepted watch-mode limitation for the release: the retrieval
+    path was fresh immediately and the graph query path stale until a rebuild.
+    BL-17 removed it — a file transaction now rewrites the edited file's
+    entities and the edges leaving them — so this pins the behavior rather
+    than the limitation.
+
+    What a watch commit still cannot do is re-derive an edge *arriving* from a
+    file it did not parse, so a rebuild remains the remedy for cross-file
+    staleness after a rename. ``knowcode doctor`` continues to warn via
+    ``store_stale_source_changed``, which is about source drift against the
+    index rather than about the graph.
     """
     repo = build_adversarial_repo(tmp_path)
     config = AppConfig.default()
@@ -185,10 +191,8 @@ def test_a_watched_edit_refreshes_retrieval_but_the_graph_needs_a_rebuild(
     assert any("gamma.py" in chunk.entity_id for chunk in chunk_hits), (
         "retrieval did not pick up the watched edit"
     )
-    # The graph (knowledge.db) is stale: the symbol is not yet a graph entity.
-    assert service.search("gamma_handler") == [], (
-        "the graph unexpectedly followed the watched edit"
-    )
+    # The graph followed too: the new symbol is a graph entity, not only a chunk.
+    assert service.search("gamma_handler"), "the graph did not follow the watched edit"
     service.close()
 
     # doctor reports the staleness rather than hiding it, and the generation is
@@ -201,7 +205,8 @@ def test_a_watched_edit_refreshes_retrieval_but_the_graph_needs_a_rebuild(
         check = next(c for c in report_.checks if c.name == name)
         assert check.status == "pass", check.message
 
-    # A full rebuild is the documented remedy: the graph catches up.
+    # A full rebuild agrees with what the watch commit already wrote, rather
+    # than being the only thing that produces it.
     rebuilt = KnowCodeService(store_path=repo.output, app_config=config)
     rebuilt.analyze(directory=repo.source, output=repo.output)
     try:

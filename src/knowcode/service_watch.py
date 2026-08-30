@@ -210,6 +210,9 @@ class ServiceWatchWriter:
                 base=base,
                 provider=bundle.indexer.embedding_provider,
                 backend=self._service.app_config.vector_backend,
+                persist_entity_source=(
+                    self._service.app_config.entity_source != "disk"
+                ),
             )
         return self._session
 

@@ -36,7 +36,7 @@ import math
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Sequence
 
-from knowcode.data_models import CodeChunk
+from knowcode.data_models import CodeChunk, Entity, Relationship
 
 
 class FileUpdateError(RuntimeError):
@@ -116,6 +116,11 @@ class PreparedFileUpdate:
     reused_embeddings: int = 0
     embedded_chunks: int = 0
     parse_errors: tuple[str, ...] = ()
+    #: The file's own graph rows, from the same parse the chunks came from, so
+    #: a caller holding a staged knowledge store can advance it in step
+    #: (BL-17). Empty on a deletion, which is what removes the file's rows.
+    entities: tuple[Entity, ...] = ()
+    relationships: tuple[Relationship, ...] = ()
 
     @property
     def is_deletion(self) -> bool:

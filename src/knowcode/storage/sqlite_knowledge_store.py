@@ -482,6 +482,51 @@ class SqliteKnowledgeStore:
         for rel in relationships:
             self._insert_relationship_row(conn, rel)
 
+    def replace_file(
+        self,
+        file_path: str | Path,
+        entities: list[Entity],
+        relationships: list[Relationship],
+    ) -> None:
+        """Re-derive one file's graph rows in a single writer transaction.
+
+        The file's own entity rows and the edges *leaving* them are dropped and
+        rewritten from a fresh parse of that file. An empty pair removes the
+        file from the graph, which is what a delete event commits.
+
+        Edges *arriving* from other files are deliberately left in place. An
+        incremental parse sees one file, so it cannot re-derive an edge another
+        file emits; dropping those would lose real structure that nothing here
+        can put back. The cost is that renaming a symbol leaves inbound edges
+        pointing at an id nothing defines until the next full build — the same
+        cross-file staleness a full build exists to clear, and strictly less of
+        it than never advancing the graph at all (BL-17).
+
+        Rows in the ``eid`` codebook are not reclaimed. They are interned
+        strings behind the edge table, cost a few bytes each, and a full
+        rebuild rewrites the artifact from scratch.
+        """
+        stored_path = self._store_id(normalize_file_identity(file_path))
+        with self._write_lock:
+            if self._closed:
+                raise RepositoryClosedError(
+                    "SqliteKnowledgeStore is closed; open a new instance."
+                )
+            with self._writer_conn:
+                conn = self._writer_conn
+                conn.execute(
+                    """
+                    DELETE FROM relationships WHERE source_id IN (
+                        SELECT id FROM eid WHERE entity_id IN (
+                            SELECT entity_id FROM entities WHERE file_path = ?
+                        )
+                    )
+                    """,
+                    (stored_path,),
+                )
+                conn.execute("DELETE FROM entities WHERE file_path = ?", (stored_path,))
+                self._commit_bulk(conn, entities, relationships)
+
     def add_entity(self, entity: Entity) -> None:
         """Add an entity to the store."""
         ensure_entity_content_hash(entity)

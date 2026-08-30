@@ -672,26 +672,25 @@ def test_a_batch_whose_base_generation_vanished_fails_closed(
     service.close()
 
 
-def test_a_watch_publication_carries_the_graph_across_unchanged(
+def test_a_watch_publication_advances_the_graph_for_the_file_it_touched(
     tmp_path: Path, backend: str
 ) -> None:
-    """A file transaction rewrites chunks and vectors, never the graph.
+    """A file transaction rewrites chunks, vectors, *and* the file's graph rows.
 
-    Pinning the limitation rather than hiding it: the watch worker has never
-    updated ``knowledge.db`` — before Step 18b it did not touch it either — so
-    a published watch generation carries the graph of the build it succeeded.
-    It is internally consistent (its manifest digests describe exactly the
-    ``knowledge.db`` in it) and stale in one direction, which ``knowcode
-    doctor`` reports as ``store_stale_source_changed``. Updating the graph from
-    a watched edit is a separate step; a test that quietly accepted either
-    behavior would let it be "fixed" by accident.
+    This test used to pin the opposite, deliberately: the watch worker had
+    never updated ``knowledge.db``, so a published watch generation carried
+    the graph of the build it succeeded, and the docstring said a test that
+    quietly accepted either behavior would let that be "fixed" by accident.
+    It was fixed on purpose (BL-17), so the assertions are inverted rather
+    than relaxed — the file's entities now reach the graph, the entities of
+    every other file are untouched, and the generation still validates whole.
     """
     src = _write(tmp_path, "alpha")
     service = _service(tmp_path, backend)
     service.analyze(directory=src, output=tmp_path)
     base = service.current_generation()
     assert base is not None
-    entities_before = generations.read_entity_ids(base.knowledge_db)
+    entities_before = set(generations.read_entity_ids(base.knowledge_db))
 
     _write(tmp_path, "beta")
     writer = service.watch_writer()
@@ -700,15 +699,19 @@ def test_a_watch_publication_carries_the_graph_across_unchanged(
 
     current = service.current_generation()
     assert current is not None
-    assert generations.read_entity_ids(current.knowledge_db) == entities_before
-    assert (
-        current.manifest.counts["relationships"]
-        == (base.manifest.counts["relationships"])
+    entities_after = set(generations.read_entity_ids(current.knowledge_db))
+    # Strictly additive: beta's rows arrived, alpha's stayed exactly as they were.
+    assert entities_before < entities_after
+    assert {eid for eid in entities_after - entities_before if "beta.py" in eid}
+    assert not {eid for eid in entities_after - entities_before if "alpha.py" in eid}
+    # The count describes the artifact rather than the base it was seeded from.
+    assert current.manifest.counts["relationships"] == generations.count_relationships(
+        current.knowledge_db
     )
-    # The chunk half *did* move, and the generation still validates as a whole.
+    # The chunk half moved too, and the generation still validates as a whole.
     assert any("beta.py" in path for path in _indexed_files(service))
     assert _validate(current) == []
-    assert service.search("beta") == [], "the graph half changed unexpectedly"
+    assert service.search("beta") != [], "the graph half did not advance"
     service.close()
 
 

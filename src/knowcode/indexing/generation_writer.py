@@ -104,6 +104,7 @@ class StagedGenerationWriter:
         base: ResolvedGeneration,
         provider: Any,
         backend: str,
+        persist_entity_source: bool = True,
     ) -> None:
         """Seed a staging generation from ``base`` and open it for writing.
 
@@ -114,6 +115,10 @@ class StagedGenerationWriter:
             provider: Embedding provider for the file transactions committed
                 here. Its configuration is recorded in the manifest.
             backend: Configured vector backend, recorded in the manifest.
+            persist_entity_source: The build's ``entity_source`` mode (D3).
+                A watch commit rewrites entity rows, so it must write them the
+                way the build that seeded this generation did, or one file's
+                rows would carry text the rest of the artifact does not.
 
         Raises:
             ValueError: ``base`` carries no semantic index, so there is nothing
@@ -127,6 +132,7 @@ class StagedGenerationWriter:
 
         from knowcode.indexing.indexer import Indexer
         from knowcode.storage.sqlite_chunk_repository import SqliteChunkRepository
+        from knowcode.storage.sqlite_knowledge_store import SqliteKnowledgeStore
         from knowcode.storage.vector_backends import create_vector_store
 
         self.base = base
@@ -152,6 +158,10 @@ class StagedGenerationWriter:
                 provider, chunk_repo=chunk_repo, vector_store=vector_store
             )
             self.indexer.load(self.path)
+            self.knowledge_store = SqliteKnowledgeStore(
+                self.path / generations.KNOWLEDGE_DB,
+                persist_entity_source=persist_entity_source,
+            )
         except BaseException:
             generations.discard_staging(self.path)
             raise
@@ -170,14 +180,30 @@ class StagedGenerationWriter:
     # -- transactions ----------------------------------------------------
 
     def replace_file(self, file_path: str | Path) -> Any:
-        """Replace one file's chunks and vectors inside the staged generation."""
+        """Replace one file's chunks, vectors, and graph rows in the staging copy.
+
+        The chunk/vector transaction commits first and the graph second. The
+        two artifacts are separate databases, so the pair is not atomic; this
+        order makes the gap between them the state that shipped before BL-17 —
+        chunks advanced, graph behind — rather than the worse inverse, where
+        the graph describes a file whose indexed text is still the old one.
+        """
         self._assert_open()
-        return self.indexer.replace_file(file_path)
+        prepared = self.indexer.prepare_file_update(file_path)
+        committed = self.indexer.commit_file_update(prepared)
+        self.knowledge_store.replace_file(
+            prepared.file_path,
+            list(prepared.entities),
+            list(prepared.relationships),
+        )
+        return committed
 
     def delete_file(self, file_path: str | Path) -> Any:
-        """Remove one file's chunks and vectors from the staged generation."""
+        """Remove one file's chunks, vectors, and graph rows from the staging copy."""
         self._assert_open()
-        return self.indexer.delete_file(file_path)
+        removed = self.indexer.delete_file(file_path)
+        self.knowledge_store.replace_file(file_path, [], [])
+        return removed
 
     # -- publication -----------------------------------------------------
 
@@ -205,6 +231,11 @@ class StagedGenerationWriter:
             self.indexer.save(self.path)
             self.indexer.chunk_repo.compact()
             self.indexer.chunk_repo.close()
+            # Closed before its rows are digested, for the same reason the
+            # chunk repository is: an open write-ahead log means the committed
+            # rows are not all in the file the manifest describes.
+            self.knowledge_store.compact()
+            self.knowledge_store.close()
 
             chunk_ids = generations.read_chunk_ids(self.path / generations.CHUNKS_DB)
             # Counted from the durable rows, not from the in-memory store: the
@@ -219,9 +250,12 @@ class StagedGenerationWriter:
                 entity_ids=generations.read_entity_ids(
                     self.path / generations.KNOWLEDGE_DB
                 ),
-                # ``knowledge.db`` was copied unchanged: a file transaction
-                # rewrites chunks and vectors, never the graph.
-                relationship_count=self.base.manifest.counts.get("relationships", 0),
+                # Counted from the staged artifact, not carried forward from
+                # the base: a file transaction now rewrites the edges leaving
+                # the file it touched (BL-17).
+                relationship_count=generations.count_relationships(
+                    self.path / generations.KNOWLEDGE_DB
+                ),
                 chunk_ids=chunk_ids,
                 vector_count=vector_count,
                 provider=self._provider,
@@ -298,6 +332,7 @@ class StagedGenerationWriter:
         for resource, what in (
             (self.indexer.chunk_repo, "staged chunk repository"),
             (self.indexer.vector_store, "staged vector store"),
+            (self.knowledge_store, "staged knowledge store"),
         ):
             try:
                 resource.close()
