@@ -294,7 +294,12 @@ class KnowCodeService:
         if not store_file.exists():
             raise MissingKnowledgeStoreError(store_file)
         if store_file.suffix == ".db":
-            return SqliteKnowledgeStore(store_file)
+            # Watch commits land through this store, so it writes under the
+            # same entity_source mode the build did (D3).
+            return SqliteKnowledgeStore(
+                store_file,
+                persist_entity_source=self.app_config.entity_source != "disk",
+            )
         return KnowledgeStore.load(store_file)
 
     def _open_indexer(
@@ -1095,7 +1100,10 @@ class KnowCodeService:
         self, staging_dir: Path, builder: GraphBuilder, root: str | Path
     ) -> None:
         """Write ``knowledge.db`` into a staging generation and close it."""
-        store = SqliteKnowledgeStore(staging_dir / "knowledge.db")
+        store = SqliteKnowledgeStore(
+            staging_dir / "knowledge.db",
+            persist_entity_source=self.app_config.entity_source != "disk",
+        )
         try:
             store.set_repo_root(root)
             # bulk_insert owns its connection, lock, and transaction (ADR 2):
@@ -1512,14 +1520,18 @@ class KnowCodeService:
             if not entity:
                 raise ValueError(f"Entity not found: {target}")
 
-            live_loader = None
-            if is_stale:
-                from knowcode.analysis.live_source_loader import LiveSourceLoader
-
-                live_loader = LiveSourceLoader(self._store_root())
+            # The loader is built unconditionally: a stale index needs it to
+            # serve live text, and a *fresh* one needs it too under
+            # `entity_source: disk` (D3), where no copy was persisted. Which
+            # read it performs is the synthesizer's call, not this one — see
+            # ContextSynthesizer._get_entity_source (BL-16).
+            from knowcode.analysis.live_source_loader import LiveSourceLoader
 
             synthesizer = ContextSynthesizer(
-                self.store, max_tokens=max_tokens, live_loader=live_loader
+                self.store,
+                max_tokens=max_tokens,
+                live_loader=LiveSourceLoader(self._store_root()),
+                index_is_stale=is_stale,
             )
 
             # Use task-specific synthesis if task_type provided
@@ -1802,6 +1814,23 @@ class KnowCodeService:
             # or just construct it manually here to be safe and explicit.
             from dataclasses import asdict
 
+            # D3: under `entity_source: disk` the stored copy — including one
+            # written by an earlier `stored`-mode build — is ignored and every
+            # read resolves from the working tree, verified, so flipping the
+            # setting takes effect on the next read, not the next rebuild.
+            # Under `stored`, a row without a copy (written by a `disk`-mode
+            # build) still resolves, best effort.
+            mode = self.app_config.entity_source
+            source_code = entity.source_code
+            if mode == "disk" or source_code is None:
+                from knowcode.analysis.live_source_loader import LiveSourceLoader
+
+                resolved = LiveSourceLoader(self._store_root()).load_verified_source(
+                    entity
+                )
+                if mode == "disk" or resolved is not None:
+                    source_code = resolved
+
             return {
                 "id": entity.id,
                 "kind": entity.kind.value,
@@ -1810,7 +1839,7 @@ class KnowCodeService:
                 "location": asdict(entity.location),
                 "docstring": entity.docstring,
                 "signature": entity.signature,
-                "source_code": entity.source_code,
+                "source_code": source_code,
                 "metadata": entity.metadata,
             }
 

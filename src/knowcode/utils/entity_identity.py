@@ -172,24 +172,34 @@ def canonicalize_source_snippet(source: str) -> str:
     return "\n".join(lines)
 
 
+def compute_entity_fallback_hash(entity: Entity) -> str:
+    """Digest an entity's identity fields, for entities with no snippet.
+
+    MODULE and DOCUMENT entities, and anything else a parser emits without
+    ``source_code``, hash these fields instead of text. D3's verified disk
+    read recognizes this digest to tell "never had a snippet" (resolve to
+    None quietly, exactly as the stored copy did) from genuine source drift.
+    """
+    payload = "\n".join(
+        part
+        for part in (
+            entity.kind.value,
+            entity.signature or "",
+            entity.docstring or "",
+            entity.name,
+        )
+        if part
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def compute_entity_content_hash(entity: Entity) -> str:
     """Compute a stable SHA-256 hash for an entity's canonical snippet."""
     canonical_source = canonicalize_source_snippet(entity.source_code or "")
     if canonical_source:
-        payload = canonical_source
-    else:
-        # Fallback for entities without source snippets (e.g., derived/system entities).
-        payload = "\n".join(
-            part
-            for part in (
-                entity.kind.value,
-                entity.signature or "",
-                entity.docstring or "",
-                entity.name,
-            )
-            if part
-        )
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+        return hashlib.sha256(canonical_source.encode("utf-8")).hexdigest()
+    # Fallback for entities without source snippets (e.g., derived/system entities).
+    return compute_entity_fallback_hash(entity)
 
 
 def pack_content_hash(value: object) -> object:

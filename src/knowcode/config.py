@@ -70,6 +70,7 @@ class AppConfig:
         "hybrid_alpha",
         "reranker_top_k_multiplier",
         "vector_backend",
+        "entity_source",
     }
     SUPPORTED_TASK_TYPES = {
         "explain",
@@ -91,6 +92,11 @@ class AppConfig:
     hybrid_alpha: float = 0.2
     reranker_top_k_multiplier: int = 5
     vector_backend: str = "lancedb"
+    # Storage plan D3: "disk" stops persisting entities.source_code and serves
+    # it from the working tree, verified against the stored content hash and
+    # failing closed on drift; "stored" keeps the persisted copy and its
+    # possibly-stale reads.
+    entity_source: str = "disk"
     preflight: PreflightConfig = field(default_factory=PreflightConfig)
 
     @classmethod
@@ -202,6 +208,7 @@ class AppConfig:
             hybrid_alpha=0.2,
             reranker_top_k_multiplier=5,
             vector_backend="lancedb",
+            entity_source="disk",
         )
 
     @classmethod
@@ -350,6 +357,13 @@ class AppConfig:
                     "'config.vector_backend' must be 'faiss' or 'lancedb'."
                 )
 
+            entity_source = config_section.get("entity_source", "disk")
+            if not isinstance(entity_source, str) or entity_source not in (
+                "disk",
+                "stored",
+            ):
+                raise ValueError("'config.entity_source' must be 'disk' or 'stored'.")
+
             # Pre-flight assessment configuration
             preflight_config = cls._parse_preflight_section(data.get("preflight"))
 
@@ -367,6 +381,7 @@ class AppConfig:
                 hybrid_alpha=hybrid_alpha,
                 reranker_top_k_multiplier=reranker_top_k_multiplier,
                 vector_backend=vector_backend,
+                entity_source=entity_source,
                 preflight=preflight_config,
             )
         except Exception as e:

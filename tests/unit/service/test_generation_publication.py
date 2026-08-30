@@ -35,6 +35,11 @@ def backend(request: pytest.FixtureRequest) -> str:
 def _config(backend: str) -> AppConfig:
     config = AppConfig.default()
     config.vector_backend = backend
+    # These tests assert generation preservation through the persisted source
+    # copy (the old generation still serves its old text after files drift).
+    # That is exactly `entity_source: stored`; under the default `disk` mode a
+    # drifted file fails closed to None by design, which is a different test.
+    config.entity_source = "stored"
     return config
 
 

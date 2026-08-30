@@ -289,3 +289,49 @@ def test_load_non_strict_invalid_file_raises_error(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="Failed to load config from"):
         AppConfig.load(str(config_file))
+
+
+def test_load_defaults_entity_source_to_disk(tmp_path: Path) -> None:
+    """D3 is the default: source resolves from a verified disk read."""
+    config_file = tmp_path / "aimodels.yaml"
+    _write(
+        config_file,
+        """
+natural_language_models:
+  - name: gemini-2.0-flash-lite
+""",
+    )
+
+    cfg = AppConfig.load(str(config_file))
+
+    assert cfg.entity_source == "disk"
+
+
+def test_load_parses_entity_source_stored(tmp_path: Path) -> None:
+    """`stored` opts a repository back into the persisted copy."""
+    config_file = tmp_path / "aimodels.yaml"
+    _write(
+        config_file,
+        """
+config:
+  entity_source: stored
+""",
+    )
+
+    cfg = AppConfig.load(str(config_file))
+
+    assert cfg.entity_source == "stored"
+
+
+def test_load_rejects_an_unknown_entity_source(tmp_path: Path) -> None:
+    config_file = tmp_path / "aimodels.yaml"
+    _write(
+        config_file,
+        """
+config:
+  entity_source: telepathy
+""",
+    )
+
+    with pytest.raises(ValueError, match="entity_source"):
+        AppConfig.load(str(config_file))

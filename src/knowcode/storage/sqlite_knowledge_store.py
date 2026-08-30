@@ -104,10 +104,23 @@ class SqliteKnowledgeStore:
     # built (ADR 1, ADR 10). Empty until set_repo_root binds it.
     _repo_root = ""
 
-    def __init__(self, db_path: str | Path) -> None:
-        """Initialize SQLite knowledge store."""
+    def __init__(
+        self, db_path: str | Path, *, persist_entity_source: bool = True
+    ) -> None:
+        """Initialize SQLite knowledge store.
+
+        Args:
+            db_path: Path to the ``.db`` file. Created if it does not exist.
+            persist_entity_source: When False (storage plan D3, config
+                ``entity_source: disk``), ``entities.source_code`` is written
+                as NULL and readers resolve the text from the working tree
+                against the stored content hash. The column stays in the
+                schema either way, so the setting flips per build without a
+                migration.
+        """
         self._db_path = Path(db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._persist_entity_source = persist_entity_source
 
         # Serialized writer connection (ADR 2). Deferred mode (isolation_level="")
         # so `with self._writer_conn:` issues a real BEGIN/commit/rollback. This
@@ -392,7 +405,10 @@ class SqliteKnowledgeStore:
                 entity.location.line_end,
                 entity.docstring,
                 entity.signature,
-                entity.source_code,
+                # D3: the persisted copy is the configurable half. Nulling it
+                # here — after the digest was computed upstream — keeps every
+                # write path (build, watch, bulk) on one seam.
+                entity.source_code if self._persist_entity_source else None,
                 metadata_json,
                 pack_content_hash(entity.metadata.get("content_hash")),
             ),
