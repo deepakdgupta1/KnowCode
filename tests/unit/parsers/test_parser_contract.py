@@ -1,6 +1,6 @@
 import pytest
 
-from knowcode.data_models import ParseResult, Entity, Relationship
+from knowcode.data_models import EntityKind, ParseResult, Entity, Relationship
 from knowcode.parsers.python_parser import PythonParser
 from knowcode.parsers.markdown_parser import MarkdownParser
 from knowcode.parsers.rst_parser import RstParser
@@ -138,20 +138,25 @@ def test_contract_entity_ids_are_unique_within_a_file(
     )
 
 
-# A top-level symbol named after its own file collides with the file's MODULE
-# entity, whose qualified name is the stem. Every language is affected and the
-# graph, not the chunk table, is what breaks: the entities silently overwrite
-# each other and every edge to that ID becomes ambiguous. BL-9.
+# A top-level symbol named after its own file used to collide with the file's
+# MODULE entity, whose qualified name is the stem. The graph, not the chunk
+# table, is what broke: the entities silently overwrote each other and every
+# edge to that ID became ambiguous. Fixed by giving module-scoped symbols the
+# module prefix ADR 1 describes, which RustParser already did. BL-9.
 NAMED_AFTER_FILE = [
     (PythonParser, "def doc():\n    pass\n", ".py"),
+    (PythonParser, "class doc:\n    pass\n", ".py"),
+    (PythonParser, "doc = 1\n", ".py"),
     (JavaScriptParser, "function doc() {}\n", ".js"),
+    (JavaScriptParser, "class doc {}\n", ".js"),
     (TypeScriptParser, "function doc(): void {}\n", ".ts"),
+    (TypeScriptParser, "class doc {}\n", ".ts"),
+    (JavaParser, "public class doc {}\n", ".java"),
+    (RustParser, "pub fn doc() {}\n", ".rs"),
+    (RustParser, "pub struct doc;\n", ".rs"),
 ]
 
 
-@pytest.mark.xfail(
-    strict=True, reason="BL-9: MODULE takes the file stem as its qualified name"
-)
 @pytest.mark.parametrize("parser_class, code, ext", NAMED_AFTER_FILE)
 def test_contract_a_symbol_named_after_its_file_does_not_shadow_the_module(
     tmp_path, parser_class, code, ext
@@ -162,3 +167,25 @@ def test_contract_a_symbol_named_after_its_file_does_not_shadow_the_module(
     entities = parser_class().parse_file(source).entities
 
     assert _colliding_ids(entities) == []
+
+
+# The module entity has to survive intact, not merely avoid a duplicate ID. A
+# parser that stopped emitting it would pass the collision assertion above.
+@pytest.mark.parametrize("parser_class, code, ext", NAMED_AFTER_FILE)
+def test_contract_the_module_entity_survives_a_symbol_of_the_same_name(
+    tmp_path, parser_class, code, ext
+):
+    source = tmp_path / f"doc{ext}"
+    source.write_text(code)
+
+    entities = parser_class().parse_file(source).entities
+    file_level = [
+        e for e in entities if e.kind in (EntityKind.MODULE, EntityKind.DOCUMENT)
+    ]
+
+    assert len(file_level) == 1
+    assert file_level[0].qualified_name == "doc"
+    declarations = [e for e in entities if e is not file_level[0]]
+    assert declarations, "the probe needs a declaration named after the file"
+    for declaration in declarations:
+        assert declaration.qualified_name.startswith("doc.")

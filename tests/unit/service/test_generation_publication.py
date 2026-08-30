@@ -105,7 +105,7 @@ def test_failed_semantic_rebuild_preserves_the_previous_generation(
     assert _search(restarted) == before
 
     # And the new graph was NOT committed alongside the old index.
-    entity = restarted.store.get_entity(f"{(src / 'm.py').resolve()}::alpha")
+    entity = restarted.store.get_entity(f"{(src / 'm.py').resolve()}::m.alpha")
     assert entity is not None
     assert "return 1" in (entity.source_code or "")
 
@@ -171,7 +171,7 @@ def test_a_second_build_publishes_a_new_generation_and_retires_nothing_live(
     assert second.generation_id != first.generation_id
 
     restarted = _service(tmp_path, backend)
-    entity = restarted.store.get_entity(f"{(src / 'm.py').resolve()}::alpha")
+    entity = restarted.store.get_entity(f"{(src / 'm.py').resolve()}::m.alpha")
     assert "return 2" in (entity.source_code or "")
 
 
@@ -464,7 +464,7 @@ def test_reload_moves_the_service_onto_the_newly_published_generation(
     assert second.generation_id != first.generation_id
     assert reader._store_file() == second.knowledge_db
     assert reader.get_indexer().chunk_repo._db_path == second.chunks_db
-    entity = reader.store.get_entity(f"{(src / 'm.py').resolve()}::alpha")
+    entity = reader.store.get_entity(f"{(src / 'm.py').resolve()}::m.alpha")
     assert "return 2" in (entity.source_code or "")
 
 
@@ -597,7 +597,7 @@ def test_a_graph_only_generation_is_not_searchable(
     reader = _service(tmp_path, "faiss")
     assert reader.current_generation().kind == generations.KIND_GRAPH_ONLY
     # The graph is still readable...
-    assert reader.store.get_entity(f"{(src / 'm.py').resolve()}::alpha") is not None
+    assert reader.store.get_entity(f"{(src / 'm.py').resolve()}::m.alpha") is not None
     # ...but retrieval fails closed with rebuild guidance.
     with pytest.raises(MissingSemanticIndexError):
         reader._assert_index_exists()

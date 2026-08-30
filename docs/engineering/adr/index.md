@@ -15,6 +15,8 @@ persistence-format analysis; ADR 9 amends ADR 4's artifact set.
 | [0007](adr-0007-protocol-and-artifact-evolution-inventory.md) | Protocol and artifact evolution inventory | Accepted | 2026-08-12 |
 | [0008](adr-0008-persistence-format-and-token-economics.md) | Persistence format and token economics | Proposed | 2026-03-07 |
 | [0009](adr-0009-derived-vector-plane.md) | The vector index is a derived cache | Accepted | 2026-08-29 |
+| [0010](adr-0010-root-relative-id-storage.md) | Ids are stored relative to a recorded repository root | Accepted | 2026-08-29 |
+| [0011](adr-0011-module-scoped-qualified-names.md) | A file's module is the outermost lexical scope | Accepted | 2026-08-31 |
 
 ## Conventions
 

@@ -50,7 +50,7 @@ class RustParser(TreeSitterParser):
     ) -> tuple[list[Entity], list[Relationship], list[str]]:
         """Extract the whole file from its root module scope."""
         state = RustFileState(file_path=file_path)
-        scope = self._build_scope(node, parent_id, file_path.stem)
+        scope = self._build_scope(node, parent_id, self._module_scope(file_path))
         entities, relationships = self._extract_scope(
             node, file_path, scope, state, source_lines
         )

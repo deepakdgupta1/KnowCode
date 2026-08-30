@@ -70,7 +70,7 @@ class TypeScriptParser(JavaScriptParser):
             return [], []
 
         ts_name = self._get_text(name_node)
-        qualified_name = ts_name
+        qualified_name = f"{self._module_scope(file_path)}.{ts_name}"
         ts_id = build_internal_entity_id(file_path, qualified_name)
 
         if node.type == "interface_declaration":
@@ -112,7 +112,7 @@ class TypeScriptParser(JavaScriptParser):
                         source_code,
                         source_lines,
                         kind=EntityKind.METHOD,
-                        parent_name=ts_name,
+                        parent_name=qualified_name,
                         local_symbols=local_symbols,
                     )
                     entities.append(method_entity)

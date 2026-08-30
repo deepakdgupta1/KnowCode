@@ -144,7 +144,7 @@ class TestRetrievalAfterBuild:
             direction="callers",
         )
 
-        assert result["entity_id"].endswith("::add")
+        assert result["entity_id"].endswith("::calc.add")
         callers = {entry["name"] for entry in result["results"]}
         assert "total" in callers
 

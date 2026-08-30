@@ -39,7 +39,7 @@ def test_parse_default_exported_typescript_class(tmp_path: Path) -> None:
 
     assert [(entity.qualified_name, entity.kind) for entity in result.entities] == [
         ("default_class", EntityKind.MODULE),
-        ("Service", EntityKind.CLASS),
+        ("default_class.Service", EntityKind.CLASS),
     ]
 
 
@@ -62,20 +62,20 @@ class Derived extends Base {}
     }
     assert relationships == {
         (
-            build_internal_entity_id(file_path, "Child"),
-            build_internal_entity_id(file_path, "Parent"),
+            build_internal_entity_id(file_path, "inheritance.Child"),
+            build_internal_entity_id(file_path, "inheritance.Parent"),
             RelationshipKind.INHERITS,
         ),
         (
-            build_internal_entity_id(file_path, "Child"),
+            build_internal_entity_id(file_path, "inheritance.Child"),
             build_unresolved_reference_id(
-                "typescript", file_path, "Child", "Framework.Shape"
+                "typescript", file_path, "inheritance.Child", "Framework.Shape"
             ),
             RelationshipKind.INHERITS,
         ),
         (
-            build_internal_entity_id(file_path, "Derived"),
-            build_internal_entity_id(file_path, "Base"),
+            build_internal_entity_id(file_path, "inheritance.Derived"),
+            build_internal_entity_id(file_path, "inheritance.Base"),
             RelationshipKind.INHERITS,
         ),
     }
@@ -123,27 +123,27 @@ def test_parse_typescript_features(tmp_path: Path) -> None:
     entities = {e.qualified_name: e for e in result.entities}
 
     # Ensure TS specific entities are mapped as CLASS
-    assert "MyInterface" in entities
-    assert entities["MyInterface"].kind == EntityKind.CLASS
+    assert "test.MyInterface" in entities
+    assert entities["test.MyInterface"].kind == EntityKind.CLASS
 
-    assert "MyType" in entities
-    assert entities["MyType"].kind == EntityKind.CLASS
+    assert "test.MyType" in entities
+    assert entities["test.MyType"].kind == EntityKind.CLASS
 
-    assert "MyEnum" in entities
-    assert entities["MyEnum"].kind == EntityKind.CLASS
+    assert "test.MyEnum" in entities
+    assert entities["test.MyEnum"].kind == EntityKind.CLASS
 
     # Normal JS parts
-    assert "MyClass" in entities
-    assert entities["MyClass"].kind == EntityKind.CLASS
+    assert "test.MyClass" in entities
+    assert entities["test.MyClass"].kind == EntityKind.CLASS
 
-    assert "MyInterface.myMethod" in entities
-    assert entities["MyInterface.myMethod"].kind == EntityKind.METHOD
+    assert "test.MyInterface.myMethod" in entities
+    assert entities["test.MyInterface.myMethod"].kind == EntityKind.METHOD
 
-    assert "MyClass.myMethod" in entities
-    assert entities["MyClass.myMethod"].kind == EntityKind.METHOD
+    assert "test.MyClass.myMethod" in entities
+    assert entities["test.MyClass.myMethod"].kind == EntityKind.METHOD
 
-    assert "arrowFunc" in entities
-    assert entities["arrowFunc"].kind == EntityKind.FUNCTION
+    assert "test.arrowFunc" in entities
+    assert entities["test.arrowFunc"].kind == EntityKind.FUNCTION
 
     # Check relationships
     rels = result.relationships
@@ -158,8 +158,8 @@ def test_parse_typescript_features(tmp_path: Path) -> None:
     targets = {r.target_id for r in calls}
     assert (
         build_unresolved_reference_id(
-            "typescript", file_path, "MyClass.myMethod", "something"
+            "typescript", file_path, "test.MyClass.myMethod", "something"
         )
         in targets
     )
-    assert build_internal_entity_id(file_path, "MyClass") in targets
+    assert build_internal_entity_id(file_path, "test.MyClass") in targets

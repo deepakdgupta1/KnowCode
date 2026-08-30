@@ -26,7 +26,8 @@ def _service(root: Path, entity_source: str) -> KnowCodeService:
 
 
 def _alpha_id(src: Path) -> str:
-    return f"{(src / 'm.py').resolve()}::alpha"
+    # ``alpha`` hangs under the ``m`` module scope (BL-9).
+    return f"{(src / 'm.py').resolve()}::m.alpha"
 
 
 def test_disk_mode_resolves_entity_source_from_the_file(tmp_path: Path) -> None:

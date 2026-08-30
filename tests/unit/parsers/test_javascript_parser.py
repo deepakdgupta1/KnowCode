@@ -60,16 +60,16 @@ def test_parse_simple_js(tmp_path: Path) -> None:
 
     # Check entities
     entities = {e.qualified_name: e for e in result.entities}
-    assert "MyClass" in entities
-    assert entities["MyClass"].kind == EntityKind.CLASS
+    assert "test.MyClass" in entities
+    assert entities["test.MyClass"].kind == EntityKind.CLASS
 
     # Check method (might be MyClass.myMethod or just myMethod dependent on implementation details)
     # Our implementation uses qualified names
-    assert "MyClass.myMethod" in entities
-    assert entities["MyClass.myMethod"].kind == EntityKind.METHOD
+    assert "test.MyClass.myMethod" in entities
+    assert entities["test.MyClass.myMethod"].kind == EntityKind.METHOD
 
-    assert "globalFunc" in entities
-    assert entities["globalFunc"].kind == EntityKind.FUNCTION
+    assert "test.globalFunc" in entities
+    assert entities["test.globalFunc"].kind == EntityKind.FUNCTION
 
     # Check relationships
     rels = result.relationships
@@ -86,11 +86,11 @@ def test_parse_simple_js(tmp_path: Path) -> None:
     targets = {r.target_id for r in calls}
     assert (
         build_unresolved_reference_id(
-            "javascript", file_path, "MyClass.myMethod", "something"
+            "javascript", file_path, "test.MyClass.myMethod", "something"
         )
         in targets
     )
-    assert build_internal_entity_id(file_path, "MyClass") in targets
+    assert build_internal_entity_id(file_path, "test.MyClass") in targets
 
 
 def test_parse_lexical_function_assignments(tmp_path: Path) -> None:
@@ -109,15 +109,15 @@ def test_parse_lexical_function_assignments(tmp_path: Path) -> None:
     result = parser.parse_file(file_path)
 
     entities = {e.qualified_name: e for e in result.entities}
-    assert "bar" in entities
-    assert entities["bar"].kind == EntityKind.FUNCTION
-    assert "baz" in entities
-    assert entities["baz"].kind == EntityKind.FUNCTION
+    assert "lexical.bar" in entities
+    assert entities["lexical.bar"].kind == EntityKind.FUNCTION
+    assert "lexical.baz" in entities
+    assert entities["lexical.baz"].kind == EntityKind.FUNCTION
 
     calls = [r for r in result.relationships if r.kind == RelationshipKind.CALLS]
     assert any(
-        r.source_id == build_internal_entity_id(file_path, "baz")
-        and r.target_id == build_internal_entity_id(file_path, "bar")
+        r.source_id == build_internal_entity_id(file_path, "lexical.baz")
+        and r.target_id == build_internal_entity_id(file_path, "lexical.bar")
         for r in calls
     )
 
@@ -137,14 +137,14 @@ def test_parse_export_default_anonymous_function(tmp_path: Path) -> None:
     result = parser.parse_file(file_path)
 
     entities = {e.qualified_name: e for e in result.entities}
-    assert set(entities) == {"anonymous_default", "default_export"}
-    assert entities["default_export"].kind == EntityKind.FUNCTION
-    assert entities["default_export"].location.line_start == 2
+    assert set(entities) == {"anonymous_default", "anonymous_default.default_export"}
+    assert entities["anonymous_default.default_export"].kind == EntityKind.FUNCTION
+    assert entities["anonymous_default.default_export"].location.line_start == 2
     module_id = build_internal_entity_id(file_path, "anonymous_default")
     assert len(result.relationships) == 1
     assert result.relationships[0].source_id == module_id
     assert result.relationships[0].target_id == build_internal_entity_id(
-        file_path, "default_export"
+        file_path, "anonymous_default.default_export"
     )
     assert result.relationships[0].kind is RelationshipKind.CONTAINS
 
@@ -171,7 +171,7 @@ def test_parse_named_and_default_exported_classes(
     assert not result.errors
     assert [(entity.qualified_name, entity.kind) for entity in result.entities] == [
         (file_path.stem, EntityKind.MODULE),
-        (declaration_name, EntityKind.CLASS),
+        (f"{file_path.stem}.{declaration_name}", EntityKind.CLASS),
     ]
     assert result.entities[1].location.line_start == 1
     assert result.entities[1].location.line_end == 1
@@ -180,7 +180,7 @@ def test_parse_named_and_default_exported_classes(
         file_path, file_path.stem
     )
     assert result.relationships[0].target_id == build_internal_entity_id(
-        file_path, declaration_name
+        file_path, f"{file_path.stem}.{declaration_name}"
     )
 
 
@@ -206,14 +206,14 @@ export const resolver = function() { return factory() }
         for entity in result.entities
     ] == [
         ("exports", EntityKind.MODULE, 1, 3),
-        ("create", EntityKind.FUNCTION, 1, 1),
-        ("factory", EntityKind.FUNCTION, 2, 2),
-        ("resolver", EntityKind.FUNCTION, 3, 3),
+        ("exports.create", EntityKind.FUNCTION, 1, 1),
+        ("exports.factory", EntityKind.FUNCTION, 2, 2),
+        ("exports.resolver", EntityKind.FUNCTION, 3, 3),
     ]
     module_id = build_internal_entity_id(file_path, "exports")
-    create_id = build_internal_entity_id(file_path, "create")
-    factory_id = build_internal_entity_id(file_path, "factory")
-    resolver_id = build_internal_entity_id(file_path, "resolver")
+    create_id = build_internal_entity_id(file_path, "exports.create")
+    factory_id = build_internal_entity_id(file_path, "exports.factory")
+    resolver_id = build_internal_entity_id(file_path, "exports.resolver")
     assert {
         (relationship.source_id, relationship.target_id, relationship.kind)
         for relationship in result.relationships
@@ -233,11 +233,11 @@ def test_nonlocal_call_uses_scoped_unresolved_reference(tmp_path: Path) -> None:
 
     result = JavaScriptParser().parse_file(file_path)
 
-    run_id = build_internal_entity_id(file_path, "run")
+    run_id = build_internal_entity_id(file_path, "calls.run")
     assert any(
         relationship.source_id == run_id
         and relationship.target_id
-        == build_unresolved_reference_id("javascript", file_path, "run", "remote")
+        == build_unresolved_reference_id("javascript", file_path, "calls.run", "remote")
         and relationship.kind is RelationshipKind.CALLS
         for relationship in result.relationships
     )
@@ -253,7 +253,7 @@ def test_commonjs_require_is_an_external_import(tmp_path: Path) -> None:
 
     result = JavaScriptParser().parse_file(file_path)
 
-    load_id = build_internal_entity_id(file_path, "load")
+    load_id = build_internal_entity_id(file_path, "commonjs.load")
     assert any(
         relationship.source_id == load_id
         and relationship.target_id == build_external_reference_id("npm", "@scope/pkg")

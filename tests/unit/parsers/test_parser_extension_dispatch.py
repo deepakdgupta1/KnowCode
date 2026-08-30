@@ -34,8 +34,8 @@ def test_tsx_file_is_extracted_as_typescript(tmp_path: Path) -> None:
 
     names = _qualified_names(TypeScriptParser(), source)
 
-    assert "Card" in names
-    assert "render" in names
+    assert "card.Card" in names
+    assert "card.render" in names
 
 
 def test_jsx_file_is_extracted_as_javascript(tmp_path: Path) -> None:
@@ -45,7 +45,7 @@ def test_jsx_file_is_extracted_as_javascript(tmp_path: Path) -> None:
 
     names = _qualified_names(JavaScriptParser(), source)
 
-    assert "Btn" in names
+    assert "btn.Btn" in names
 
 
 def test_vue_setup_lang_ts_block_is_extracted(tmp_path: Path) -> None:

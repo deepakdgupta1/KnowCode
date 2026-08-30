@@ -130,23 +130,34 @@ def test_every_reviewed_c2_construct_extracts_exactly(tmp_path: Path) -> None:
     edges = _edge_reprs(builder)
 
     # C2 TypeScript: every exported declaration form, not just the module.
-    assert {"User", "UserId", "Role", "Session", "load", "make"} <= qnames
+    assert {
+        "svc.User",
+        "svc.UserId",
+        "svc.Role",
+        "svc.Session",
+        "svc.load",
+        "svc.make",
+    } <= qnames
 
     # C2 JavaScript: `class Widget extends BaseComponent` emits one INHERITS edge
     # to an explicit unresolved (external) base, not nothing.
-    assert ("Widget", "inherits", "BaseComponent") in edges
+    assert ("app.Widget", "inherits", "BaseComponent") in edges
 
     # C2 Python nesting + scope confinement: place owns its own calls, and the
     # nested normalize()'s calls are never attributed to place.
     assert {
-        "OrderService",
-        "OrderService.place",
-        "OrderService.place.normalize",
+        "orders.OrderService",
+        "orders.OrderService.place",
+        "orders.OrderService.place.normalize",
     } <= qnames
-    assert ("OrderService.place", "calls", "validate") in edges
-    assert ("OrderService.place", "calls", "OrderService.place.normalize") in edges
+    assert ("orders.OrderService.place", "calls", "orders.validate") in edges
+    assert (
+        "orders.OrderService.place",
+        "calls",
+        "orders.OrderService.place.normalize",
+    ) in edges
     place_call_targets = {
-        t for s, k, t in edges if s == "OrderService.place" and k == "calls"
+        t for s, k, t in edges if s == "orders.OrderService.place" and k == "calls"
     }
     assert "strip" not in place_call_targets and "lower" not in place_call_targets, (
         "a nested function's calls leaked into the enclosing scope"
@@ -157,7 +168,7 @@ def test_every_reviewed_c2_construct_extracts_exactly(tmp_path: Path) -> None:
     assert ("core.Core.render", "implements", "core.Render") in edges
 
     # C2 Vue Composition API: template bindings resolve to internal entities.
-    assert {"Widget.onClick", "Widget.label"} <= qnames
+    assert {"Widget.onClick", "Widget.label"} <= qnames  # Vue has no module (BL-10)
     assert ("Widget", "references", "Widget.label") in edges
 
 
@@ -171,7 +182,7 @@ def test_decorated_python_entity_location_includes_its_first_decorator(
     service = next(
         entity
         for entity in builder.entities.values()
-        if entity.qualified_name == "OrderService"
+        if entity.qualified_name == "orders.OrderService"
     )
     assert service.metadata.get("decorators") == ["audit"]
     first_line = (service.source_code or "").splitlines()[0]

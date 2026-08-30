@@ -124,7 +124,10 @@ class PythonParser:
             file_path=file_path,
             source_lines=source_lines,
             parent_id=module_id,
-            parent_qname="",
+            # The module's own name roots every scope in the file, so a
+            # top-level symbol sharing the file stem cannot mint the module's
+            # id (BL-9). RustParser has always done this.
+            parent_qname=module_name,
             parent_is_class=False,
             is_module=True,
             scope_chain=[],
@@ -217,6 +220,7 @@ class PythonParser:
                         file_path,
                         source_lines,
                         parent_id,
+                        parent_qname,
                         entities,
                         relationships,
                     )
@@ -365,19 +369,21 @@ class PythonParser:
         file_path: Path,
         source_lines: list[str],
         parent_id: str,
+        parent_qname: str,
         entities: list[Entity],
         relationships: list[Relationship],
     ) -> None:
         start_line = node.lineno
         end_line = node.end_lineno or node.lineno
-        var_id = build_internal_entity_id(file_path, name)
+        qualified_name = self._qualified_name(parent_qname, name)
+        var_id = build_internal_entity_id(file_path, qualified_name)
 
         entities.append(
             Entity(
                 id=var_id,
                 kind=EntityKind.VARIABLE,
                 name=name,
-                qualified_name=name,
+                qualified_name=qualified_name,
                 location=Location(
                     file_path=str(file_path),
                     line_start=start_line,

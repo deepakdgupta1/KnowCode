@@ -33,11 +33,13 @@ def test_parse_simple_java(tmp_path: Path) -> None:
 
     # Check entities
     entities = {e.qualified_name: e for e in result.entities}
-    assert "MyClass" in entities
-    assert entities["MyClass"].kind == EntityKind.CLASS
+    # Declarations hang under the module scope, so MyClass.java's public
+    # class is MyClass.MyClass and no longer shadows the module (BL-9).
+    assert "MyClass.MyClass" in entities
+    assert entities["MyClass.MyClass"].kind == EntityKind.CLASS
 
-    assert "MyClass.myMethod" in entities
-    assert entities["MyClass.myMethod"].kind == EntityKind.METHOD
+    assert "MyClass.MyClass.myMethod" in entities
+    assert entities["MyClass.MyClass.myMethod"].kind == EntityKind.METHOD
 
     # Check relationships
     rels = result.relationships

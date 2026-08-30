@@ -2,27 +2,149 @@
   "schema_version": 1,
   "language": "typescript",
   "entities": [
-    {"qualified_name": "exported_declarations", "kind": "module", "line_start": 1, "line_end": 8},
-    {"qualified_name": "Shape", "kind": "class", "line_start": 1, "line_end": 1},
-    {"qualified_name": "Identifier", "kind": "class", "line_start": 2, "line_end": 2},
-    {"qualified_name": "State", "kind": "class", "line_start": 3, "line_end": 3},
-    {"qualified_name": "Service", "kind": "class", "line_start": 4, "line_end": 4},
-    {"qualified_name": "createService", "kind": "function", "line_start": 5, "line_end": 5},
-    {"qualified_name": "factory", "kind": "function", "line_start": 6, "line_end": 6},
-    {"qualified_name": "default_export", "kind": "function", "line_start": 7, "line_end": 7},
-    {"qualified_name": "resolver", "kind": "function", "line_start": 8, "line_end": 8}
+    {
+      "qualified_name": "exported_declarations",
+      "kind": "module",
+      "line_start": 1,
+      "line_end": 8
+    },
+    {
+      "qualified_name": "exported_declarations.Shape",
+      "kind": "class",
+      "line_start": 1,
+      "line_end": 1
+    },
+    {
+      "qualified_name": "exported_declarations.Identifier",
+      "kind": "class",
+      "line_start": 2,
+      "line_end": 2
+    },
+    {
+      "qualified_name": "exported_declarations.State",
+      "kind": "class",
+      "line_start": 3,
+      "line_end": 3
+    },
+    {
+      "qualified_name": "exported_declarations.Service",
+      "kind": "class",
+      "line_start": 4,
+      "line_end": 4
+    },
+    {
+      "qualified_name": "exported_declarations.createService",
+      "kind": "function",
+      "line_start": 5,
+      "line_end": 5
+    },
+    {
+      "qualified_name": "exported_declarations.factory",
+      "kind": "function",
+      "line_start": 6,
+      "line_end": 6
+    },
+    {
+      "qualified_name": "exported_declarations.default_export",
+      "kind": "function",
+      "line_start": 7,
+      "line_end": 7
+    },
+    {
+      "qualified_name": "exported_declarations.resolver",
+      "kind": "function",
+      "line_start": 8,
+      "line_end": 8
+    }
   ],
   "relationships": [
-    {"source": "exported_declarations", "target": {"classification": "internal", "qualified_name": "Shape"}, "kind": "contains"},
-    {"source": "exported_declarations", "target": {"classification": "internal", "qualified_name": "Identifier"}, "kind": "contains"},
-    {"source": "exported_declarations", "target": {"classification": "internal", "qualified_name": "State"}, "kind": "contains"},
-    {"source": "exported_declarations", "target": {"classification": "internal", "qualified_name": "Service"}, "kind": "contains"},
-    {"source": "exported_declarations", "target": {"classification": "internal", "qualified_name": "createService"}, "kind": "contains"},
-    {"source": "exported_declarations", "target": {"classification": "internal", "qualified_name": "factory"}, "kind": "contains"},
-    {"source": "exported_declarations", "target": {"classification": "internal", "qualified_name": "default_export"}, "kind": "contains"},
-    {"source": "exported_declarations", "target": {"classification": "internal", "qualified_name": "resolver"}, "kind": "contains"},
-    {"source": "createService", "target": {"classification": "internal", "qualified_name": "Service"}, "kind": "calls"},
-    {"source": "factory", "target": {"classification": "internal", "qualified_name": "createService"}, "kind": "calls"},
-    {"source": "resolver", "target": {"classification": "internal", "qualified_name": "factory"}, "kind": "calls"}
+    {
+      "source": "exported_declarations",
+      "target": {
+        "classification": "internal",
+        "qualified_name": "exported_declarations.Shape"
+      },
+      "kind": "contains"
+    },
+    {
+      "source": "exported_declarations",
+      "target": {
+        "classification": "internal",
+        "qualified_name": "exported_declarations.Identifier"
+      },
+      "kind": "contains"
+    },
+    {
+      "source": "exported_declarations",
+      "target": {
+        "classification": "internal",
+        "qualified_name": "exported_declarations.State"
+      },
+      "kind": "contains"
+    },
+    {
+      "source": "exported_declarations",
+      "target": {
+        "classification": "internal",
+        "qualified_name": "exported_declarations.Service"
+      },
+      "kind": "contains"
+    },
+    {
+      "source": "exported_declarations",
+      "target": {
+        "classification": "internal",
+        "qualified_name": "exported_declarations.createService"
+      },
+      "kind": "contains"
+    },
+    {
+      "source": "exported_declarations",
+      "target": {
+        "classification": "internal",
+        "qualified_name": "exported_declarations.factory"
+      },
+      "kind": "contains"
+    },
+    {
+      "source": "exported_declarations",
+      "target": {
+        "classification": "internal",
+        "qualified_name": "exported_declarations.default_export"
+      },
+      "kind": "contains"
+    },
+    {
+      "source": "exported_declarations",
+      "target": {
+        "classification": "internal",
+        "qualified_name": "exported_declarations.resolver"
+      },
+      "kind": "contains"
+    },
+    {
+      "source": "exported_declarations.createService",
+      "target": {
+        "classification": "internal",
+        "qualified_name": "exported_declarations.Service"
+      },
+      "kind": "calls"
+    },
+    {
+      "source": "exported_declarations.factory",
+      "target": {
+        "classification": "internal",
+        "qualified_name": "exported_declarations.createService"
+      },
+      "kind": "calls"
+    },
+    {
+      "source": "exported_declarations.resolver",
+      "target": {
+        "classification": "internal",
+        "qualified_name": "exported_declarations.factory"
+      },
+      "kind": "calls"
+    }
   ]
 }

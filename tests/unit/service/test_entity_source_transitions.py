@@ -36,7 +36,8 @@ def _service(root: Path, entity_source: str) -> KnowCodeService:
 
 
 def _eid(src: Path, file_name: str, fn: str) -> str:
-    return f"{(src / file_name).resolve()}::{fn}"
+    # Declarations hang under the module scope (BL-9).
+    return f"{(src / file_name).resolve()}::{Path(file_name).stem}.{fn}"
 
 
 def _current_generation(root: Path) -> Path:
@@ -52,7 +53,7 @@ def _row_has_text(root: Path, file_name: str, fn: str) -> bool:
     try:
         row = con.execute(
             "SELECT source_code IS NOT NULL FROM entities WHERE entity_id LIKE ?",
-            (f"%{file_name}::{fn}",),
+            (f"%{file_name}::{Path(file_name).stem}.{fn}",),
         ).fetchone()
         return bool(row[0])
     finally:

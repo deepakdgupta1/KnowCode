@@ -30,55 +30,6 @@ measured reason not to build something is worth more than silence.
 
 ## Open
 
-### BL-9 - A symbol named after its own file shadows the file's module entity
-
-**Severity:** High. **Found:** 2026-08-29, writing the parser-contract
-uniqueness assertion that closed BL-1.
-
-Every parser gives a file's MODULE entity the file stem as its qualified name.
-A top-level symbol whose name is also the stem therefore produces the same
-entity id, and the two entities silently overwrite each other in
-`knowledge.db`. This is BL-1's defect in a second place: identity derived
-without lexical scope. ADR 1's own example, `module.Type.method`, says a
-module-scoped symbol should carry the module prefix, and none does.
-
-Unlike BL-1 the file is not rejected, because the chunker skips MODULE
-entities and so emits no duplicate chunk id. What breaks is the graph.
-
-Measured on this repository: **3 of 313 indexable tracked files**, one of them
-`src/knowcode/cli/cli.py`, where the MODULE entity spanning lines 1-1071 and
-the `cli()` function at lines 23-27 share
-`src/knowcode/cli/cli.py::cli`, and **48 relationships point at the ambiguous
-id**. The others are `scripts/fix_swallowed.py` and
-`tests/integration/test_golden_queries.py`.
-
-It is language-independent. Confirmed for Python, JavaScript, and TypeScript,
-and the mechanism holds for every parser that emits a MODULE entity. It is
-commoner in JavaScript and TypeScript, where `format.ts` exporting
-`function format()` is ordinary style.
-
-Reproduce:
-
-```bash
-pytest tests/unit/parsers/test_parser_contract.py -k named_after_its_file -rx
-```
-
-That test is a strict `xfail` carrying this item's id, so it fails loudly the
-day the defect is fixed and the marker has to come off.
-
-**Deferred on purpose.** The honest fix is to give module-scoped symbols the
-scope prefix ADR 1 already describes, which changes every entity id in the
-index and touches all nine parsers. Do not paper over it with a reserved
-`::module` token; ADR 1 rules out ad hoc internal namespaces, and BL-6 is the
-evidence that inventing one produces ids nothing else agrees with.
-
-**This item no longer has a carrier.** It was deferred to Phase C on the
-premise that Phase C rewrites id encoding anyway. C1 shipped instead as a
-storage-layer codec (ADR 0010): ids are unchanged above the store, and only
-their stored form is relative. Nothing in Phase C touches how a qualified name
-is built, so BL-9 now costs what it costs on its own. Size it as a parser
-change, not as a rider on storage work.
-
 ### BL-10 - A Vue file has no entity standing for the file itself
 
 **Severity:** Low. **Found:** 2026-08-29, closing BL-6 in Phase B.
@@ -168,6 +119,7 @@ the anchors are re-verified as part of adopting a later phase.
 
 | Item | Resolution |
 | --- | --- |
+| A symbol named after its own file shadowed the file's module entity (BL-9) | Fixed 2026-08-31, as [ADR 11](adr/adr-0011-module-scoped-qualified-names.md). Every declaration made directly in a file now carries the module's qualified name as its prefix, and the module entity keeps the bare stem. **This is not a new design.** `RustParser` already emitted `sample.top` and `sample.S.meth`, and `HeadingScope` already rooted every heading under the document name, which is how BL-1 was closed. Python, JavaScript, TypeScript and Java were the four that read ADR 1's `module.Type.method` as an explicit module construct rather than the file. **The damage was worse than an ambiguity.** In `src/knowcode/cli/cli.py` the declaration won the merge, so the module entity spanning lines 1-1071 was destroyed and its **48 edges, 27 `imports` and 21 `contains`, came to rest on the five-line `cli()` function**, along with the file's whole 1,170-byte import block as a chunk. After the fix the same file puts 48 edges on the module and 1 on the function, and 0 of 335 indexable tracked files collide, from 3. `TreeSitterParser._module_scope` is the single definition of the prefix; `RustParser` was migrated onto it rather than keeping its own `file_path.stem` read. **A second, latent defect surfaced while doing it**: JavaScript, TypeScript and Java passed a class's *bare* name to their method extractor, so the prefix stopped at the first nesting level and `svc.Session` held a `Session.constructor`. It was invisible before, because a bare name and a qualified one were the same string. The e2e release-gate test is what caught it. `Indexer.SCHEMA_VERSION` moves 6 to 7, so every generation rebuilds. Reference resolution is untouched: `_find_entity_by_name` matches `Entity.name`, which is unchanged, and the integration test asserting `trace_calls` resolves a bare name still passes against the new id. Each parser's own local symbol table was migrated with it, because a bare name there resolves a reference to an id no entity was emitted under. Pinned by `tests/unit/parsers/test_parser_contract.py`, whose BL-9 strict `xfail` is gone: 10 rows across five parsers assert no colliding ids, and 10 more assert the module entity *survives*, since a parser that stopped emitting one would pass the first check. Six committed fixture contracts were re-scoped by a script that refuses to write unless it can prove the change is a pure re-scoping against a live parse, and it refused twice, correctly, on Rust and Vue. Full suite 1,955 passed, 0 xfailed, down from 3. Left open: BL-10, Vue still has no entity for the file. |
 | A chunk was content-addressed by MD5 (BL-11) | Fixed 2026-08-31. All four `hashlib.md5` sites in `Chunker` are SHA-256, so both halves of an index are addressed by the same digest, and the prose route stops re-hashing bytes `ProseChunker` has already digested. That digest is not decorative: `Indexer._reuse_durable_embeddings` looks a chunk up by it and, on a hit, attaches the stored embedding **without comparing content**, so a collision hands one chunk another chunk's vector and the chunk still retrieves. Digest strength is what stands in for that missing comparison, which is why it had to be the strong one. `Indexer.SCHEMA_VERSION` moves 5 to 6 and `SUPPORTED_SCHEMA_VERSIONS` holds only the current value, so **every existing generation needs one rebuild**; `knowcode doctor` reports it as `Unsupported index manifest schema version 5. Supported versions: [6]. Rebuild with knowcode build.` rather than failing obscurely. The storage layer needed no change, because `pack_content_hash` was already width-agnostic, and it stays that way even though nothing emits 32 characters now: narrowing it to one width is what made C5 a net loss of 36,864 bytes the first time. **Measured cost, 0.24 MB.** Rewriting every `content_hash` in generation `20260830T061050304877Z-8abc9f11` to the real SHA-256 of its own row's `content` and vacuuming both copies takes `chunks.db` from 39,129,088 to 39,366,656 bytes, **+237,568, 0.61%**. This is the first item in the storage stream that spends rather than saves, and the plan's §17 says why the trade is right. Verified end to end on a rebuilt corpus: both `chunks.content_hash` and `entities.content_hash` are 32 raw bytes, and all 30 stored digests equal `sha256` of the row's own stored content. Pinned by `tests/unit/indexing/test_chunk_content_hash.py`, whose assertions compare against the recomputed digest rather than against a width, so a different 64-character digest still fails them. The prose row is the odd one: once both routes agree on the algorithm no honest input distinguishes a reuse from a second hash, so it observes a `ProseChunk` whose recorded digest does not describe its content. Three mutation probes, each reddening only its own guard: `sha3_256` (same width, different digest), re-hashing on the prose route, and reverting the schema version. `test_md5_digest_is_stored_as_sixteen_bytes` is renamed and widened rather than deleted, because it is now the only place a packer narrowing would show. Full suite 1,935 passed, 3 xfailed. |
 | A generation manifest could not witness row loss in either database (BL-8) | Fixed 2026-08-31. The witness is temporal, not structural: `compact()` reads one digest per row set from its own writer connection before it does anything, and compares after, so the comparison cannot be satisfied by the damage. Nothing is threaded in from the caller, which is what makes it hold on all three publication paths where the rejected chunk-count fix could not: a full rebuild knows its corpus total, `index_incremental` knows only the files it touched, and a watch batch counts nothing at all. `rows_preserved` in `storage/rewrite_witness.py` is the bracket, `_rewrite()` on both stores is the named place a future staged rewrite goes so it lands inside the bracket rather than beside it, and `StagedRewriteError` names which row set moved. **The item's premise was half wrong, found by probe.** On the full-build path `knowledge.db` was never blind: `entity_ids` comes from the in-memory `GraphBuilder` at `service.py:957`, so an entity-dropping probe was already caught as `entity id digest mismatch` and refused to publish. Only `StagedGenerationWriter.publish` reads entity ids back out of the artifact, so the watch path was blind where the rebuild was not. `chunks.db` was blind on every path. **Reproduced end to end and re-run under the fix**: a probe deleting `WHERE rowid = (SELECT MIN(rowid) FROM chunks)` inside `compact` published a 30-chunk corpus as 29 with `validate_generation(verify_digests=True)` returning no failures; the same probe now refuses, the damaged `chunks.db` is discarded, and the build reports `rewriting staged chunks.db changed chunk_ids, embedded_chunk_ids`. **Three choices carry it.** The digest is over a sorted *list*, not `digest_ids`' set, because `relationships` has no unique constraint and a set cannot see one of two identical edges go. Edges are digested as raw integer triples with the `eid` codebook witnessed separately rather than joined into readable endpoints, because two thirds of endpoints have no `entities` row and a join hides an orphan on both sides of the comparison, which is the false negative BL-17 hit. And the chunk witness covers *which* chunks carry a durable embedding, not how many, which is the blind spot [ADR 9](adr/adr-0009-derived-vector-plane.md) records the D1 guard sharing. **What it does not close**: this witnesses the rewrite, not the whole build. Compaction remains the only step that rewrites a staged artifact, and `_rewrite()` is where the next one has to go to inherit the guard. Pinned by `tests/unit/storage/test_rewrite_witness.py`. Three mutation probes, each reddening only its own guard: digesting the set reddens the identical-edges row alone, joining edges through `entities` reddens the two codebook rows, and pointing the embedding witness at every chunk reddens the embedding row. Measured on generation `20260830T061050304877Z-8abc9f11` with paired interleaved runs, the bracket costs 29 ms on a 39.1 MB `chunks.db` and 89 ms on a 9.8 MB `knowledge.db`, once per publication. Full suite 1,930 passed, 3 xfailed. |
 | The exact search mode treated `_` and `%` as wildcards (BL-15) | Fixed 2026-08-31. Both SQLite stores had it, not one. `SqliteKnowledgeStore.search` built the same unescaped `LIKE` pattern, and its in-memory twin `KnowledgeStore.search` is `pattern_lower in name.lower()`, so two implementations of one Protocol disagreed and the in-memory one states the contract. `store.search` is reached from `mcp/server.py:185` with a raw user query and from `:427` with a `trace_calls` target, which is an identifier and so full of underscores. **The row counts understate it.** On generation `20260830T061050304877Z-8abc9f11` the quoted query `"vector_"` served 927 chunks of which 264 held the literal, and now serves 278 of which all 278 do. But `search_exact` has no `ORDER BY`, so scan order decides what the limit keeps: at the orchestrator's own breadth of `max(10, limit_entities * 5)` = 15, **none of the 15 rows contained the string asked for**, every one scored 1.0. All 15 do now. `storage/sqlite_like.py` holds the pattern builder and the `ESCAPE` clause in one place, because an escaped pattern run without the clause matches the escape character itself. Case-insensitivity over ASCII was kept on purpose and is now written into the `ChunkRepository.search_exact` contract rather than left implicit. Pinned by `tests/unit/storage/test_like_escaping.py`; the entity half is differential against the in-memory store, so no relabelling satisfies it. Two mutation probes: dropping the `%` and `_` escaping reddens exactly the five rows that were red before the fix, and emptying `LIKE_ESCAPE_CLAUSE` reddens all ten, which is what proves the two halves are coupled. Full suite 1,920 passed, 3 xfailed. |

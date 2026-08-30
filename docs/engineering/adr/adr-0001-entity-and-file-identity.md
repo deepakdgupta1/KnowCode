@@ -6,6 +6,10 @@
 
 **Origin:** Parser, Index, and Security Hardening blueprint, Step 01 (archived source: docs/archive/hardening-contracts.md)
 
+**Amended by:** [ADR 0010](adr-0010-root-relative-id-storage.md) (the stored
+form of an id) and [ADR 0011](adr-0011-module-scoped-qualified-names.md) (which
+scope a qualified name starts from)
+
 ---
 
 

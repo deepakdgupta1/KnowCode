@@ -2,18 +2,83 @@
   "schema_version": 1,
   "language": "python",
   "entities": [
-    {"qualified_name": "module_variables", "kind": "module", "line_start": 1, "line_end": 3},
-    {"qualified_name": "threshold", "kind": "variable", "line_start": 1, "line_end": 1},
-    {"qualified_name": "primary", "kind": "variable", "line_start": 2, "line_end": 2},
-    {"qualified_name": "secondary", "kind": "variable", "line_start": 2, "line_end": 2},
-    {"qualified_name": "left", "kind": "variable", "line_start": 3, "line_end": 3},
-    {"qualified_name": "right", "kind": "variable", "line_start": 3, "line_end": 3}
+    {
+      "qualified_name": "module_variables",
+      "kind": "module",
+      "line_start": 1,
+      "line_end": 3
+    },
+    {
+      "qualified_name": "module_variables.threshold",
+      "kind": "variable",
+      "line_start": 1,
+      "line_end": 1
+    },
+    {
+      "qualified_name": "module_variables.primary",
+      "kind": "variable",
+      "line_start": 2,
+      "line_end": 2
+    },
+    {
+      "qualified_name": "module_variables.secondary",
+      "kind": "variable",
+      "line_start": 2,
+      "line_end": 2
+    },
+    {
+      "qualified_name": "module_variables.left",
+      "kind": "variable",
+      "line_start": 3,
+      "line_end": 3
+    },
+    {
+      "qualified_name": "module_variables.right",
+      "kind": "variable",
+      "line_start": 3,
+      "line_end": 3
+    }
   ],
   "relationships": [
-    {"source": "module_variables", "target": {"classification": "internal", "qualified_name": "threshold"}, "kind": "contains"},
-    {"source": "module_variables", "target": {"classification": "internal", "qualified_name": "primary"}, "kind": "contains"},
-    {"source": "module_variables", "target": {"classification": "internal", "qualified_name": "secondary"}, "kind": "contains"},
-    {"source": "module_variables", "target": {"classification": "internal", "qualified_name": "left"}, "kind": "contains"},
-    {"source": "module_variables", "target": {"classification": "internal", "qualified_name": "right"}, "kind": "contains"}
+    {
+      "source": "module_variables",
+      "target": {
+        "classification": "internal",
+        "qualified_name": "module_variables.threshold"
+      },
+      "kind": "contains"
+    },
+    {
+      "source": "module_variables",
+      "target": {
+        "classification": "internal",
+        "qualified_name": "module_variables.primary"
+      },
+      "kind": "contains"
+    },
+    {
+      "source": "module_variables",
+      "target": {
+        "classification": "internal",
+        "qualified_name": "module_variables.secondary"
+      },
+      "kind": "contains"
+    },
+    {
+      "source": "module_variables",
+      "target": {
+        "classification": "internal",
+        "qualified_name": "module_variables.left"
+      },
+      "kind": "contains"
+    },
+    {
+      "source": "module_variables",
+      "target": {
+        "classification": "internal",
+        "qualified_name": "module_variables.right"
+      },
+      "kind": "contains"
+    }
   ]
 }

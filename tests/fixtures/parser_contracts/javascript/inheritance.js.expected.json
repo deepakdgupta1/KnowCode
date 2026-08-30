@@ -2,27 +2,154 @@
   "schema_version": 1,
   "language": "javascript",
   "entities": [
-    {"qualified_name": "inheritance", "kind": "module", "line_start": 1, "line_end": 7},
-    {"qualified_name": "Parent", "kind": "class", "line_start": 1, "line_end": 1},
-    {"qualified_name": "Child", "kind": "class", "line_start": 2, "line_end": 2},
-    {"qualified_name": "RemoteChild", "kind": "class", "line_start": 3, "line_end": 3},
-    {"qualified_name": "MixedChild", "kind": "class", "line_start": 4, "line_end": 4},
-    {"qualified_name": "ConditionalChild", "kind": "class", "line_start": 5, "line_end": 5},
-    {"qualified_name": "ForwardChild", "kind": "class", "line_start": 6, "line_end": 6},
-    {"qualified_name": "ForwardParent", "kind": "class", "line_start": 7, "line_end": 7}
+    {
+      "qualified_name": "inheritance",
+      "kind": "module",
+      "line_start": 1,
+      "line_end": 7
+    },
+    {
+      "qualified_name": "inheritance.Parent",
+      "kind": "class",
+      "line_start": 1,
+      "line_end": 1
+    },
+    {
+      "qualified_name": "inheritance.Child",
+      "kind": "class",
+      "line_start": 2,
+      "line_end": 2
+    },
+    {
+      "qualified_name": "inheritance.RemoteChild",
+      "kind": "class",
+      "line_start": 3,
+      "line_end": 3
+    },
+    {
+      "qualified_name": "inheritance.MixedChild",
+      "kind": "class",
+      "line_start": 4,
+      "line_end": 4
+    },
+    {
+      "qualified_name": "inheritance.ConditionalChild",
+      "kind": "class",
+      "line_start": 5,
+      "line_end": 5
+    },
+    {
+      "qualified_name": "inheritance.ForwardChild",
+      "kind": "class",
+      "line_start": 6,
+      "line_end": 6
+    },
+    {
+      "qualified_name": "inheritance.ForwardParent",
+      "kind": "class",
+      "line_start": 7,
+      "line_end": 7
+    }
   ],
   "relationships": [
-    {"source": "inheritance", "target": {"classification": "internal", "qualified_name": "Parent"}, "kind": "contains"},
-    {"source": "inheritance", "target": {"classification": "internal", "qualified_name": "Child"}, "kind": "contains"},
-    {"source": "inheritance", "target": {"classification": "internal", "qualified_name": "RemoteChild"}, "kind": "contains"},
-    {"source": "inheritance", "target": {"classification": "internal", "qualified_name": "MixedChild"}, "kind": "contains"},
-    {"source": "inheritance", "target": {"classification": "internal", "qualified_name": "ConditionalChild"}, "kind": "contains"},
-    {"source": "inheritance", "target": {"classification": "internal", "qualified_name": "ForwardChild"}, "kind": "contains"},
-    {"source": "inheritance", "target": {"classification": "internal", "qualified_name": "ForwardParent"}, "kind": "contains"},
-    {"source": "Child", "target": {"classification": "internal", "qualified_name": "Parent"}, "kind": "inherits"},
-    {"source": "RemoteChild", "target": {"classification": "unresolved", "scope": "RemoteChild", "symbol": "Framework.Component"}, "kind": "inherits"},
-    {"source": "MixedChild", "target": {"classification": "unresolved", "scope": "MixedChild", "symbol": "withMixin(Parent)"}, "kind": "inherits"},
-    {"source": "ConditionalChild", "target": {"classification": "unresolved", "scope": "ConditionalChild", "symbol": "(enabled ? Parent : Framework.Component)"}, "kind": "inherits"},
-    {"source": "ForwardChild", "target": {"classification": "internal", "qualified_name": "ForwardParent"}, "kind": "inherits"}
+    {
+      "source": "inheritance",
+      "target": {
+        "classification": "internal",
+        "qualified_name": "inheritance.Parent"
+      },
+      "kind": "contains"
+    },
+    {
+      "source": "inheritance",
+      "target": {
+        "classification": "internal",
+        "qualified_name": "inheritance.Child"
+      },
+      "kind": "contains"
+    },
+    {
+      "source": "inheritance",
+      "target": {
+        "classification": "internal",
+        "qualified_name": "inheritance.RemoteChild"
+      },
+      "kind": "contains"
+    },
+    {
+      "source": "inheritance",
+      "target": {
+        "classification": "internal",
+        "qualified_name": "inheritance.MixedChild"
+      },
+      "kind": "contains"
+    },
+    {
+      "source": "inheritance",
+      "target": {
+        "classification": "internal",
+        "qualified_name": "inheritance.ConditionalChild"
+      },
+      "kind": "contains"
+    },
+    {
+      "source": "inheritance",
+      "target": {
+        "classification": "internal",
+        "qualified_name": "inheritance.ForwardChild"
+      },
+      "kind": "contains"
+    },
+    {
+      "source": "inheritance",
+      "target": {
+        "classification": "internal",
+        "qualified_name": "inheritance.ForwardParent"
+      },
+      "kind": "contains"
+    },
+    {
+      "source": "inheritance.Child",
+      "target": {
+        "classification": "internal",
+        "qualified_name": "inheritance.Parent"
+      },
+      "kind": "inherits"
+    },
+    {
+      "source": "inheritance.RemoteChild",
+      "target": {
+        "classification": "unresolved",
+        "scope": "inheritance.RemoteChild",
+        "symbol": "Framework.Component"
+      },
+      "kind": "inherits"
+    },
+    {
+      "source": "inheritance.MixedChild",
+      "target": {
+        "classification": "unresolved",
+        "scope": "inheritance.MixedChild",
+        "symbol": "withMixin(Parent)"
+      },
+      "kind": "inherits"
+    },
+    {
+      "source": "inheritance.ConditionalChild",
+      "target": {
+        "classification": "unresolved",
+        "scope": "inheritance.ConditionalChild",
+        "symbol": "(enabled ? Parent : Framework.Component)"
+      },
+      "kind": "inherits"
+    },
+    {
+      "source": "inheritance.ForwardChild",
+      "target": {
+        "classification": "internal",
+        "qualified_name": "inheritance.ForwardParent"
+      },
+      "kind": "inherits"
+    }
   ]
 }

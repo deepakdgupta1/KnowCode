@@ -112,7 +112,7 @@ class Indexer:
     # reader that predates the codec would hand callers relative ids and
     # resolve nothing. New artifacts read correctly under old code only by
     # accident, so the version refuses them outright.
-    SCHEMA_VERSION = 6
+    SCHEMA_VERSION = 7
     LEGACY_MANIFEST_VERSION = 1
     SUPPORTED_SCHEMA_VERSIONS = {SCHEMA_VERSION}
 

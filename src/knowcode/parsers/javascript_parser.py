@@ -33,7 +33,7 @@ class JavaScriptParser(TreeSitterParser):
         """Extract JavaScript-family declarations through one shared dispatcher."""
         entities: list[Entity] = []
         relationships: list[Relationship] = []
-        local_symbols = self._collect_local_symbols(node)
+        local_symbols = self._collect_local_symbols(node, file_path)
 
         for child in node.children:
             child_entities, child_relationships = self._dispatch_declaration(
@@ -147,15 +147,21 @@ class JavaScriptParser(TreeSitterParser):
             return value, "default_export"
         return None, None
 
-    def _collect_local_symbols(self, node: Any) -> LocalSymbols:
-        """Collect module declarations before emitting order-independent edges."""
+    def _collect_local_symbols(self, node: Any, file_path: Path) -> LocalSymbols:
+        """Collect module declarations before emitting order-independent edges.
+
+        The table holds the same module-scoped qualified names the entities
+        carry (BL-9). A bare name here would resolve a reference to an id no
+        entity was emitted under.
+        """
+        scope = self._module_scope(file_path)
         collected: dict[str, list[str]] = {}
         for child in node.children:
             declaration, fallback_name = self._unwrap_export(child)
             if declaration is None:
                 continue
             for name in self._declared_names(declaration, fallback_name):
-                collected.setdefault(name, []).append(name)
+                collected.setdefault(name, []).append(f"{scope}.{name}")
 
         return {
             name: tuple(qualified_names) for name, qualified_names in collected.items()
@@ -274,7 +280,7 @@ class JavaScriptParser(TreeSitterParser):
             self._get_text(name_node) if name_node is not None else fallback_name
         )
         assert class_name is not None
-        qualified_name = class_name
+        qualified_name = f"{self._module_scope(file_path)}.{class_name}"
         class_id = build_internal_entity_id(file_path, qualified_name)
 
         superclass = self._find_superclass(node)
@@ -313,7 +319,7 @@ class JavaScriptParser(TreeSitterParser):
                         source_code,
                         source_lines,
                         kind=EntityKind.METHOD,
-                        parent_name=class_name,
+                        parent_name=qualified_name,
                         local_symbols=local_symbols,
                     )
                     entities.append(method_entity)
@@ -387,7 +393,7 @@ class JavaScriptParser(TreeSitterParser):
         if parent_name:
             qualified_name = f"{parent_name}.{name}"
         else:
-            qualified_name = name
+            qualified_name = f"{self._module_scope(file_path)}.{name}"
 
         func_id = build_internal_entity_id(file_path, qualified_name)
 
@@ -429,10 +435,11 @@ class JavaScriptParser(TreeSitterParser):
         name = (
             self._get_text(name_node) if name_node else (fallback_name or "anonymous")
         )
-        func_id = build_internal_entity_id(file_path, name)
+        qualified_name = f"{self._module_scope(file_path)}.{name}"
+        func_id = build_internal_entity_id(file_path, qualified_name)
 
         entity = self._create_entity(
-            node, EntityKind.FUNCTION, name, name, file_path, source_lines
+            node, EntityKind.FUNCTION, name, qualified_name, file_path, source_lines
         )
 
         relationships = [

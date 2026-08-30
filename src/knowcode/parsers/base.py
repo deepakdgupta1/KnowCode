@@ -75,7 +75,7 @@ class TreeSitterParser:
         source_lines = source_code.splitlines()
 
         # Create module entity
-        module_name = file_path.stem
+        module_name = self._module_scope(file_path)
         module_id = build_internal_entity_id(file_path, module_name)
         module_entity = Entity(
             id=module_id,
@@ -97,10 +97,8 @@ class TreeSitterParser:
         # Two declarations in one file cannot share one canonical ID. Dedupe the
         # real declarations (children) and surface the dropped duplicate instead
         # of letting it collapse silently in GraphBuilder. The synthetic module
-        # entity is intentionally excluded: a top-level declaration whose name
-        # matches the file stem (notably a Java public class) is a redundant
-        # wrapper collision, not a duplicate declaration, and is resolved by the
-        # graph merge keeping the declaration.
+        # entity is excluded because it is not a declaration; it can no longer
+        # collide with one, since every declaration is scoped under it (BL-9).
         child_entities, dedupe_errors = dedupe_entities_by_id(child_entities)
         entities.extend(child_entities)
         relationships.extend(child_rels)
@@ -119,6 +117,17 @@ class TreeSitterParser:
             relationships=relationships,
             errors=errors,
         )
+
+    @staticmethod
+    def _module_scope(file_path: Path) -> str:
+        """The qualified name every declaration in the file hangs under.
+
+        ADR 1 says a qualified name carries its lexical scope, and a file's
+        module is the outermost scope there is. Rooting declarations here is
+        what stops a top-level symbol sharing the file stem from minting the
+        module entity's own id and silently replacing it (BL-9).
+        """
+        return file_path.stem
 
     def _extract_file(
         self,

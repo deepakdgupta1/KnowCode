@@ -60,10 +60,10 @@ def test_nested_function_call_resolves_locally_without_leaking(tmp_path: Path) -
     )
     result = PythonParser().parse_file(src)
     by_qname = {entity.qualified_name: entity for entity in result.entities}
-    assert {"outer", "outer.duplicate"} <= set(by_qname)
+    assert {"scope.outer", "scope.outer.duplicate"} <= set(by_qname)
 
-    outer_id = by_qname["outer"].id
-    duplicate_id = by_qname["outer.duplicate"].id
+    outer_id = by_qname["scope.outer"].id
+    duplicate_id = by_qname["scope.outer.duplicate"].id
 
     calls = [rel for rel in result.relationships if rel.kind is RelationshipKind.CALLS]
     # outer() calls its locally defined duplicate() -> internal target.
@@ -99,12 +99,12 @@ def test_method_local_call_resolves_to_nested_function(tmp_path: Path) -> None:
     )
     result = PythonParser().parse_file(src)
     by_qname = {entity.qualified_name: entity for entity in result.entities}
-    assert by_qname["Container"].kind is EntityKind.CLASS
-    assert by_qname["Container.method"].kind is EntityKind.METHOD
-    assert by_qname["Container.method.duplicate"].kind is EntityKind.FUNCTION
+    assert by_qname["cls.Container"].kind is EntityKind.CLASS
+    assert by_qname["cls.Container.method"].kind is EntityKind.METHOD
+    assert by_qname["cls.Container.method.duplicate"].kind is EntityKind.FUNCTION
 
-    method_id = by_qname["Container.method"].id
-    dup_id = by_qname["Container.method.duplicate"].id
+    method_id = by_qname["cls.Container.method"].id
+    dup_id = by_qname["cls.Container.method.duplicate"].id
     calls = [
         rel
         for rel in result.relationships
@@ -127,15 +127,15 @@ def test_async_nested_function_keeps_function_kind_and_scope(tmp_path: Path) -> 
     )
     result = PythonParser().parse_file(src)
     by_qname = {entity.qualified_name: entity for entity in result.entities}
-    assert by_qname["outer"].kind is EntityKind.FUNCTION
-    assert by_qname["outer"].signature is not None
-    assert by_qname["outer"].signature.startswith("async def outer(")
-    assert by_qname["outer.inner"].kind is EntityKind.FUNCTION
-    assert by_qname["outer.inner"].signature is not None
-    assert by_qname["outer.inner"].signature.startswith("async def inner(")
+    assert by_qname["amod.outer"].kind is EntityKind.FUNCTION
+    assert by_qname["amod.outer"].signature is not None
+    assert by_qname["amod.outer"].signature.startswith("async def outer(")
+    assert by_qname["amod.outer.inner"].kind is EntityKind.FUNCTION
+    assert by_qname["amod.outer.inner"].signature is not None
+    assert by_qname["amod.outer.inner"].signature.startswith("async def inner(")
 
-    inner_id = by_qname["outer.inner"].id
-    outer_id = by_qname["outer"].id
+    inner_id = by_qname["amod.outer.inner"].id
+    outer_id = by_qname["amod.outer"].id
     calls = [rel for rel in result.relationships if rel.kind is RelationshipKind.CALLS]
     assert any(rel.source_id == outer_id and rel.target_id == inner_id for rel in calls)
     inner_calls = [rel for rel in calls if rel.source_id == inner_id]
@@ -164,12 +164,12 @@ def test_decorated_definition_spans_decorators_and_records_them(tmp_path: Path) 
     result = PythonParser().parse_file(src)
     by_qname = {entity.qualified_name: entity for entity in result.entities}
 
-    service = by_qname["Service"]
+    service = by_qname["dec.Service"]
     assert service.kind is EntityKind.CLASS
     assert (service.location.line_start, service.location.line_end) == (1, 6)
     assert service.metadata["decorators"] == ["register('service')", "trace"]
 
-    run = by_qname["Service.run"]
+    run = by_qname["dec.Service.run"]
     assert run.kind is EntityKind.METHOD
     assert (run.location.line_start, run.location.line_end) == (4, 6)
     assert run.metadata["decorators"] == ["cached"]
@@ -201,11 +201,11 @@ def test_module_variables_cover_annotation_chaining_and_unpacking(
     by_qname = {entity.qualified_name: entity for entity in result.entities}
 
     expected = {
-        "threshold": 1,
-        "primary": 2,
-        "secondary": 2,
-        "left": 3,
-        "right": 3,
+        "vars.threshold": 1,
+        "vars.primary": 2,
+        "vars.secondary": 2,
+        "vars.left": 3,
+        "vars.right": 3,
     }
     for name, line in expected.items():
         entity = by_qname[name]
@@ -239,9 +239,9 @@ def test_local_assignments_are_not_treated_as_module_variables(
         if entity.kind is EntityKind.VARIABLE
     }
     # Only the module-level GLOBAL becomes a variable entity.
-    assert variables == {"GLOBAL"}
+    assert variables == {"assigns.GLOBAL"}
     qnames = {entity.qualified_name for entity in result.entities}
-    assert "f" in qnames
+    assert "assigns.f" in qnames
 
 
 # ---------------------------------------------------------------------------
@@ -316,7 +316,7 @@ def test_inheritance_emits_ref_edge_for_base(tmp_path: Path) -> None:
         "class Base:\n    pass\nclass Child(Base):\n    pass\n", encoding="utf-8"
     )
     result = PythonParser().parse_file(src)
-    child = next(e for e in result.entities if e.qualified_name == "Child")
+    child = next(e for e in result.entities if e.qualified_name == "inh.Child")
     inherits = [
         rel for rel in result.relationships if rel.kind is RelationshipKind.INHERITS
     ]
@@ -336,7 +336,7 @@ def test_dotted_bases_and_attribute_calls_become_unresolved_references(
         encoding="utf-8",
     )
     result = PythonParser().parse_file(src)
-    f_id = next(e.id for e in result.entities if e.qualified_name == "f")
+    f_id = next(e.id for e in result.entities if e.qualified_name == "dotted.f")
     calls = [
         rel
         for rel in result.relationships
@@ -362,14 +362,16 @@ def test_starred_unpacking_creates_variable_entities(tmp_path: Path) -> None:
         for entity in result.entities
         if entity.kind is EntityKind.VARIABLE
     }
-    assert variables == {"first", "rest"}
+    assert variables == {"star.first", "star.rest"}
 
 
 def test_duplicate_module_variable_name_is_not_duplicated(tmp_path: Path) -> None:
     src = tmp_path / "dup.py"
     src.write_text("x = 1\nx = 2\n", encoding="utf-8")
     result = PythonParser().parse_file(src)
-    x_entities = [entity for entity in result.entities if entity.qualified_name == "x"]
+    x_entities = [
+        entity for entity in result.entities if entity.qualified_name == "dup.x"
+    ]
     assert len(x_entities) == 1
     # The first assignment wins.
     assert x_entities[0].location.line_start == 1
@@ -382,7 +384,7 @@ def test_signature_captures_annotations_varargs_and_kwargs(tmp_path: Path) -> No
         encoding="utf-8",
     )
     result = PythonParser().parse_file(src)
-    fn = next(entity for entity in result.entities if entity.qualified_name == "f")
+    fn = next(entity for entity in result.entities if entity.qualified_name == "sig.f")
     signature = fn.signature
     assert signature is not None
     assert "a: int" in signature
@@ -402,7 +404,7 @@ def test_lambda_body_calls_do_not_leak_into_enclosing_function(
         encoding="utf-8",
     )
     result = PythonParser().parse_file(src)
-    f_id = next(e.id for e in result.entities if e.qualified_name == "f")
+    f_id = next(e.id for e in result.entities if e.qualified_name == "lam.f")
     calls = [
         rel
         for rel in result.relationships
@@ -420,7 +422,7 @@ def test_calls_with_unnameable_targets_are_skipped(tmp_path: Path) -> None:
     src = tmp_path / "idx.py"
     src.write_text("def f():\n    fns[0]()\n", encoding="utf-8")
     result = PythonParser().parse_file(src)
-    f_id = next(e.id for e in result.entities if e.qualified_name == "f")
+    f_id = next(e.id for e in result.entities if e.qualified_name == "idx.f")
     calls = [
         rel
         for rel in result.relationships

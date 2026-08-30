@@ -92,7 +92,7 @@ class JavaParser(TreeSitterParser):
 
         name_node = node.child_by_field_name("name")
         class_name = self._get_text(name_node)
-        qualified_name = class_name  # Simplified
+        qualified_name = f"{self._module_scope(file_path)}.{class_name}"
         class_id = f"{file_path}::{qualified_name}"
 
         # Inheritance
@@ -134,7 +134,7 @@ class JavaParser(TreeSitterParser):
                         class_id,
                         source_code,
                         source_lines,
-                        parent_name=class_name,
+                        parent_name=qualified_name,
                     )
                     entities.extend(method_entities)
                     relationships.extend(method_rels)
@@ -147,7 +147,7 @@ class JavaParser(TreeSitterParser):
                         class_id,
                         source_code,
                         source_lines,
-                        parent_name=class_name,
+                        parent_name=qualified_name,
                     )
                     entities.extend(method_entities)
                     relationships.extend(method_rels)
