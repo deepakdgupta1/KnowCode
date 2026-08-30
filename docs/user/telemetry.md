@@ -35,6 +35,7 @@ through the CLI, the API, or MCP.
 | `local_or_escalated`, `is_stale` | Routing outcome and index freshness |
 | `selected_entity_count`, `evidence_count`, `error_count` | Result shape — counts, never ids |
 | `retrievals`, `duration_ms`, `outcome` | Attempts, latency, and `ok`/`error` |
+| `user_marked_miss` | Operator flag marking the answer as a miss; `telemetry show` totals these as "User-marked misses" |
 
 ### `agent_decision`, `tool_call`, `reranker_latency`
 

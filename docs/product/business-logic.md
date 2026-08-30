@@ -226,8 +226,9 @@ structure only — no runtime frequency or ownership data.
 
 - **Rate limiting:** 60 req/min standard; 10 req/min for the expensive
   `trace_calls`/`impact` endpoints; buckets keyed on peer IP with proxy
-  headers disabled (no `X-Forwarded-For` rotation). In loopback mode all
-  local clients share one bucket — intentionally capping runaway agents.
+  headers disabled (no `X-Forwarded-For` rotation). The server binds
+  `127.0.0.1` by default, so all local clients share one bucket —
+  intentionally capping runaway agents.
 - **Freshness:** artifact-vs-source comparison flags staleness
   (`is_stale` + reasons) on responses; stale is surfaced, never hidden,
   and never auto-repaired — rebuilding is the user's call.
