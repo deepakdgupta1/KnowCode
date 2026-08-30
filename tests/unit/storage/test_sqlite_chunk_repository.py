@@ -59,7 +59,9 @@ class TestBasicCRUD:
         assert result.id == "c1"
         assert result.entity_id == "e1"
         assert result.content == "def hello(): pass"
-        assert "hello" in result.tokens
+        # tokens are an indexing-time derivation of content; D2 persists them
+        # only inside the contentless FTS row, so a hydrated chunk carries none.
+        assert result.tokens == []
         assert result.metadata["kind"] == "function"
 
     def test_get_nonexistent_returns_none(self, repo: SqliteChunkRepository) -> None:
@@ -777,15 +779,17 @@ class TestSchemaVersioning:
         """A chunks.db predating the digest column must not be silently used."""
         legacy_path = tmp_path / "v2.db"
         conn = sqlite3.connect(str(legacy_path))
+        # No tokens_text either: with it present the v3 check below fires
+        # first, and this test is about the digest column in isolation.
         conn.execute(
             "CREATE TABLE chunks (chunk_id TEXT UNIQUE, entity_id TEXT, "
-            "content TEXT, tokens_text TEXT, metadata_json TEXT, file_path TEXT, "
+            "content TEXT, metadata_json TEXT, file_path TEXT, "
             "embedding BLOB, embedding_dim INTEGER)"
         )
         conn.execute(
-            "INSERT INTO chunks (chunk_id, entity_id, content, tokens_text, "
+            "INSERT INTO chunks (chunk_id, entity_id, content, "
             "metadata_json, file_path) VALUES "
-            "('v2a', '/x.py::X', 'c', 't', '{\"content_hash\": \"ab\"}', '/x.py')"
+            "('v2a', '/x.py::X', 'c', '{\"content_hash\": \"ab\"}', '/x.py')"
         )
         conn.commit()
         conn.close()
@@ -793,6 +797,29 @@ class TestSchemaVersioning:
         with pytest.raises(ValueError) as excinfo:
             SqliteChunkRepository(legacy_path)
 
+        assert "rebuild" in str(excinfo.value).lower()
+
+    def test_v3_schema_with_tokens_text_fails_closed(self, tmp_path: Path) -> None:
+        """A chunks.db still storing tokens_text (pre-D2) must not be used."""
+        v3_path = tmp_path / "v3.db"
+        conn = sqlite3.connect(str(v3_path))
+        conn.execute(
+            "CREATE TABLE chunks (chunk_id TEXT UNIQUE, entity_id TEXT, "
+            "content TEXT, tokens_text TEXT, metadata_json TEXT, file_path TEXT, "
+            "embedding BLOB, embedding_dim INTEGER, content_hash BLOB)"
+        )
+        conn.execute(
+            "INSERT INTO chunks (chunk_id, entity_id, content, tokens_text, "
+            "metadata_json, file_path) VALUES "
+            "('v3a', '/x.py::X', 'c', 't', '{}', '/x.py')"
+        )
+        conn.commit()
+        conn.close()
+
+        with pytest.raises(ValueError) as excinfo:
+            SqliteChunkRepository(v3_path)
+
+        assert "tokens_text" in str(excinfo.value)
         assert "rebuild" in str(excinfo.value).lower()
 
     def test_load_initializes_schema_for_fresh_target(self, tmp_path: Path) -> None:
@@ -845,9 +872,9 @@ class TestEmbeddingAndMetadataValidation:
     ) -> None:
         """A truncated BLOB that is not a multiple of four bytes fails."""
         repo._writer_conn.execute(
-            "INSERT INTO chunks (chunk_id, entity_id, content, tokens_text, "
+            "INSERT INTO chunks (chunk_id, entity_id, content, "
             "metadata_json, file_path, embedding, embedding_dim) "
-            "VALUES ('odd', '/x.py::X', 'c', 't', '{}', '/x.py', X'0102', NULL)"
+            "VALUES ('odd', '/x.py::X', 'c', '{}', '/x.py', X'0102', NULL)"
         )
         repo._writer_conn.commit()
         with pytest.raises(ValueError):
@@ -858,9 +885,9 @@ class TestEmbeddingAndMetadataValidation:
     ) -> None:
         """Invalid or non-dict metadata must not break row hydration."""
         repo._writer_conn.execute(
-            "INSERT INTO chunks (chunk_id, entity_id, content, tokens_text, "
+            "INSERT INTO chunks (chunk_id, entity_id, content, "
             "metadata_json, file_path, embedding, embedding_dim) "
-            "VALUES ('badmeta', '/x.py::X', 'c', 't', 'not-json', '/x.py', NULL, NULL)"
+            "VALUES ('badmeta', '/x.py::X', 'c', 'not-json', '/x.py', NULL, NULL)"
         )
         repo._writer_conn.commit()
         chunk = repo.get("badmeta")
@@ -873,9 +900,9 @@ class TestEmbeddingAndMetadataValidation:
         """A valid BLOB with a null dimension still decodes by byte length."""
         blob, _ = repo._encode_embedding([0.25, 0.75, 1.0])
         repo._writer_conn.execute(
-            "INSERT INTO chunks (chunk_id, entity_id, content, tokens_text, "
+            "INSERT INTO chunks (chunk_id, entity_id, content, "
             "metadata_json, file_path, embedding, embedding_dim) "
-            "VALUES ('nodim', '/x.py::X', 'c', 't', '{}', '/x.py', ?, NULL)",
+            "VALUES ('nodim', '/x.py::X', 'c', '{}', '/x.py', ?, NULL)",
             (blob,),
         )
         repo._writer_conn.commit()
