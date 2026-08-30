@@ -156,3 +156,85 @@ def test_verified_source_is_quietly_none_for_snippetless_entities(
         assert LiveSourceLoader(tmp_path).load_verified_source(entity) is None
 
     assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+
+def _entity_at(path: str) -> Entity:
+    return Entity(
+        id=f"{path}::secret",
+        kind=EntityKind.FUNCTION,
+        name="secret",
+        qualified_name="secret",
+        location=Location(file_path=path, line_start=1, line_end=1),
+        metadata={"content_hash": "unverifiable"},
+    )
+
+
+def test_an_absolute_path_inside_the_root_is_still_read(tmp_path: Path) -> None:
+    """The containment check must not reject the normal case.
+
+    ``normalize_file_identity`` resolves every indexed path to an absolute
+    POSIX path, so an entity read back from a published index carries one.
+    Rejecting absolute paths outright would stop the loader reading anything.
+    """
+    inside = tmp_path / "m.py"
+    inside.write_text("line 1\n")
+
+    assert LiveSourceLoader(tmp_path).load_source(_entity_at(str(inside))) == "line 1\n"
+
+
+def test_an_absolute_path_outside_the_root_is_not_read(tmp_path: Path) -> None:
+    """BL-25: ``root / p`` discards ``root`` entirely when ``p`` is absolute.
+
+    The join bounded nothing, and digest verification bounds what may be
+    *served*, never what is *read* -- ``load_source`` skips the digest
+    altogether. A foreign or tampered index naming any readable file on the
+    host had it opened and sliced.
+    """
+    outside = tmp_path / "outside.py"
+    outside.write_text("SECRET\n")
+    root = tmp_path / "repo"
+    root.mkdir()
+
+    assert LiveSourceLoader(root).load_source(_entity_at(str(outside))) is None
+
+
+def test_a_relative_path_that_climbs_out_of_the_root_is_not_read(
+    tmp_path: Path,
+) -> None:
+    """The other way out: ``..`` segments, which the join happily follows."""
+    (tmp_path / "outside.py").write_text("SECRET\n")
+    root = tmp_path / "repo"
+    root.mkdir()
+
+    assert LiveSourceLoader(root).load_source(_entity_at("../outside.py")) is None
+
+
+def test_the_verified_read_is_bounded_too_even_with_a_matching_digest(
+    tmp_path: Path,
+) -> None:
+    """Containment sits under both reads, not just the unverified one.
+
+    The digest here is the *correct* one for the outside file, so the
+    fail-closed digest check would hand the content straight back. Only
+    containment can refuse it -- which is the point: verification bounds what
+    may be served, never what may be read.
+    """
+    import hashlib
+
+    from knowcode.utils.entity_identity import canonicalize_source_snippet
+
+    body = "SECRET\n"
+    outside = tmp_path / "outside.py"
+    outside.write_text(body)
+    root = tmp_path / "repo"
+    root.mkdir()
+
+    entity = _entity_at(str(outside))
+    entity.metadata["content_hash"] = hashlib.sha256(
+        canonicalize_source_snippet(body).encode("utf-8")
+    ).hexdigest()
+
+    # The digest really does match: the same loader rooted at the file's own
+    # directory serves it. Only the root differs between these two calls.
+    assert LiveSourceLoader(tmp_path).load_verified_source(entity) == body
+    assert LiveSourceLoader(root).load_verified_source(entity) is None

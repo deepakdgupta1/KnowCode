@@ -19,13 +19,42 @@ class LiveSourceLoader:
         """Initialize with repository root directory."""
         self.root_dir = Path(root_dir)
 
+    def _resolve(self, entity: Entity) -> Path | None:
+        """Resolve the entity's file to a path inside the root, or None.
+
+        ``root / p`` discards ``root`` entirely when ``p`` is absolute, and
+        indexed paths *are* absolute -- ``normalize_file_identity`` resolves
+        every one of them. So the join on its own bounded nothing, and a
+        ``..`` segment walked out just as easily. Digest verification bounds
+        what may be *served*, never what may be *read*, and ``load_source``
+        skips the digest altogether: a foreign or tampered index naming any
+        readable file on the host had it opened and sliced (BL-25).
+
+        Both sides are resolved before comparing so a symlinked root -- macOS
+        puts temporary directories behind one -- compares against the same
+        real path the indexed identity was normalized to.
+        """
+        root = self.root_dir.expanduser().resolve(strict=False)
+        candidate = (
+            (root / entity.location.file_path).expanduser().resolve(strict=False)
+        )
+        if candidate != root and root not in candidate.parents:
+            logger.warning(
+                "Refusing to read %s for %s: outside the repository root %s.",
+                candidate,
+                entity.id,
+                root,
+            )
+            return None
+        return candidate
+
     def _slice(self, entity: Entity) -> str | None:
         """Read the entity's recorded line span from its file, or None."""
         if not entity.location or not entity.location.file_path:
             return None
 
-        file_path = self.root_dir / entity.location.file_path
-        if not file_path.exists():
+        file_path = self._resolve(entity)
+        if file_path is None or not file_path.exists():
             return None
 
         try:
