@@ -92,43 +92,6 @@ asserts a `_` in the query does not match a different character. It narrows
 what a quoted query returns, which is the point: every row it stops serving is
 one that does not contain what was asked for.
 
-### BL-17 - A watched edit never advances the entity graph
-
-**Severity:** Medium. **Found:** 2026-08-30, testing `entity_source` mode
-transitions across incremental builds. **Renumbered** from BL-16 on the same
-day: two sessions allocated that id concurrently, and the other one — the
-context bundle serving no source under `entity_source: disk` — had already
-reached shipped source comments. This item moved because it was the cheaper
-of the two to move, not because it was the later one.
-
-`StagedGenerationWriter` copies `knowledge.db` unchanged on a watch commit —
-its own manifest comment: "a file transaction rewrites chunks and vectors,
-never the graph". Entity rows, their digests, and their relationships
-therefore describe the last full build, no matter how many watched edits
-follow.
-
-Under `entity_source: stored` this was invisible: a query for an edited
-function's source served the pre-edit copy, presented as current. Under the
-default `disk` mode (D3) the same query fails closed to `None` — the stored
-digest predates the edit — which is honest, but it means entity source for
-any file edited since the last full build is unavailable until a rebuild.
-
-Reproduce:
-
-```bash
-pytest tests/unit/service/test_entity_source_transitions.py -q
-```
-
-Both incremental tests assert the frozen-row contract directly, including
-that a watch commit leaves `source_code` rows byte-identical.
-
-**Deferred on purpose.** The fix is for the watch path to re-derive the
-changed file's entities and relationships into the staged `knowledge.db`.
-That is a watch-pipeline change independent of D3 — the graph staleness
-predates it, and D3 only removed the stale text that hid it. Sequence it with
-any work that makes the graph incremental, and revisit the two transition
-tests then.
-
 ### BL-9 - A symbol named after its own file shadows the file's module entity
 
 **Severity:** High. **Found:** 2026-08-29, writing the parser-contract
@@ -371,3 +334,4 @@ the anchors are re-verified as part of adopting a later phase.
 | An in-memory vector plane is the wrong default at scale (BL-3) | **Rejected** 2026-08-30 under [DR-4](../research/storage_optimization_2026_v4.md). The item's substance was a disk-backed int8 ANN cache, measured in `storage_optimization_2026_v4.md` §5.2 at **recall@10 0.9950** against exhaustive fp32's 1.0000. That is a half-percent of top-10 recall traded for 18 MB, and no footprint number buys it. Its other half is already shipped: `VectorStore` builds `faiss.IndexIDMap2(faiss.IndexFlatIP(...))`, an exhaustive fp32 scan, so "skip the ANN index below the threshold" describes what runs today. What remains is a memory and open-time cost above roughly 100,000 vectors, which no repository this project indexes has reached. Re-file it as a footprint item if one does, with a width that keeps recall@10 at 1.0000. |
 | Phase F cannot be built as specified, and would cost more than it saves (BL-14) | **Rejected** 2026-08-30 under [DR-4](../research/storage_optimization_2026_v4.md), and with it Phase F and its `chunk_source` escape hatch. Replacing `chunks.content` with byte-range descriptors leaves the exact plane with no implementation: `ExactQueryEngine` is `SELECT ... FROM chunks WHERE content LIKE ?` and nothing else. Measured over 300 mid-identifier fragments with LIKE as ground truth, the shipped `chunks_fts` plane answers them at **57.8% recall unbounded and 14.6% at the engine's limit of 10**, returning nothing at all for 109 of 300; a trigram index that would answer them exactly costs 10.00 MB against the 4.32 MB column it replaces. F also fails closed on an edited file, so the twelve paths touched in one working session would render **518 chunks, 7.6% of the index**, as empty hits while `chunks_fts` still matched their terms, and it takes away `rebuild_fts`'s only input, which is what makes the term index reproducible from the artifact alone. The saving is 3.50 MB, not §11's 6.39 MB. `zlib` level 6 on the same column saves 2.38 MB and `zstandard` level 10 with a trained dictionary saves 3.05 MB, both changing no plane, no semantics, and no freshness contract — take the bytes there. Reproduce either with `python scripts/exact_plane_recall.py --index knowcode_index` and `python scripts/storage_simulate.py --index knowcode_index --repo-root .`. The plan's "F stays gated on BL-14's prerequisites" now resolves to this row: F does not ship. |
 | A fresh index under the default `entity_source` serves context with no source code (BL-16) | Fixed 2026-08-30, the day it was filed. `ContextSynthesizer` now chooses the read by *why* the text is missing rather than by whether the index is stale: a stale index still gets an unverified live slice, because the drift is what the caller asked to see; a fresh index with no stored copy (D3's `disk` default) gets `load_verified_source`, which serves the span only while it hashes to the digest taken at build time and nothing at all otherwise. `KnowCodeService.get_context` builds the loader unconditionally — gating its construction on staleness was the defect. Pinned by four rows added to `tests/unit/service/test_entity_source_resolution.py`, which now covers `get_context` alongside `get_entity_details`; the fresh-`disk` row failed before the fix. Both new guards were mutation-probed: swapping the verified read for an unverified one reddens the fail-closed row, and deleting the stale branch reddens the stale row. Full suite 1,857 passed, 3 xfailed. |
+| A watched edit never advances the entity graph (BL-17) | Fixed 2026-08-30. A file transaction now rewrites the touched file's entity rows and the edges leaving them, from the same parse that produced its chunks: `PreparedFileUpdate` carries the parse's entities and relationships, `SqliteKnowledgeStore.replace_file` applies them in one writer transaction, and `StagedGenerationWriter` opens the staged `knowledge.db` and commits the graph half after the chunk half — that order makes a crash between the two land on the old behaviour rather than its worse inverse. The manifest's relationship count is read from the staged artifact instead of carried forward from the base. **Deliberately not fixed:** edges *arriving* from a file the transaction did not parse, which an incremental parse cannot re-derive; a rename still needs a full build to resolve everywhere. Five tests that pinned the old contract are inverted, not relaxed, including the e2e release-gate test that named the limitation — `knowcode doctor` stops reporting `store_stale_source_changed` after a watch commit, because the mtime that signal reads was the copied `knowledge.db`'s. Pinned by `tests/unit/service/test_watch_graph_updates.py`; all three production changes mutation-probed. The first probe of the edge deletion did *not* fire, because the assertion resolved edges through the `entities` table and so could not see an orphan — it now joins the `eid` codebook alone. Full suite 1,864 passed, 3 xfailed. |

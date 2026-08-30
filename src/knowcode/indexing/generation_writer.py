@@ -115,10 +115,16 @@ class StagedGenerationWriter:
             provider: Embedding provider for the file transactions committed
                 here. Its configuration is recorded in the manifest.
             backend: Configured vector backend, recorded in the manifest.
-            persist_entity_source: The build's ``entity_source`` mode (D3).
-                A watch commit rewrites entity rows, so it must write them the
-                way the build that seeded this generation did, or one file's
-                rows would carry text the rest of the artifact does not.
+            persist_entity_source: The *current* ``entity_source`` mode (D3).
+                A watch commit rewrites entity rows, so it writes them the way
+                the setting in force now says to, not the way the build that
+                seeded this generation did. Flipping the mode and then watch
+                committing therefore leaves a mixed artifact: the touched
+                file's rows follow the new mode and the rest follow the old.
+                That is benign — a NULL row resolves against its digest and a
+                text row serves its copy, so both halves read correctly — and
+                it is preferred over ignoring the operator's setting until the
+                next full build. A full build makes the artifact uniform.
 
         Raises:
             ValueError: ``base`` carries no semantic index, so there is nothing

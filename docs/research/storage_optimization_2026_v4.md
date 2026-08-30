@@ -2077,14 +2077,20 @@ ignored and every read resolves verified, so a flip takes effect on the next
 read, not the next rebuild; under `stored` a NULL row (from a `disk`-mode
 build) still resolves, best effort.
 
-Testing the transitions against incremental builds found the deeper fact
-those tests now pin: a watch commit copies `knowledge.db` unchanged, so
-entity rows — text, NULL, and digest — advance only on full builds. After a
-watched edit, `disk` mode serves `None` for that file's entities (the digest
-predates the edit) where `stored` served the stale copy with no signal.
+Testing the transitions against incremental builds found a deeper fact those
+tests pinned at the time: a watch commit copied `knowledge.db` unchanged, so
+entity rows — text, NULL, and digest — advanced only on full builds. After a
+watched edit, `disk` mode served `None` for that file's entities (the digest
+predated the edit) where `stored` served the stale copy with no signal.
+
 Filed as [BL-17](../engineering/backlog.md) (BL-16 when this entry was
-written; renumbered for an id collision); the honest fix is in the watch
-pipeline, not in D3. `tests/unit/service/test_entity_source_transitions.py`
+written; renumbered for an id collision) and **fixed 2026-08-30** in the watch
+pipeline rather than in D3, which is where it belonged: a file transaction now
+rewrites the touched file's entity rows and the edges leaving them from the
+same parse that produced its chunks. The transition tests are inverted
+accordingly — a mode flip plus a watch commit now leaves a deliberately mixed
+artifact, the touched file in the new mode and the rest in the old, which
+reads correctly either way. D3's saving is unaffected. `tests/unit/service/test_entity_source_transitions.py`
 holds the matrix: both flips over an incremental build, both flips over a
 full rebuild, and the frozen-row assertion a watch commit must not violate.
 

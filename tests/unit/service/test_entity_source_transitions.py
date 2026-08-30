@@ -1,13 +1,17 @@
 """Entity-source mode transitions across builds (storage plan D3).
 
-A generation's entity rows carry whatever the mode in force at *full-build*
-time put there: text under `stored`, NULL under `disk`. Watch commits rewrite
-chunks and vectors and copy ``knowledge.db`` unchanged (``generation_writer``:
-"a file transaction rewrites chunks and vectors, never the graph"), so a mode
-flip plus an incremental build leaves every entity row — text, NULL, and
-digest — exactly as the last full build wrote it. These tests pin both
-directions over that truth, including what each mode's reader serves for a
-file edited after the last full build.
+A generation's entity rows carry whatever the mode in force when they were
+written put there: text under `stored`, NULL under `disk`. A full build writes
+every row; a watch commit writes the rows of the file it touched, in the mode
+in force *now* (BL-17 — it used to copy ``knowledge.db`` unchanged and write
+none of them).
+
+So flipping the mode and then watch committing leaves a deliberately mixed
+artifact: the touched file's rows follow the new mode, every other file keeps
+the old. Both halves read correctly — a NULL row resolves against its digest,
+a text row serves its copy — and a full build makes the artifact uniform
+again. These tests pin both directions over that, including what each mode's
+reader serves for a file edited after the last full build.
 """
 
 import sqlite3
@@ -60,14 +64,15 @@ def _row_has_text(root: Path, file_name: str, fn: str) -> bool:
 # ----------------------------------------------------------------------
 
 
-def test_stored_to_disk_incremental_reads_verified_only_over_frozen_rows(
+def test_stored_to_disk_incremental_rewrites_the_touched_file_in_the_new_mode(
     tmp_path: Path,
 ) -> None:
-    """A watched edit leaves the entity row stale; disk mode says so.
+    """A watched edit under `disk` replaces the `stored` build's text with NULL.
 
-    The flip takes effect on the next read: the stored copy a `stored`-mode
-    build left behind is ignored, so the edited file serves None (the entity
-    digest predates the edit) while the untouched file still verifies.
+    The touched file's row is rewritten in the mode in force now, so its copy
+    is dropped and its digest advances — the reader resolves the edit from
+    disk and verifies it. The untouched file keeps the text the `stored` build
+    wrote, which is the mixed artifact this flip is defined to produce.
     """
     src = _source_tree(tmp_path)
     stored = _service(tmp_path, "stored")
@@ -81,8 +86,11 @@ def test_stored_to_disk_incremental_reads_verified_only_over_frozen_rows(
     disk.watch_writer().replace_file(src / "m.py")
     disk.flush()
     disk.close()
-    assert _row_has_text(tmp_path, "m.py", "alpha"), (
-        "a watch commit must not rewrite entity rows"
+    assert not _row_has_text(tmp_path, "m.py", "alpha"), (
+        "the touched file's row must be rewritten in the mode in force now"
+    )
+    assert _row_has_text(tmp_path, "beta.py", "beta"), (
+        "an untouched file must keep the row the last full build wrote"
     )
 
     reader = _service(tmp_path, "disk")
@@ -90,19 +98,19 @@ def test_stored_to_disk_incremental_reads_verified_only_over_frozen_rows(
         alpha = reader.get_entity_details(_eid(src, "m.py", "alpha"))
         beta = reader.get_entity_details(_eid(src, "beta.py", "beta"))
 
-        # Edited after the last full build: the digest predates the edit, so
-        # nothing the index can vouch for is served.
-        assert alpha["source_code"] is None
+        # The digest advanced with the edit, so the verified read serves it.
+        assert "return 2" in (alpha["source_code"] or "")
         # Untouched since the last full build: resolves and verifies.
         assert "return 10" in (beta["source_code"] or "")
     finally:
         reader.close()
 
-    # The same artifact under `stored` serves the stale copy with no signal.
+    # Reading the same artifact under `stored` finds no copy for the touched
+    # file — the flip dropped it — and falls back to the same verified read.
     stored_reader = _service(tmp_path, "stored")
     try:
         alpha = stored_reader.get_entity_details(_eid(src, "m.py", "alpha"))
-        assert "return 1" in (alpha["source_code"] or "")
+        assert "return 2" in (alpha["source_code"] or "")
     finally:
         stored_reader.close()
 
@@ -115,10 +123,11 @@ def test_stored_to_disk_incremental_reads_verified_only_over_frozen_rows(
 def test_disk_to_stored_incremental_resolves_null_rows_best_effort(
     tmp_path: Path,
 ) -> None:
-    """`stored` over NULL rows has no copy to serve and resolves instead.
+    """A watched edit under `stored` gives the touched file a persisted copy.
 
-    The edited file has neither a stored copy nor a current digest: None.
-    The untouched file resolves and verifies.
+    The `disk` build left every row NULL. The watch commit rewrites the touched
+    file's row in the mode in force now, so that one row gains text while every
+    other stays NULL and resolves from disk.
     """
     src = _source_tree(tmp_path)
     disk = _service(tmp_path, "disk")
@@ -131,8 +140,11 @@ def test_disk_to_stored_incremental_resolves_null_rows_best_effort(
     stored.watch_writer().replace_file(src / "m.py")
     stored.flush()
     stored.close()
-    assert not _row_has_text(tmp_path, "m.py", "alpha"), (
-        "a watch commit must not rewrite entity rows"
+    assert _row_has_text(tmp_path, "m.py", "alpha"), (
+        "the touched file's row must be rewritten in the mode in force now"
+    )
+    assert not _row_has_text(tmp_path, "beta.py", "beta"), (
+        "an untouched file must keep the NULL row the last full build wrote"
     )
 
     reader = _service(tmp_path, "stored")
@@ -140,7 +152,9 @@ def test_disk_to_stored_incremental_resolves_null_rows_best_effort(
         alpha = reader.get_entity_details(_eid(src, "m.py", "alpha"))
         beta = reader.get_entity_details(_eid(src, "beta.py", "beta"))
 
-        assert alpha["source_code"] is None
+        # Persisted by the watch commit.
+        assert "return 2" in (alpha["source_code"] or "")
+        # Still NULL, so it resolves from disk and verifies.
         assert "return 10" in (beta["source_code"] or "")
     finally:
         reader.close()

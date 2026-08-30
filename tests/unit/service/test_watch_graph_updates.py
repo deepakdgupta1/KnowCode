@@ -93,7 +93,13 @@ def test_a_watch_commit_advances_the_edited_files_entity_rows(
 
 
 def _edges_from(root: Path, file_name: str) -> int:
-    """How many edges leave entities defined in one file."""
+    """How many edges leave a symbol in one file, orphans included.
+
+    Resolved through the ``eid`` codebook alone, never through ``entities``.
+    Codebook rows outlive the entity rows they name, so joining via ``entities``
+    would report zero for a file whose rows were deleted whether or not its
+    edges were — the assertion could not fail. This sees the orphan.
+    """
     con = sqlite3.connect(
         f"file:{_current_generation(root) / 'knowledge.db'}?mode=ro", uri=True
     )
@@ -101,9 +107,7 @@ def _edges_from(root: Path, file_name: str) -> int:
         return con.execute(
             """
             SELECT COUNT(*) FROM relationships WHERE source_id IN (
-                SELECT id FROM eid WHERE entity_id IN (
-                    SELECT entity_id FROM entities WHERE entity_id LIKE ?
-                )
+                SELECT id FROM eid WHERE entity_id LIKE ?
             )
             """,
             (f"%{file_name}::%",),

@@ -158,9 +158,15 @@ def test_a_watched_edit_refreshes_retrieval_and_the_graph(
 
     What a watch commit still cannot do is re-derive an edge *arriving* from a
     file it did not parse, so a rebuild remains the remedy for cross-file
-    staleness after a rename. ``knowcode doctor`` continues to warn via
-    ``store_stale_source_changed``, which is about source drift against the
-    index rather than about the graph.
+    staleness after a rename.
+
+    ``knowcode doctor`` used to warn ``store_stale_source_changed`` here, and
+    no longer does. That signal is ``latest_source_change > last_store_rebuild``
+    over ``knowledge.db``'s mtime; the copy a watch commit made preserved the
+    base's mtime, so it read as older than the edit it had just indexed. The
+    store is now written rather than copied, which puts the graph half on
+    exactly the footing the chunk half was already on — ``index_stale_source_changed``
+    has never fired after a watch commit for the same reason.
     """
     repo = build_adversarial_repo(tmp_path)
     config = AppConfig.default()
@@ -195,12 +201,12 @@ def test_a_watched_edit_refreshes_retrieval_and_the_graph(
     assert service.search("gamma_handler"), "the graph did not follow the watched edit"
     service.close()
 
-    # doctor reports the staleness rather than hiding it, and the generation is
-    # otherwise valid.
+    # doctor now reports the generation fresh, because it is: the graph half
+    # was rewritten by the same transaction that rewrote the chunks.
     report_ = run_doctor(store_path=repo.output)
     freshness = next(c for c in report_.checks if c.name == "Freshness")
-    assert freshness.status == "warn"
-    assert "store_stale_source_changed" in freshness.message
+    assert freshness.status == "pass", freshness.message
+    assert "store_stale_source_changed" not in freshness.message
     for name in ("Index generation", "Knowledge store", "Semantic index"):
         check = next(c for c in report_.checks if c.name == name)
         assert check.status == "pass", check.message

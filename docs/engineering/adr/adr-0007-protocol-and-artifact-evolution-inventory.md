@@ -940,9 +940,12 @@ its own envelope, so the restart failed closed with
 `StagedGenerationWriter` copies a published generation into
 `.staging-<id>.pid<pid>/`, applies Step 15 file transactions there, and
 publishes the result through the same validate-then-move-the-pointer path a
-build uses. `knowledge.db` is carried across unchanged, because a file
-transaction rewrites chunks and vectors and never the graph. The published
-original is read once and never written.
+build uses. `knowledge.db` is copied and then written: a file transaction
+rewrites the touched file's entity rows and the edges leaving them alongside
+its chunks and vectors (BL-17; it carried the graph across unchanged until
+2026-08-30). Edges *arriving* from files the transaction did not parse are
+left as they are, so a rename still needs a full build to be resolved
+everywhere. The published original is read once and never written.
 
 The copy is a full one. Hardlinking would let a SQLite write in the successor
 reach the published file it was linked to, which is the defect staging exists to
