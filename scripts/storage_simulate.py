@@ -21,9 +21,11 @@ Candidates are grouped by how much contract they change:
     relationships, hash stored as a BLOB, redundant JSON keys removed.
 ``derived``
     Stop persisting what can be reconstructed. ``tokens_text`` (recomputable
-    via ``tokenize_code``), ``entities.source_code`` and ``chunks.content``
-    (resolvable from the source tree), and the vector index itself (rebuilt
-    from the durable float32 BLOBs, per ADR 0003).
+    via ``tokenize_code``), ``entities.source_code`` (a verbatim line span,
+    so wholly resolvable from the source tree), ``chunks.content`` (only
+    partly resolvable, because a chunk carries synthesized text as well as
+    file text), and the vector index itself (rebuilt from the durable
+    float32 BLOBs, per ADR 0003).
 ``policy``
     Changes what gets embedded. Minimum-content thresholds and vector width.
 """
@@ -36,6 +38,7 @@ import shutil
 import sqlite3
 import sys
 import tempfile
+import zlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
@@ -153,6 +156,28 @@ def _strip_prefix(
     con.execute(f"UPDATE {table} SET {assignments}", (prefix,) * len(columns))
 
 
+def _has_redundant_metadata(con: sqlite3.Connection, table: str) -> bool:
+    """Whether any ``REDUNDANT_METADATA_KEYS`` survive in ``table``.
+
+    C4/C5 removed them. Once they are gone the slim pass still measures a
+    saving, but that saving is the compact JSON separators it re-serializes
+    with — not a key it dropped. The label has to say which, or the row reads
+    as work that is still outstanding.
+    """
+    for (blob,) in con.execute(f"SELECT metadata_json FROM {table}"):
+        if not blob:
+            continue
+        try:
+            payload = json.loads(blob)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if isinstance(payload, dict) and any(
+            key in payload for key in REDUNDANT_METADATA_KEYS
+        ):
+            return True
+    return False
+
+
 def _slim_metadata(con: sqlite3.Connection, table: str) -> None:
     """Drop metadata_json keys that duplicate first-class columns."""
     updates = []
@@ -171,6 +196,86 @@ def _slim_metadata(con: sqlite3.Connection, table: str) -> None:
             payload.pop(key, None)
         updates.append((json.dumps(payload, separators=(",", ":")), rowid))
     con.executemany(f"UPDATE {table} SET metadata_json = ? WHERE rowid = ?", updates)
+
+
+def _first_resident_offset(content: str, text: str) -> int:
+    """Smallest ``k`` where ``content[k:]`` occurs in ``text``.
+
+    Occurrence is monotone in ``k``: if a suffix occurs, every shorter suffix
+    is a substring of it and occurs too. So the boundary is a binary search.
+    """
+    lo, hi = 0, len(content)
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if content[mid:] in text:
+            hi = mid
+        else:
+            lo = mid + 1
+    return lo
+
+
+def _source_descriptors(con: sqlite3.Connection, repo_root: Path) -> None:
+    """Replace chunk text with a byte range plus whatever is not on disk.
+
+    A chunk is not a slice of its file. ``ChunkBuilder`` prepends a
+    reconstructed signature and a re-quoted docstring, concatenates the
+    scattered import lines, and drops blank lines out of a module header, so
+    the majority of chunks contain text that occurs nowhere in the source
+    tree. What a descriptor cannot address has to stay stored, and modelling
+    Phase F as ``DROP COLUMN content`` prices a change that cannot be built
+    (BL-14).
+    """
+    con.executescript(DROP_TRIGGERS)
+    con.execute("ALTER TABLE chunks ADD COLUMN span_start INTEGER")
+    con.execute("ALTER TABLE chunks ADD COLUMN span_end INTEGER")
+
+    files: dict[str, Optional[str]] = {}
+    updates: list[tuple[str, Optional[int], Optional[int], int]] = []
+    resolved = 0
+    whole = 0
+    residue = 0
+    for rowid, rel, content in con.execute(
+        "SELECT rowid, file_path, content FROM chunks"
+    ).fetchall():
+        if rel not in files:
+            path = Path(rel) if Path(rel).is_absolute() else repo_root / rel
+            try:
+                files[rel] = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError, ValueError):
+                files[rel] = None
+        text = files[rel]
+        if text is None or not content:
+            updates.append((content, None, None, rowid))
+            continue
+        cut = _first_resident_offset(content, text)
+        if cut == len(content):
+            updates.append((content, None, None, rowid))
+            continue
+        start = len(text[: text.find(content[cut:])].encode("utf-8"))
+        end = start + len(content[cut:].encode("utf-8"))
+        updates.append((content[:cut], start, end, rowid))
+        resolved += 1
+        whole += not cut
+        residue += len(content[:cut].encode("utf-8"))
+
+    readable = sum(1 for text in files.values() if text is not None)
+    if readable < len(files) / 2:
+        raise SystemExit(
+            f"source descriptors need the indexed tree: only {readable} of "
+            f"{len(files)} files read under {repo_root}. Pass --repo-root."
+        )
+    con.executemany(
+        "UPDATE chunks SET content = ?, span_start = ?, span_end = ? WHERE rowid = ?",
+        updates,
+    )
+    if not resolved:
+        raise SystemExit("source descriptors resolved no chunk; the model is broken")
+    print(
+        f"source descriptors: {whole} of {len(updates)} chunks are a verbatim "
+        f"slice of their file; {residue:,} bytes occur nowhere in the tree and "
+        f"stay stored",
+        file=sys.stderr,
+    )
 
 
 def _vacuum(db: Path) -> int:
@@ -197,7 +302,8 @@ class Simulator:
         """
         self.generation = generation
         self.workdir = workdir
-        self.prefix = f"{repo_root.resolve()}/"
+        self.repo_root = repo_root.resolve()
+        self.prefix = f"{self.repo_root}/"
         self._counter = 0
 
     def _copy(self, artifact: str) -> Path:
@@ -244,6 +350,7 @@ def chunk_candidates(sim: Simulator) -> list[Result]:
     probe = sqlite3.connect(f"file:{sim.generation / 'chunks.db'}?mode=ro", uri=True)
     try:
         fts_already_contentless = not _has_column(probe, "chunks", "tokens_text")
+        chunk_metadata_is_slim = not _has_redundant_metadata(probe, "chunks")
     finally:
         probe.close()
 
@@ -273,6 +380,27 @@ def chunk_candidates(sim: Simulator) -> list[Result]:
         con.executescript(DROP_TRIGGERS)
         con.execute("ALTER TABLE chunks DROP COLUMN content")
 
+    def source_descriptors(con: sqlite3.Connection) -> None:
+        _source_descriptors(con, sim.repo_root)
+
+    def compressed_content(con: sqlite3.Connection) -> None:
+        """Keep the text and every plane over it, store it deflated.
+
+        The alternative to a descriptor. It changes no query semantics and no
+        freshness contract, at the cost of a decompress on each chunk read and
+        a scan in Python where LIKE runs in SQLite today.
+        """
+        con.executescript(DROP_TRIGGERS)
+        con.executemany(
+            "UPDATE chunks SET content = ? WHERE rowid = ?",
+            [
+                (zlib.compress(content.encode("utf-8"), 6), rowid)
+                for rowid, content in con.execute(
+                    "SELECT rowid, content FROM chunks"
+                ).fetchall()
+            ],
+        )
+
     def combined(con: sqlite3.Connection) -> None:
         contentless_fts(con)
         relative_paths(con)
@@ -280,7 +408,7 @@ def chunk_candidates(sim: Simulator) -> list[Result]:
 
     def combined_no_source(con: sqlite3.Connection) -> None:
         combined(con)
-        con.execute("ALTER TABLE chunks DROP COLUMN content")
+        _source_descriptors(con, sim.repo_root)
 
     def combined_no_vectors(con: sqlite3.Connection) -> None:
         combined(con)
@@ -309,7 +437,14 @@ def chunk_candidates(sim: Simulator) -> list[Result]:
             "chunks.db",
             relative_paths,
         ),
-        sim.run("slim metadata_json", "lossless", "chunks.db", slim_metadata),
+        sim.run(
+            "compact metadata_json separators — redundant keys already gone (C4/C5)"
+            if chunk_metadata_is_slim
+            else "slim metadata_json",
+            "lossless",
+            "chunks.db",
+            slim_metadata,
+        ),
         sim.run(
             "fold tokens_text into contentless FTS5"
             + (" — already applied (D2)" if fts_already_contentless else ""),
@@ -318,10 +453,22 @@ def chunk_candidates(sim: Simulator) -> list[Result]:
             contentless_fts,
         ),
         sim.run(
-            "drop content (resolve from source tree)",
+            "drop content outright — upper bound, not reachable (BL-14)",
             "derived",
             "chunks.db",
             drop_content,
+        ),
+        sim.run(
+            "content as source descriptors (Phase F)",
+            "derived",
+            "chunks.db",
+            source_descriptors,
+        ),
+        sim.run(
+            "content stored deflated (alternative to Phase F)",
+            "lossless",
+            "chunks.db",
+            compressed_content,
         ),
         sim.run("drop durable fp32 embeddings", "policy", "chunks.db", drop_embedding),
         sim.run(
@@ -340,13 +487,13 @@ def chunk_candidates(sim: Simulator) -> list[Result]:
             "ALL + embedding-planner pruning", "combined", "chunks.db", combined_pruned
         ),
         sim.run(
-            "ALL + content resolved from source tree",
+            "ALL + content as source descriptors",
             "combined",
             "chunks.db",
             combined_no_source,
         ),
         sim.run(
-            "ALL + vectors moved out of SQLite",
+            "ALL + durable fp32 embeddings dropped (a deletion, not a relocation)",
             "combined",
             "chunks.db",
             combined_no_vectors,
@@ -362,6 +509,7 @@ def knowledge_candidates(sim: Simulator) -> list[Result]:
         # C2 replaced the TEXT edge keys with integer codebook ids and an
         # ``eid`` table; its root text is what relative paths must strip now.
         edges_already_integer = _has_table(probe, "eid")
+        entity_metadata_is_slim = not _has_redundant_metadata(probe, "entities")
     finally:
         probe.close()
 
@@ -417,7 +565,9 @@ def knowledge_candidates(sim: Simulator) -> list[Result]:
             integer_edges,
         ),
         sim.run(
-            "slim metadata_json (drop duplicated content_hash)",
+            "compact metadata_json separators — duplicated content_hash already gone (C4)"
+            if entity_metadata_is_slim
+            else "slim metadata_json (drop duplicated content_hash)",
             "lossless",
             "knowledge.db",
             slim_metadata,
