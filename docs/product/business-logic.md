@@ -129,12 +129,23 @@ the single largest token lever.
 (`analysis/context_synthesizer.py`):
 
 ```
-score   = Σ weight(i) × included(i),  weight(i) = 1/(i+1) over the task's priority list
-         + 0.2 if source code included
-         + 0.1 if docstring longer than 50 chars
-score  *= 0.5 if the whole bundle is under 100 characters
-sufficiency = score / max_score
+score       = Σ weight(i) × included(i),  weight(i) = 1/(i+1) over the task's priority list
+             + 0.2 if source code included
+             + 0.1 if docstring longer than 50 chars
+score      *= 0.5 if the whole bundle is under 100 characters
+max_score   = Σ weight(i) over the *whole* priority list  +  0.2  +  0.1
+sufficiency = min(1.0, score / max_score)
 ```
+
+`max_score` is fixed by the task type, not by the bundle: both bonuses are in
+the denominator whether or not they were earned. That is what makes the number
+a measurement — a bundle is scored against what it should have held. Growing
+the denominator only alongside the numerator was
+[BL-20](../engineering/backlog.md): every bundle holding everything its
+template named scored exactly 1.00 whatever the task type, and `extend` and
+`locate` cleared the 0.9 gate with no source code at all. A consequence worth
+knowing: an entity with no docstring over 50 characters tops out near 0.96, not
+1.00, because its bundle really is missing something.
 
 **Why:** It converts "how much context do we have" into a routable number.
 **Pros:** Explainable — a low score names the missing sections. **Cons:**

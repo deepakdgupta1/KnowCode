@@ -593,16 +593,27 @@ class ContextSynthesizer:
             if content_included.get(section_name, False):
                 score += weight
 
-        # Bonus for having source code (always valuable)
+        # Source code and a real docstring are always worth having, so they are
+        # always part of what a bundle is measured against -- whatever the task
+        # template asked for. Growing max_score only inside the branch that
+        # grew score made the denominator describe what the bundle happened to
+        # contain rather than what it should have, which is not a measurement:
+        # every bundle holding everything its template named scored exactly
+        # 1.00 whatever the task type, and `extend` and `locate` cleared the
+        # 0.9 routing gate with no source code at all (BL-20).
+        #
+        # These two lines must stay outside the conditionals below. An entity
+        # with no long docstring now tops out around 0.96 rather than 1.00,
+        # which is the honest reading: the bundle really is missing something.
+        max_score += 0.2
+        max_score += 0.1
+
         source_code = self._get_entity_source(entity)
         if source_code and "## Source Code" in context_text:
             score += 0.2
-            max_score += 0.2
 
-        # Bonus for having docstring (helps LLM understand intent)
         if entity.docstring and len(entity.docstring) > 50:
             score += 0.1
-            max_score += 0.1
 
         # Penalize if context is very short
         min_useful_tokens = 100

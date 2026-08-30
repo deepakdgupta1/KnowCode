@@ -30,52 +30,6 @@ measured reason not to build something is worth more than silence.
 
 ## Open
 
-### BL-20 - Sufficiency saturates, and two task types clear the routing gate with no source code
-
-**Severity:** High. **Found:** 2026-08-30, same audit.
-
-`_calculate_sufficiency` increments `max_score` inside the same branch that
-increments `score` (`context_synthesizer.py:600`, `:605`), so the source-code
-and docstring bonuses move the numerator and the denominator together. A bundle
-is measured against what it happened to contain rather than against what its
-task template asked for.
-
-Two consequences, both measured by calling the shipped `_calculate_sufficiency`
-directly. Gate is `max(sufficiency_threshold 0.8, routing_quality_floor 0.9)`:
-
-| Task | source in priority | shipped, no source | shipped, with source | fixed denominator, no source | fixed denominator, with source |
-|---|---|---:|---:|---:|---:|
-| explain | yes | 0.85 | 1.00 | 0.75 | 0.96 |
-| debug | yes | 0.56 | 1.00 | 0.50 | 0.96 |
-| extend | yes | **0.91** | 1.00 | 0.81 | 0.96 |
-| review | yes | 0.52 | 1.00 | 0.45 | 0.96 |
-| locate | no | **1.00** | 1.00 | 0.86 | 0.95 |
-| general | yes | 0.86 | 1.00 | 0.77 | 0.96 |
-
-First, `extend` and `locate` clear a 0.9 gate on a bundle containing no source
-code at all — the exact outcome the gate exists to prevent. `extend`'s template
-asks for source, does not get it, and passes anyway.
-
-Second, every complete bundle scores exactly 1.00 whatever its task type,
-because when everything the template asked for is present the numerator equals
-the denominator by construction. The score cannot distinguish a rich `debug`
-bundle from a thin `locate` one. Under a fixed denominator the six land between
-0.95 and 0.96 and the no-source column falls below the gate everywhere.
-
-Reproduce: build an `Entity` with `source_code=None`, mark every priority
-section included, pass a `context_text` over 100 characters with no
-`## Source Code` heading, and call `_calculate_sufficiency` for each `TaskType`.
-
-The fix is to hoist both `max_score` increments out of their conditionals. Note
-that it caps an entity with no docstring at 0.96 rather than 1.00, which is the
-honest reading — the bundle really is missing something. Confirm the 0.9 floor
-is still the number wanted once scores stop saturating; it was calibrated
-against a formula that could only ever return 1.00 or block.
-
-Latent for routing today because the allowlist is empty, but sufficiency is
-served to agents over MCP and REST, where it steers whether they fetch more,
-and it is the number the eval program will calibrate against. Compounds BL-22.
-
 ### BL-21 - Preflight accepts a weight set that turns an F into an A
 
 **Severity:** High. **Found:** 2026-08-30, same audit.
@@ -527,3 +481,4 @@ to `None` like every other rejection in this class.
 | A watched edit never advances the entity graph (BL-17) | Fixed 2026-08-30. A file transaction now rewrites the touched file's entity rows and the edges leaving them, from the same parse that produced its chunks: `PreparedFileUpdate` carries the parse's entities and relationships, `SqliteKnowledgeStore.replace_file` applies them in one writer transaction, and `StagedGenerationWriter` opens the staged `knowledge.db` and commits the graph half after the chunk half — that order makes a crash between the two land on the old behaviour rather than its worse inverse. The manifest's relationship count is read from the staged artifact instead of carried forward from the base. **Deliberately not fixed:** edges *arriving* from a file the transaction did not parse, which an incremental parse cannot re-derive; a rename still needs a full build to resolve everywhere. Five tests that pinned the old contract are inverted, not relaxed, including the e2e release-gate test that named the limitation — `knowcode doctor` stops reporting `store_stale_source_changed` after a watch commit, because the mtime that signal reads was the copied `knowledge.db`'s. Pinned by `tests/unit/service/test_watch_graph_updates.py`; all three production changes mutation-probed. The first probe of the edge deletion did *not* fire, because the assertion resolved edges through the `entities` table and so could not see an orphan — it now joins the `eid` codebook alone. Full suite 1,864 passed, 3 xfailed. |
 | Dependency expansion relabelled a ranked hit as non-evidence (BL-18) | Fixed 2026-08-30, the day the business-logic audit filed it. `SearchEngine.search_scored` now emits every ranked hit as `retrieved`, in rank order, *before* expanding anything, and only then adds unseen callees as `dependency` with a zero score. The de-duplication guard can no longer reach a primary hit, so being some other hit's callee cannot cost a chunk its own retrieval evidence -- the loop order is what enforces it, which the docstring now says. Pinned by two tests in `tests/unit/retrieval/test_search_engine.py`: a three-link call chain with all three links ranked returned one `retrieved` label before the fix and three after, and a second test holds the other half, that a callee retrieval never ranked stays a `dependency` -- the guard against "fix" by relabelling everything `retrieved`. Both mutation-probed: moving the seeding loop back after expansion reddens the first, relabelling callees `retrieved` reddens only the second. The returned list changes from expansion-traversal order to rank order; `cli.py:438`, `mcp/server.py:343` and `api.py:195` all just iterate it, and `evidence[].rank` in the orchestrator now means retrieval rank, which is what it claimed. Full suite 1,866 passed, 3 xfailed. |
 | The retrieval ladder was gated on the fail-closed flag, so every LLM answer got rung one (BL-19) | Fixed 2026-08-30. Both broadening rungs were guarded by membership in `local_answer_task_types`, which `AppConfig._fail_closed` empties on every load and no blessed policy artifact repopulates, so retrieval always stopped at rung one and the model was asked to answer from one entity's signature and docstring -- no source, no dependencies, under 1,500 tokens. The three copy-pasted rung blocks are now one `LADDER_RUNGS` tuple and one loop that stops at the first rung clearing the threshold. The ladder is climbed only when stopping early is *possible* -- some task type may answer locally and the caller has not demanded the LLM; otherwise one retrieval runs at the widest rung. That is the same single attempt as before, at full breadth rather than minimal, so the fix costs no extra retrieval in today's universal case. `force_llm` no longer thins the bundle either: it means "do not answer locally", not "retrieve less". Pinned by two tests in `tests/integration/test_agent_retrieval_contract.py`, which assert the whole kwargs dict one attempt asks retrieval for rather than one field at a time -- a bundle is thin because of the *combination*. Three mutation probes, each reddening only its own test: giving the un-routable case the thinnest rung, removing the early stop, and letting `force_llm` climb. The existing `retrieve_calls == 1` and `== 3` assertions still hold, so the token saving on a populated allowlist is unchanged. `docs/product/business-logic.md` restates the ladder. Full suite 1,868 passed, 3 xfailed. |
+| Sufficiency saturated, and two task types cleared the routing gate with no source code (BL-20) | Fixed 2026-08-30. `_calculate_sufficiency` grew `max_score` inside the same branch that grew `score`, so the denominator described what the bundle happened to contain rather than what its task template asked for. Two consequences, both measured: every bundle holding everything its template named scored exactly 1.00 whatever the task type -- the number could not tell a rich `debug` bundle from a thin `locate` one -- and `extend` (0.91) and `locate` (1.00) cleared the 0.9 gate with no source code at all, `extend` while its own template asks for source. Both increments are now unconditional. With a fixed denominator the six task types land at 0.95-0.96 complete and 0.45-0.86 without source, so the gate discriminates in the direction it was built for. An entity with no docstring over 50 characters now tops out near 0.96 rather than 1.00, which is the honest reading. Pinned by `tests/unit/analysis/test_sufficiency_scoring.py`: source and docstring halves probed separately (each hoist reintroduced reddens one test and only one), an over-correction guard that a complete bundle still clears the gate, and an end-to-end EXTEND bundle through the real synthesizer that scored 0.91 before and blocks after. `docs/product/business-logic.md` now writes `max_score` out; leaving it undefined is what let the drift live. Full suite 1,881 passed, 3 xfailed. **Recalibrate the 0.9 floor** -- it was chosen against a formula that could only return 1.00 or block. |
