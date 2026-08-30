@@ -317,38 +317,6 @@ whole corpus as §5 implies.
 **Deferred on purpose.** Line anchors go stale on every commit. Fix them only if
 the anchors are re-verified as part of adopting a later phase.
 
-### BL-23 - Freshness cannot see a deleted file
-
-**Severity:** Medium. **Found:** 2026-08-30, same audit.
-
-`get_freshness_metadata` derives staleness from
-
-```python
-latest_source_change = max(os.path.getmtime(f.path) for f in files)   # service.py:685
-```
-
-— the maximum mtime across files that *currently exist*. Deleting a source file
-raises no file's mtime, so `is_stale` stays `false` while the index keeps
-serving entities for a file that is gone. No file count or path set is
-compared, so nothing else can catch it either.
-
-The spec does call freshness "mtime-based and advisory", which covers the shape
-of this in spirit; the specific deletion blind spot is worth naming because the
-staleness banner is what tells a user their answer may be wrong.
-
-Partly backstopped by D3: under the default `entity_source: disk`,
-`LiveSourceLoader.load_verified_source` fails closed on a missing file, so no
-stale *body* is served for a deleted file — only its name, signature and
-relationships. Under `entity_source: stored` the body is served too.
-
-Fix by recording the indexed file count in the manifest and comparing it
-against the scan's count; a drop means a deletion. That is O(1) and
-proportionate to an advisory signal. It misses a same-count delete-plus-add,
-but the added file's mtime catches that case already.
-
-Separately, this runs `scanner.scan_all()` plus one `stat` per file on the
-retrieval path, on every call. Worth measuring before it is worth changing.
-
 ## Closed
 
 | Item | Resolution |
@@ -374,3 +342,4 @@ retrieval path, on every call. Worth measuring before it is worth changing.
 | Preflight accepted a weight set that turned an F into an A (BL-21) | Fixed 2026-08-30. `_parse_preflight_section` checked that each weight was a number and that its key was known, and nothing else -- neither sign nor sum -- while the composite normalised by `max(weight_sum, 1e-9)`. A set summing to zero therefore divided by `1e-9` and clamped to `overall_score = 1.0`, `overall_grade = A`, on a codebase whose `parse_success_rate` scored 0.0, clearing a `min_score` 0.9 build gate. One `validate_preflight_weights` rejects negative weights and any set that does not sum to 1.0 within `WEIGHT_SUM_TOLERANCE` (1e-6, generous beside the defaults' own 1.0000000000000002); the config parser calls it at load -- even when the section overrode nothing, so a drift in the defaults fails loudly -- and `assess_codebase` calls it too, being public and taking `weights` directly. The `1e-9` floor is gone: with validation it could only mask the bug it caused. Pinned by `tests/unit/analysis/test_preflight_weights.py`, both entry points, plus a guard that the two duplicate default tables in `config` and `preflight` have not drifted apart. Three mutation probes, each reddening only its own guard. **One existing test changed on purpose**: `test_custom_weights` passed partial overrides summing to 1.70, which is now rejected -- and it only asserted that both calls returned a float, so it could not have caught a composite that ignored the weights. It now puts the whole weight on one dimension and asserts the composite equals that dimension's score. Full suite 1,895 passed, 3 xfailed. |
 | Live source reads were not bounded to the repository root (BL-25) | Fixed 2026-08-30. `LiveSourceLoader._slice` built its path as `self.root_dir / entity.location.file_path`, and `pathlib` discards the left operand entirely when the right is absolute -- which indexed paths *are*, since `normalize_file_identity` resolves every one. So the join bounded nothing, and a `..` segment walked out just as easily. Digest verification bounds what may be *served*, never what may be *read*, and `load_source` skips the digest altogether. A new `_resolve` sits under both reads and fails closed to `None` with a logged refusal, resolving root and candidate before comparing so a symlinked root -- macOS puts temporary directories behind one -- compares against the same real path the indexed identity was normalized to. Defense in depth: reaching it needs a foreign or tampered index. Worth closing because the loader now runs on the default read path for every `get_context` call, not only stale ones, since the BL-16 fix. Pinned by four tests in `tests/unit/analysis/test_live_hydration.py` -- absolute escape, `..` escape, a verified read whose digest genuinely *matches* the outside file (so only containment can refuse it, proved by the same entity being served when the loader is rooted at its own directory), and an over-rejection guard that an absolute path inside the root is still read. Mutation-probed. Full suite 1,899 passed, 3 xfailed. |
 | Every context bundle labelled its source Python (BL-24) | Fixed 2026-08-30. All four signature and source-code fences in `ContextSynthesizer` were hardcoded to ```` ```python ````, so Rust, TypeScript, Java and Vue source reached the LLM -- and the user -- declared as Python: wrong highlighting for the reader, and a false claim to the model about what it was asked to reason over. `DocumentationSynthesizer._language_for` already resolved this exactly right for its language census, so the answer was extracted to `knowcode/utils/language.py` rather than written a second time, and both call it. The two callers want different fallbacks and get their own function: a census needs every entity in a bucket (`unknown`), a fence needs no tag at all there, because ```` ```unknown ```` is a literal wrong claim where a bare fence says nothing. An unfamiliar-but-present suffix is passed through -- renderers ignore an info string they do not know, so it costs nothing and remembers what the file was. Pinned by `tests/unit/analysis/test_context_fence_language.py` across both synthesis paths, which carry separate fences. Two mutation probes. Full suite 1,906 passed, 3 xfailed. |
+| Freshness could not see a deleted file (BL-23) | Fixed 2026-08-30. Staleness came entirely from `max(mtime)` across files that *currently exist*, and deleting a file raises nobody's mtime, so the index kept serving entities for a file that was gone and reported itself fresh. `indexed_file_paths()` on both stores returns the files the index covers, and `_indexed_files_gone` subtracts the scan from it -- reusing the walk freshness already does, so no extra filesystem IO. New reason `store_stale_files_deleted`. **Two directional choices carry the fix.** The difference runs one way only: a scanned file the index does not cover is a parse failure or a new file the mtime check already reports, never a deletion -- comparing *counts* instead would have read every unparsed file as a permanent deletion. And paths that do not come back absolute are dropped, because `_load_id` cannot anchor them without a recorded repo root and a relative path resolves against the process working directory; comparing those would have reported a wholesale deletion on every retrieval. This signal may miss a deletion, which is the behaviour that already shipped; it must never invent one. The whole check sits inside one guard including resolving `self.store`, so a generation whose store will not open loses this signal rather than the whole freshness report -- freshness used to be pure filesystem work. Found by an existing test: the doctor fixture indexes `sample.py` and never creates it, so it flipped to `warn` -- the new answer is the correct one, and chasing it is what surfaced the anchoring hazard. Pinned by four tests in `tests/unit/service/test_freshness_deletions.py` covering both sides of the comparison. Three mutation probes; the sharp one makes the difference symmetric and reddens all three guards. Partly backstopped already by D3: under the default `entity_source: disk` no stale *body* is served for a deleted file, only its name, signature and relationships. Full suite 1,910 passed, 3 xfailed. Left open: this still runs `scan_all()` plus a stat per file on the retrieval path, which is worth measuring before it is worth changing. |

@@ -268,7 +268,13 @@ structure only — no runtime frequency or ownership data.
 
 - Local answering disabled pending blessed policy (above).
 - Language coverage fixed (12 extensions across 9 language families); others ignored.
-- Freshness is mtime-based and advisory.
+- Freshness is advisory. Edits and additions are caught by mtime; deletions
+  are caught by comparing the index's file set against the scan, because
+  removing a file raises nobody's mtime ([BL-23](../engineering/backlog.md)).
+  That comparison runs in one direction only — a scanned file the index does
+  not cover is a parse failure, not a deletion — and it is skipped entirely
+  for an index whose stored paths cannot be anchored to a repository root,
+  since a wrong comparison would invent deletions rather than miss them.
 - Unresolved dynamic references (`ref::` targets) degrade tracing and are
   surfaced as a preflight dimension rather than fixed.
 - Classifier heuristics are English-oriented.

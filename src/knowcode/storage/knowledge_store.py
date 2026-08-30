@@ -16,7 +16,10 @@ from knowcode.data_models import (
     RelationshipKind,
 )
 from knowcode.utils.atomic_write import atomic_write_json, cleanup_orphaned_temp_files
-from knowcode.utils.entity_identity import ensure_entity_content_hash
+from knowcode.utils.entity_identity import (
+    ensure_entity_content_hash,
+    normalize_file_identity,
+)
 
 
 class KnowledgeStore:
@@ -240,6 +243,20 @@ class KnowledgeStore:
         )
 
     # Query methods
+
+    def indexed_file_paths(self) -> set[str]:
+        """Every source file this store holds entities for.
+
+        Normalized to match the scanner's paths; see the SQLite store's copy
+        for why freshness needs it (BL-23).
+        """
+        return {
+            normalize_file_identity(entity.location.file_path)
+            for entity in self.entities.values()
+            if entity.location
+            and entity.location.file_path
+            and Path(entity.location.file_path).is_absolute()
+        }
 
     def get_entity(self, entity_id: str) -> Optional[Entity]:
         """Get entity by ID."""

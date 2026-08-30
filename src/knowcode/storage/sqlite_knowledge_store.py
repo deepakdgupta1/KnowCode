@@ -552,6 +552,35 @@ class SqliteKnowledgeStore:
     # Aggregations (reader connection)
     # ------------------------------------------------------------------
 
+    def indexed_file_paths(self) -> set[str]:
+        """Every source file this generation holds entities for, where anchored.
+
+        Returned in ``normalize_file_identity`` form -- absolute, resolved,
+        POSIX -- which is exactly what a scanned path normalizes to, so the two
+        sets are directly comparable. Freshness takes the difference to see a
+        *deletion*, which no file's mtime can report: removing a file raises
+        nobody's mtime (BL-23).
+
+        **Paths that do not come back absolute are omitted.** ``_load_id``
+        re-anchors a stored path onto the repository root, but a store that
+        never recorded one hands back exactly what was written -- and a
+        relative path resolves against the process working directory, which is
+        not the repository. Comparing those against scanned paths would report
+        every file in the index as deleted. Dropping them can only cost this
+        signal a file it would have flagged, which is the behaviour that
+        already shipped; keeping them would invent deletions, which is a new
+        defect. Production entities carry absolute locations from the scanner.
+
+        Distinct over ``file_path``, so the cost tracks the file count rather
+        than the entity count.
+        """
+        with self._read_lease() as conn:
+            rows = conn.execute("SELECT DISTINCT file_path FROM entities").fetchall()
+        loaded = (self._load_id(row["file_path"]) for row in rows)
+        return {
+            normalize_file_identity(path) for path in loaded if Path(path).is_absolute()
+        }
+
     def count_by_kind(self) -> dict[str, dict[str, int]]:
         """Return entity and relationship counts grouped by kind.
 

@@ -681,9 +681,11 @@ class KnowCodeService:
         latest_source_change = 0.0
         is_stale = False
         stale_reasons = []
+        scanned_paths: set[str] | None = None
 
         try:
             from knowcode.indexing.scanner import Scanner
+            from knowcode.utils.entity_identity import normalize_file_identity
 
             root_dir = self._store_root()
             if root_dir.exists() and root_dir.is_dir():
@@ -691,6 +693,10 @@ class KnowCodeService:
                 files = scanner.scan_all()
                 if files:
                     latest_source_change = max(os.path.getmtime(f.path) for f in files)
+                # None means "the scan did not complete"; an empty set means
+                # "there is nothing there". The deletion check below must not
+                # confuse the two, or a failed scan reads as a wiped repository.
+                scanned_paths = {normalize_file_identity(f.path) for f in files}
         except OSError as e:
             import logging
 
@@ -712,6 +718,10 @@ class KnowCodeService:
             is_stale = True
             stale_reasons.append("index_stale_source_changed")
 
+        if scanned_paths is not None and self._indexed_files_gone(scanned_paths):
+            is_stale = True
+            stale_reasons.append("store_stale_files_deleted")
+
         return {
             "last_store_rebuild": int(last_store_rebuild),
             "last_index_rebuild": int(last_index_rebuild),
@@ -719,6 +729,43 @@ class KnowCodeService:
             "is_stale": is_stale,
             "stale_reasons": stale_reasons,
         }
+
+    def _indexed_files_gone(self, scanned_paths: set[str]) -> bool:
+        """Whether the index covers a file the working tree no longer has.
+
+        Every other staleness signal is an mtime comparison, and deleting a
+        file raises nobody's mtime -- so before this, an index kept serving
+        entities for a file that was gone and reported itself fresh (BL-23).
+
+        Compared in one direction only. A scanned file *missing* from the index
+        is not a deletion: it is a file the parser rejected, or one added since
+        the build whose own mtime already reports it. Comparing set sizes
+        instead would have read every unparsed file as a permanent deletion.
+
+        Everything here is inside the guard, including resolving ``self.store``
+        itself. Freshness used to be pure filesystem work, and it is called on
+        the retrieval path: a generation whose knowledge store cannot be opened
+        must lose this one signal, not the whole freshness report. In a real
+        retrieval the bundle is already leased, so this is an attribute read
+        rather than an open.
+
+        Duck-typed rather than isinstance-checked so a store without the method
+        degrades the same way.
+        """
+        try:
+            indexed_file_paths = getattr(self.store, "indexed_file_paths", None)
+            if indexed_file_paths is None:
+                return False
+            return bool(indexed_file_paths() - scanned_paths)
+        except Exception as exc:
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "Could not check for deleted indexed files, so freshness is "
+                "reporting mtime signals only: %s",
+                exc,
+            )
+            return False
 
     def _build_index(
         self, directory: str | Path, index_path: str | Path, incremental: bool = False
