@@ -85,6 +85,7 @@ class ContextSynthesizer:
         max_tokens: int = DEFAULT_MAX_TOKENS,
         model: str = "gpt-4",
         live_loader: Optional["LiveSourceLoader"] = None,
+        index_is_stale: bool = False,
     ) -> None:
         """Initialize context synthesizer.
 
@@ -92,20 +93,46 @@ class ContextSynthesizer:
             store: Knowledge store to query.
             max_tokens: Maximum tokens in context bundle.
             model: Model name for token counting.
-            live_loader: Optional LiveSourceLoader to fetch fresh content.
+            live_loader: Optional LiveSourceLoader used to read entity source
+                from the working tree. Needed whether or not the index is
+                stale: under ``entity_source: disk`` (storage plan D3) a fresh
+                index holds no stored copy either.
+            index_is_stale: Whether the artifact is known not to match the
+                tree. This selects *which* read the loader performs, not
+                whether it is constructed. See :meth:`_get_entity_source`.
         """
         self.store = store
         self.max_tokens = max_tokens
         self.tokenizer = TokenCounter(model)
         self.live_loader = live_loader
+        self.index_is_stale = index_is_stale
 
     def _get_entity_source(self, entity: Entity) -> str:
-        """Get entity source code, preferring live file if available."""
-        if self.live_loader:
+        """Get an entity's source text, choosing the read by why it is missing.
+
+        Two different questions reach this method, and they want opposite
+        answers from the same loader:
+
+        - **The index is stale.** The caller has been told the artifact no
+          longer matches the tree, so live text is what they asked for, drift
+          included. Read it unverified — the drift *is* the answer.
+        - **The index is fresh but holds no copy** (``entity_source: disk``,
+          D3's default). The tree is the record and the index can still vouch
+          for it, so serve the span only while it hashes to the digest taken
+          at build time, and nothing at all otherwise.
+
+        Gating the loader on staleness alone answered the first question and
+        silently returned "" for the second, which is BL-16.
+        """
+        if self.live_loader and self.index_is_stale:
             live_source = self.live_loader.load_source(entity)
             if live_source is not None:
                 return live_source
-        return entity.source_code or ""
+        if entity.source_code is not None:
+            return entity.source_code
+        if self.live_loader:
+            return self.live_loader.load_verified_source(entity) or ""
+        return ""
 
     def synthesize(
         self, entity_id: str, summarize: bool = False
