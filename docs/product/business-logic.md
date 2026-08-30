@@ -51,7 +51,9 @@ generation current.
 ### Hybrid fusion — Reciprocal Rank Fusion, sparse-heavy
 
 **What:** BM25 (keyword) and dense vector search run in parallel, each
-contributing `limit × 3` candidates, fused by RRF:
+contributing `CANDIDATE_FACTOR = 3` times the limit *they* are given — which
+`SearchEngine` has already multiplied by `reranker_top_k_multiplier = 5`, so
+each retriever sees 15× the result count the caller asked for. Fused by RRF:
 
 ```
 score(chunk) = Σ_sparse (1 − α)/(60 + rank + 1)  +  Σ_dense α/(60 + rank + 1)
