@@ -249,6 +249,12 @@ its §17 is the running execution log.
 depends on P1, because it narrows the semantic candidate set and may only ship
 behind a measured recall gate.
 
+**Governing decision:** the plan's
+[DR-4](research/storage_optimization_2026_v4.md) — no phase may cost retrieval
+quality, whatever the byte saving. It was settled 2026-08-30 after three
+separate phases proposed buying footprint with recall, and it is why two of
+them are now rejected rather than deferred.
+
 **Status:** Phases D1, A2, B and all of C shipped 2026-08-29. D1 stopped publishing the
 ANN index and made it a plane rebuilt from the durable embeddings in
 `chunks.db`, worth 32.31 MB, with retrieval verified unchanged on 6,874 vectors
@@ -265,7 +271,31 @@ its last item made a generation's size independent of the directory it was
 built in. D2 shipped 2026-08-30: the term index became a contentless FTS5
 table carrying `contentless_delete=1`, worth a measured 4.46 MB of `chunks.db`,
 with BL-13's deletion fix shipped inside it and the simulator BL-12 flagged
-repaired first to re-size the phase honestly.
+repaired first to re-size the phase honestly. D3 shipped 2026-08-30 and
+completed Phase D: `entities.source_code` resolves from the working tree
+against its indexed digest, worth a measured 3.67 MB, behind a global
+`config.entity_source: disk | stored` (default `disk`) so a repository can opt
+back into the persisted copy with no migration. Wiring its resolver into
+`get_entity_details` and not into `get_context` cost the canonical MCP tool its
+source body on a fresh index; that was BL-16, Critical, found and fixed the
+same day.
+
+**Phase F and the int8 ANN cache are rejected, not deferred.** F would have
+left `ExactQueryEngine` with no implementation — the term index that would
+inherit the mode answers mid-identifier fragments at 14.6% recall at the limit
+the engine passes — for 3.50 MB. The int8 cache measured `recall@10 0.9950`
+against exhaustive fp32's `1.0000` for 18 MB. Both are closed as rejected in
+the [backlog](engineering/backlog.md), and DR-4 records the rule that closed
+them.
+
+**Where this leaves the stream.** One generation now measures 46.70 MB.
+Everything DR-4 permits inside a generation is worth **2.53 MB**: deflating
+`chunks.content` (2.38 MB, the replacement for F) and compacting
+`metadata_json` separators (0.15 MB). The larger remaining lever is retention —
+two generations hold 97 MB of mostly identical bytes — which is Phase G, and it
+is a different axis from making a generation smaller. The plan's §17 closing
+ledger carries the full accounting, measured rather than projected; read it
+before §11, whose targets are sized against the pre-B corpus.
 
 **Work, in order:**
 
@@ -298,20 +328,41 @@ repaired first to re-size the phase honestly.
    storage simulator no longer models a post-C2 `knowledge.db`
    ([BL-12](engineering/backlog.md)), and it removed the carrier BL-9 had been
    deferred onto.
-4. **Stop persisting the rest of the derived data.** Half shipped 2026-08-30
-   as D2: `tokens_text` folds into a contentless FTS5 table declared with
-   `contentless_delete=1`, so deletion works and the sync triggers are
-   replaced by explicit FTS writes in each chunk transaction (BL-13, closed).
-   Remaining as D3: `entities.source_code` resolves from disk against a
-   verified content hash, failing closed rather than serving stale source.
+4. ~~**Stop persisting the rest of the derived data.**~~ Shipped 2026-08-30,
+   completing Phase D. D2: `tokens_text` folds into a contentless FTS5 table
+   declared with `contentless_delete=1`, so deletion works and the sync
+   triggers are replaced by explicit FTS writes in each chunk transaction
+   (BL-13, closed), worth a measured 4.46 MB. D3: `entities.source_code`
+   resolves from disk against a verified content hash, failing closed rather
+   than serving stale source, worth a measured 3.67 MB — and it ships as a
+   global configuration setting, `config.entity_source: disk | stored`
+   (default `disk`), so a repository can opt back into the persisted copy per
+   build with no migration.
 5. **Embedding-selection policy,** gated on the retrieval evaluation harness.
    Chunks below a content-size threshold stay stored and stay reachable through
    the exact, path, and FTS planes; they leave only the semantic candidate set.
+   Under DR-4 it ships on a measured no-loss result, never on a loss judged
+   small enough to accept. Its premise — that an unembedded chunk stays
+   reachable through the other three planes — holds only because F is rejected
+   and the exact plane stays.
+6. **The lossless remainder, 2.53 MB.** Deflate `chunks.content` (2.38 MB;
+   `zstandard` with a trained dictionary reaches 3.05 MB and adds a dependency)
+   and dump `metadata_json` with compact separators (0.15 MB across three call
+   sites). Neither changes a plane, a semantic, or a freshness contract.
+   Independent of P1.
+7. **Decide Phase G, or retire the plan without it.** Content addressed across
+   retained generations, so retention costs the delta rather than the whole.
+   Lossless by construction and worth more than everything above combined, but
+   larger than the rest of the plan put together. `BL-11` — chunks
+   content-addressed by MD5, where a collision hands one chunk another chunk's
+   vector — should close before the stream does either way.
 
 **Exit criteria:** every tracked document in a repository is retrievable, one
 generation is a small multiple of the source it describes rather than an order
 of magnitude, and no phase past the first changes what an existing query
-returns without a measured recall number to justify it.
+returns without a measured recall number to justify it. DR-4 tightened the
+last clause: a measured recall number is no longer a licence to ship a loss,
+only evidence that there is none.
 
 ## Sequencing and Gates
 
@@ -331,7 +382,8 @@ The next trust release ships only when all of the following are true:
 4. Freshness and language-coverage checks report no unresolved correctness
    warnings for the target repository.
 5. No `Critical` item is open in the [engineering backlog](engineering/backlog.md).
-   `BL-1` is open today, so this gate is not met.
+   None is open today. (This line named `BL-1` long after Phase B fixed it on
+   2026-08-29; check the backlog rather than trusting the name here.)
 
 P3 through P7 improve efficiency, adoption, and footprint, but they are not
 permitted to weaken these release gates.

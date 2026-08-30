@@ -14,8 +14,16 @@ current SQLite/LanceDB artifact layout
 This document is both the audit and the work order. It is written to be
 executed without reference to the conversation that produced it.
 
+> **Start at §17's closing ledger, not at §11.** Most of this plan has shipped,
+> two phases are rejected, and §11–§12's targets are sized against a corpus
+> that Phase B replaced. The ledger says what is actually left, measured
+> against the current artifact. Read §11 for how a phase was meant to work, not
+> for whether it is still wanted.
+
 - **§1–§2** state the result and the decisions that are already settled. Do
-  not re-litigate §2; those questions were asked and answered.
+  not re-litigate §2; those questions were asked and answered. **§2's DR-4 is
+  the newest and governs the rest:** no phase may cost retrieval quality,
+  whatever the byte saving.
 - **§3–§10** are the evidence. Every number is measured unless marked
   **(modeled)**. Re-run §3's three commands before starting — if the numbers
   have moved, the plan still holds but the targets shift.
@@ -26,6 +34,8 @@ executed without reference to the conversation that produced it.
   acceptance target.
 - **§14–§16** are appendices: a code-anchor index, the schema deltas, and the
   questions this round resolved.
+- **§17** is the execution log, one entry per phase as it shipped, and it ends
+  with the ledger that closes the stream.
 
 The repository is Python, `pytest`, `ruff`, `mypy`, `black`. Coverage floor is
 80%. Every phase below lists its own tests; write them first.
@@ -128,6 +138,49 @@ first makes the policy a genuine quality/size trade rather than a workaround.
 
 **Consequence:** Phase B is new, sits before the encoding work, and is the only
 phase that fixes a retrieval correctness bug.
+
+### DR-4 — Retrieval quality is a floor, not a variable to trade
+
+Settled 2026-08-30, after three separate phases had proposed buying footprint
+with recall. No phase in this plan may cost search or retrieval quality: not
+recall, not precision, not the exactness of a mode that calls itself exact.
+The size of the measured loss is not a mitigating factor. A phase that trades
+quality is **rejected** — not deferred, not shipped behind a flag, not
+re-sized until the loss looks affordable.
+
+**Rationale.** Every number in this document is a byte count, and byte counts
+argue better than recall numbers do: `18 MB` reads as a result and `0.9950`
+reads as a rounding error. It is not one. Footprint is recoverable later — by
+compression, by encoding, by stopping the same text being stored twice — and
+this plan has already recovered 54 MB without touching a retrieval path.
+Quality is not recoverable the same way. A caller handed the wrong ten rows
+gets no signal that anything was lost, and no later phase gives those rows
+back. Where the two compete, take the bytes that are free and leave the rest.
+
+**Consequence, applied 2026-08-30.** Two items left the plan and the
+[engineering backlog](../engineering/backlog.md) closed both as rejected
+rather than fixed:
+
+- **§5.2/§5.3's int8 ANN plane (BL-3).** `recall@10 0.9950` against exhaustive
+  fp32's `1.0000` is half a percent of top-10 recall for 18 MB. If an on-disk
+  plane is ever needed it is fp32; §5.2's binary-plus-rescore row is 0.9983 and
+  is also not 1.0000.
+- **§11's Phase F (BL-14).** It leaves `ExactQueryEngine` with no
+  implementation, and the term index that would inherit the mode answers
+  mid-identifier fragments at 14.6% recall at the limit the engine passes.
+
+**Phase E survives, and is why this rule needed writing down.** E's premise is
+that an unembedded chunk stays reachable through the exact, path, and FTS
+planes. That premise is true only because F is rejected and the exact plane
+stays — F would have removed one of the three legs E stands on. E ships on a
+measured no-loss result or it does not ship, and "within the harness's noise
+band" has to mean the harness could not detect a loss, never that a detected
+loss was small enough to accept.
+
+**Where the bytes come from instead.** Compressing `chunks.content` (`zlib`
+2.38 MB, `zstandard` with a trained dictionary 3.05 MB) changes no plane, no
+semantics, and no freshness contract. Not storing the chunk prefix its own body
+already carries recovers a further 0.28 MB. Neither costs a row.
 
 ---
 
@@ -317,15 +370,29 @@ fp32 vectors are also nearly incompressible — zlib takes 24.09 MB to 22.31 MB,
 a 7% gain — confirming v3 §5.3's "low benefit" classification. The lever on the
 vector plane is count and width, never compression.
 
+> **Overtaken by DR-4.** This section's heading is the claim DR-4 reverses.
+> Width is not a free policy dial: every row below fp32 in the table above is a
+> measured recall loss, and DR-4 rules those out whatever the byte saving. The
+> measurements stand — they are what makes the rejection quantitative — but the
+> only width this plan will ship is the one that reads `1.0000`.
+
 ### 5.3 Direction
 
 Keep the durable fp32 BLOB exactly as ADR 0003 specifies. Change the derived
 plane. Below roughly 100k vectors, skip the ANN index entirely: an exhaustive
 fp32 dot product over 6,166 × 1024 is a few million multiply-adds and completes
 well under a millisecond. An ANN index at this scale buys nothing and costs
-28 MB. Where an on-disk ANN index is warranted for large repositories, build it
+28 MB.
+
+~~Where an on-disk ANN index is warranted for large repositories, build it
 int8 — 4x smaller at 0.995 recall@10, with the fp32 record still available for
-exact rescoring.
+exact rescoring.~~ **Rejected under DR-4, 2026-08-30.** 0.995 is not 1.000, and
+no footprint number buys the difference. The exhaustive-scan half of this
+direction is already what ships: `VectorStore` builds
+`faiss.IndexIDMap2(faiss.IndexFlatIP(...))`, an exact fp32 scan. What is left
+undone is a memory and open-time cost above roughly 100,000 vectors, which no
+repository this project indexes has reached; re-file it as a footprint item
+when one does, at a width that keeps recall@10 at 1.0000.
 
 Execution: A1 (compaction), D1 (index becomes a cache).
 
@@ -567,12 +634,18 @@ return stale source, whereas a persisted copy silently can.
 the identical digest in 32 bytes. No collision-resistance change, half the
 bytes. (Chunk hashes are md5, so 16 bytes.)
 
-**`chunks.content` — 3.47 MB.** A duplicate of the source tree, but unlike the
-others it has live consumers: `reranker.py:154` and `:217`. Replacing it with
-byte-range descriptors requires a source resolver, so it belongs to a later
-phase. Measured if done: **6.39 MB (16.0%)**.
+**`chunks.content` — 3.47 MB.** ~~A duplicate of the source tree, but unlike
+the others it has live consumers: `reranker.py:154` and `:217`. Replacing it
+with byte-range descriptors requires a source resolver, so it belongs to a
+later phase. Measured if done: **6.39 MB (16.0%)**.~~
 
-Execution: C3–C5, D2, D3, Phase F.
+**Corrected 2026-08-30.** It is not a duplicate of the source tree: 55.9% of
+chunks contain text that occurs nowhere in their file. It has nine consumers,
+not two, and a sixth read path in `rebuild_fts()`. The reachable saving is
+3.50 MB, not 6.39. And the column is the exact plane's only implementation, so
+under DR-4 it stays. The bytes come from compression instead (§17, Phase F).
+
+Execution: C3–C5, D2, D3. Phase F is rejected.
 
 ---
 
@@ -798,7 +871,7 @@ corrected corpus — not 19.9 MB. Plan against the composed figures in §12.
 |---|---|---:|
 | **D1** | Vector index becomes a rebuildable cache: not published, not retained, built on first semantic query or lazily at load | 28.43 MB |
 | **D2** | `tokens_text` folded into a contentless FTS5 table (`content=''`, `contentless_delete=1`; BL-13) | 4.64 MB re-measured |
-| **D3** | `entities.source_code` resolved from disk via `file_path` + `line_start`/`line_end`, verified against `content_hash` | 4.77 MB |
+| **D3** | `entities.source_code` resolved from disk via `file_path` + `line_start`/`line_end`, verified against `content_hash`, gated on the global `config.entity_source` setting (`disk`, the default, or `stored`) | 3.67 MB re-measured |
 
 **`entities.metadata_json` is retained (DR-1). Do not strip `behavior` or
 `confidence`.**
@@ -819,10 +892,14 @@ corrected corpus — not 19.9 MB. Plan against the composed figures in §12.
   is dropped, schema v4 fails closed on v3 databases, a runtime guard declares
   the SQLite 3.43 floor, and `rebuild_fts()` re-tokenizes from `content` as
   the replacement for the retired `'rebuild'` statement. DDL in §15.
-- D3: `src/knowcode/storage/sqlite_knowledge_store.py` (drop the column),
-  `src/knowcode/service.py:1657` (the one reader), and a new source resolver.
-  `src/knowcode/analysis/live_source_loader.py` already exists — check whether
-  it is the right home before adding another.
+- D3: `src/knowcode/config.py` — the global `entity_source` setting
+  (`disk`/`stored`, default `disk`). `src/knowcode/storage/
+  sqlite_knowledge_store.py` — one write seam nulls `source_code` when the
+  mode is `disk`; the column stays in the schema so the setting flips per
+  build without a migration. `src/knowcode/analysis/live_source_loader.py` —
+  `load_verified_source` is the resolver (the right home; the read/slice half
+  already lived there). `src/knowcode/service.py` — the one reader resolves
+  when the stored copy is absent.
 
 **Design notes.**
 - D1 is the largest single win and the lowest-risk one, because the rebuild
@@ -844,11 +921,14 @@ corrected corpus — not 19.9 MB. Plan against the composed figures in §12.
 - Unit (the BL-13 pin): a deleted chunk's terms stop matching, and a replaced
   file's old terms stop matching while its new terms start. Asserting only
   that new chunks are findable passes on a broken build.
-- Unit: D3 returns identical source for an unmodified file; returns `None` and
-  logs when the file is modified (hash mismatch) or absent.
-- Integration: `knowcode build` → published generation contains no
-  `vectors.lancedb` and no `source_code` column; retrieval eval suite
-  unchanged.
+- Unit: D3 returns identical source for an unmodified file; returns `None`
+  and warns when the file is modified (hash mismatch) or absent; returns
+  `None` quietly for entities that never carried a snippet (their digest
+  covers identity fields, and the stored copy was empty for them too); and
+  `entity_source: stored` restores the persisted copy with its stale reads.
+- Integration: `knowcode build` under the default `disk` mode publishes a
+  generation whose `entities.source_code` is NULL throughout; retrieval eval
+  suite unchanged.
 
 **Acceptance.** `chunks.db` 34.04 → **28.51 MB**; `knowledge.db` 10.53 →
 **7.39 MB**; `vectors.lancedb` **0 MB in the published generation**. Total
@@ -909,6 +989,20 @@ stale.
 
 Sequence after E, and only once D3's resolver has proven itself in production.
 
+> **Rejected 2026-08-30 under DR-4. This phase does not ship, in this form or
+> a re-scoped one.** It cannot be built as written — 55.9% of chunks contain
+> text that occurs nowhere in their file, and the reachable saving is 3.50 MB,
+> not 6.39 — but that is not why it is rejected. It is rejected because it
+> leaves `ExactQueryEngine` with no implementation: the term index that would
+> inherit the mode answers mid-identifier fragments at 57.8% recall unbounded
+> and 14.6% at the limit of 10 the engine passes, and a plane that answers them
+> exactly costs 10.00 MB against the 4.32 MB column it replaces. Take the bytes
+> from compression instead. See §17, Phase F, and backlog BL-14, closed as
+> rejected. The correctness argument above — that a persisted snippet may be
+> stale — is real and is answered by failing closed on a verified read where
+> the text is addressable, which is D3 on the entity plane; it does not
+> transfer to the chunk plane, where the text is not addressable.
+
 ---
 
 ### Phase G — Cross-generation content addressing
@@ -947,8 +1041,10 @@ and **3.4x the entire tracked tree** rather than 10x. Two-generation retention
 falls from ~176 MB to ~59 MB, and Phase G would make the second generation cost
 only its delta.
 
-If an on-disk ANN index is required rather than rebuilt on demand, an int8
-plane adds 6.02 MB at a measured recall@10 of 0.995.
+~~If an on-disk ANN index is required rather than rebuilt on demand, an int8
+plane adds 6.02 MB at a measured recall@10 of 0.995.~~ **Not an option under
+DR-4** — 0.995 is a recall loss, and this plan does not trade recall for bytes.
+An on-disk plane, if one is ever required, is fp32.
 
 ---
 
@@ -1035,7 +1131,7 @@ drift; the symbol names are the durable reference.
 **Retrieval and consumers**
 | Anchor | What |
 |---|---|
-| `retrieval/reranker.py:154`, `:217` | the two `chunk.content` readers (Phase F) |
+| `retrieval/reranker.py:154`, `:217`, `api/api.py:184`, `:203`, `:214`, `:220`, `:227`, `cli/cli.py:445` | the `chunk.content` readers, nine of them, not the two this row used to list (Phase F, BL-14) |
 | `service.py:1657` | the one `entity.source_code` reader (D3) |
 | `analysis/preflight.py:622` | reads `behavior["confidence"]` (retained, D1 of §2) |
 | `analysis/context_synthesizer.py:318` | renders `behavior` (retained) |
@@ -1105,8 +1201,10 @@ delete. Every mutating repository path owns its FTS row.
 `INSERT INTO chunks_fts(chunks_fts) VALUES ('rebuild')` is not available
 against a contentless table, so index repair becomes an explicit
 re-tokenization pass over `chunks.content`, carried by the repository as
-`rebuild_fts()`. While `content` is still stored — until Phase F — that pass
-reconstructs the whole term index without touching the source tree.
+`rebuild_fts()`. Because `content` is stored — permanently, now that Phase F is
+rejected under DR-4 — that pass reconstructs the whole term index without
+touching the source tree. That property was one of the things F would have
+taken away.
 
 C1 rewrites `chunk_id`, `entity_id`, and `file_path` to repo-relative form. It
 is a data change, not a DDL change.
@@ -1178,8 +1276,12 @@ After C3 and D3:
 UPDATE entities SET content_hash = unhex(content_hash)
 WHERE content_hash IS NOT NULL AND LENGTH(content_hash) = 64;
 
--- D3: source resolved from disk, verified against content_hash.
-ALTER TABLE entities DROP COLUMN source_code;
+-- D3: source resolved from disk, verified against content_hash. As shipped,
+-- the column is retained and written NULL under `entity_source: disk`
+-- rather than dropped. The saving is the text, not the column shell, and a
+-- retained column is what makes the setting a per-build choice: `stored`
+-- writes it again on the next build with no migration either way.
+UPDATE entities SET source_code = NULL;
 ```
 
 C4 strips `'$.content_hash'` from `entities.metadata_json`. **Everything else in
@@ -1237,11 +1339,16 @@ content threshold to everything.
 
 ### 16.4 Is the 100k-vector threshold for skipping the ANN index correct?
 
-**Still open.** It should be measured against exhaustive-scan latency on real
-hardware rather than assumed. It does not block any phase: at this repository's
-6,166 vectors the exhaustive scan is unambiguously correct, and the threshold
-only matters once a repository approaches six figures. Measure it during D1 and
-record the result here.
+**Still open, and now only a latency question.** It should be measured against
+exhaustive-scan latency on real hardware rather than assumed. It does not block
+any phase: at this repository's 6,166 vectors the exhaustive scan is
+unambiguously correct, and the threshold only matters once a repository
+approaches six figures.
+
+DR-4 removed the half of this question that mattered. The threshold used to
+decide *when to switch to an approximate plane*; with int8 rejected, crossing
+it cannot change what is retrieved, only how long retrieval takes. So the
+answer is a latency curve, and the plane above the threshold is still exact.
 
 ---
 
@@ -1762,8 +1869,12 @@ vectors. §5.3's disk-backed int8 cache outside `generations/`, keyed by the
 chunk-id digest, is not implemented, and neither is the exhaustive-scan path in
 `search_engine.py`. Neither is needed for the saving above.
 
-**Found, not fixed.** Both are in the
-[engineering backlog](../engineering/backlog.md).
+**Resolved 2026-08-30, against the direction this entry assumed.** The int8
+cache is rejected under DR-4 at `recall@10 0.9950`; backlog BL-3 is closed as
+rejected, not deferred. The exhaustive-scan path turned out to be already
+shipped — `VectorStore` builds `faiss.IndexIDMap2(faiss.IndexFlatIP(...))`,
+which is an exact fp32 scan — so what this entry filed as two undone items was
+one rejected item and one that was never missing.
 
 *Markdown documents are dropped from the index entirely* (BL-1). `MarkdownParser`
 gives the document entity the id `<file>::<file-stem>` and each heading the id
@@ -1877,4 +1988,325 @@ generation fails closed when opened by the new code.
 
 **Left in Phase D.** D3 (`entities.source_code` resolved from disk, re-measured
 at 3.70 MB by the fixed simulator) remains. Phase F stays gated on BL-14's
-prerequisites; D2's landing makes none of them easier.
+prerequisites; D2's landing makes none of them easier. *(Superseded
+2026-08-30: F is rejected under DR-4, so the gate is moot.)*
+
+---
+
+### Phase D3 — shipped 2026-08-30, as a global configuration setting
+
+**Deviation from §11/§15, on purpose.** D3 was specified as dropping
+`entities.source_code`. It ships instead behind a global setting,
+`config.entity_source: disk | stored` (default `disk`): the column stays in
+the schema and is written NULL under `disk`, so the behavior is a per-build
+choice with no migration in either direction. `stored` restores today's
+persisted copy and its possibly-stale reads, one YAML line away. The saving
+is the text, not the column shell, and the measured delta shows it.
+
+**What was built.**
+
+- `AppConfig.entity_source` (`disk`/`stored`, validated, default `disk`) —
+  the setting rides the existing `config:` section beside `vector_backend`.
+- One write seam in `SqliteKnowledgeStore._insert_entity_row` nulls
+  `source_code` when the mode is `disk` — after the digest was computed
+  upstream, so build, watch, and bulk paths are covered by construction. The
+  service passes the mode at both store construction sites
+  (`_open_store`, `_write_staged_knowledge_store`).
+- `LiveSourceLoader.load_verified_source` is the resolver — the right home,
+  as §11 suspected: the read/slice half already lived there. It re-reads the
+  recorded span, canonicalizes, hashes, and serves the text only on an exact
+  digest match. Everything else fails closed to `None`.
+- `KnowCodeService.get_entity_details` resolves when the stored copy is
+  absent; a row built under `stored` still serves its copy untouched.
+- `compute_entity_fallback_hash` (extracted from
+  `compute_entity_content_hash`) lets the resolver tell the two `None`s
+  apart: MODULE/DOCUMENT-style entities hashed from identity fields never
+  had a snippet, their stored copy was empty too, and their resolution is
+  parity rather than drift — quiet, no warning.
+
+**Baseline and result.** Two builds of this tree; the only change between
+them is the mode.
+
+| Artifact | Before (stored) | After (disk) |
+|---|---:|---:|
+| `knowledge.db` | 13.04 MB (4,032 rows with stored source) | **9.38 MB** (0 rows) |
+
+**3.67 MB**, against the fixed simulator's 3.70 MB estimate. Served-source
+coverage is unchanged: 4,045 of 5,471 entities (73.9%) resolve verified, and
+the stored-copy build served 4,032 — the resolver serves, byte for byte, the
+set of entities that ever had a snippet. The remaining 26% never carried one
+(modules, documents, and BL-9-style merged ids), and served empty before D3
+too. Of the sweep's warnings, the only genuine ones were the two source files
+edited after the build — drift caught within minutes of indexing, which is
+the failure mode working as designed.
+
+**Verification.** 1,853 unit and integration tests pass. The loader matrix
+(`tests/unit/analysis/test_live_hydration.py`) pins clean resolution, edited
+body, shifted span, unrelated edit outside the span, deleted file, missing
+digest, and the quiet snippet-less case. Service-level tests
+(`tests/unit/service/test_entity_source_resolution.py`) pin the reader end to
+end: `disk` resolves from the file and fails closed after drift; `stored`
+serves the stale copy. The generation-publication tests, whose assertions are
+about the persisted-copy semantics of preservation, now run under
+`entity_source: stored` — the escape hatch doing exactly the job it exists
+for.
+
+**Correction, 2026-08-30: the reader coverage above is one consumer, not the
+reader end.** `get_entity_details` is pinned in all three cases. `get_context`
+was pinned in none, and it was broken: under the default `disk` mode on a
+*fresh* index it served a context bundle with no source body at all, because
+`KnowCodeService.get_context` built the `LiveSourceLoader` only when the index
+was stale — a gate that was correct while a stored copy always existed and was
+not correct after D3. That path carries the canonical MCP tool. Both *sides* of
+the D3 seam were tested, the loader and the writer; the consumer between them
+was not, which is the shape of gap the testing rules call a stubbed-boundary
+miss.
+
+Filed as BL-16 and fixed the same day. The synthesizer now picks the read by
+why the text is absent — unverified slice for a stale index, `load_verified_source`
+for a fresh one with no stored copy — and the service builds the loader
+unconditionally. `tests/unit/service/test_entity_source_resolution.py` carries
+the `get_context` half of the matrix, mutation-probed in both directions. D3's
+reader coverage is now what this entry originally claimed.
+
+**Mode transitions, pinned the same day.** The first cut read rows purely
+adaptively — text served, NULL resolved — which made a `stored`-to-`disk`
+flip quietly wrong: unchanged rows kept serving their unverified copies
+indefinitely. The reader is mode-aware now: under `disk` the stored copy is
+ignored and every read resolves verified, so a flip takes effect on the next
+read, not the next rebuild; under `stored` a NULL row (from a `disk`-mode
+build) still resolves, best effort.
+
+Testing the transitions against incremental builds found the deeper fact
+those tests now pin: a watch commit copies `knowledge.db` unchanged, so
+entity rows — text, NULL, and digest — advance only on full builds. After a
+watched edit, `disk` mode serves `None` for that file's entities (the digest
+predates the edit) where `stored` served the stale copy with no signal.
+Filed as [BL-17](../engineering/backlog.md) (BL-16 when this entry was
+written; renumbered for an id collision); the honest fix is in the watch
+pipeline, not in D3. `tests/unit/service/test_entity_source_transitions.py`
+holds the matrix: both flips over an incremental build, both flips over a
+full rebuild, and the frozen-row assertion a watch commit must not violate.
+
+**Phase D is complete.** D1, D2, and D3 have shipped; E follows behind its
+eval gate, and F is rejected under DR-4 rather than deferred.
+
+---
+
+### Phase F — re-measured, then rejected 2026-08-30
+
+Discharging BL-14's four prerequisites turned into a correction of the phase
+itself, and then into DR-4. The full evidence and reproduction are in
+`docs/engineering/backlog.md`, BL-14, closed as rejected; this records what the
+plan has to stop saying. The decision is at the foot of this entry.
+
+**§11's premise is false.** A chunk is not a slice of its file.
+`ChunkBuilder._chunk_entity` prepends a reconstructed signature and re-quotes
+the docstring around itself before appending the entity's source,
+`_extract_imports` concatenates lines from across the file, and
+`_extract_module_header` drops blank lines out of the span it copies. Over
+generation `20260830T061050304877Z-8abc9f11`, resolved against a `git archive`
+of the commit it indexed, only 2,991 of 6,782 chunks are a verbatim slice of
+their file. **3,791 (55.9%) are not**, holding 54.7% of the stored chunk
+bytes. Only prose is faithful, 4 of 1,042, because `ProseChunker` copies a real
+line range. D3
+worked because `entity.source_code` is a verbatim line span. Nothing carries
+that property down to the chunk plane.
+
+**§11's figure is stale by 2.89 MB.** Split every chunk into the longest suffix
+that is on disk and the residue that is not, and 589,752 bytes have to stay
+stored. Simulated: dropping the column outright saves 3.81 MB and is not
+reachable, and the buildable form saves **3.50 MB**, not 6.39. Phase B took the
+rest when a class chunk stopped carrying its members. §11's estimates have now
+failed to reproduce in three phases; the standing instruction to re-measure
+before planning against them holds here too.
+
+**The plane F destroys costs three times what F saves.** An FTS5 `trigram`
+index over the same text, contentless, answers a mid-identifier substring query
+exactly as `LIKE` does and measures 10.00 MB against the 4.32 MB column it
+replaces. The existing term index is not a substitute: measured against LIKE as
+ground truth over three hundred mid-identifier fragments, it recovers 57.8%
+unbounded and **14.6% at the limit of 10 the engine actually passes**, with
+109 of 300 queries returning nothing. Whole-line literals survive at 90.8%.
+`scripts/exact_plane_recall.py` is the measurement. So F plus an
+honest replacement is a net increase of roughly 6 MB, and F without one drops
+the mode.
+
+**`rebuild_fts` is a read path §11 does not count.** It re-tokenizes every row
+from `chunks.content`, which is what makes the term index reproducible from the
+artifact alone with no tree access. F removes its input. Counting it, the
+resolver threads through six repository methods and nine consumer call sites in
+three modules, not the two the plan names, and the API's token-budget
+arithmetic is among them.
+
+**The resolver's cost is set by the reranker, not the result count.**
+`orchestrator.py:188` requests `max(10, limit_entities * 5)` candidates and
+`reranker.py:154` needs the text of all of them; 100 candidates touch 93
+distinct files. Warm, that is 4.22 ms against 0.11 ms for the column. The cost
+is linear in files opened rather than bytes read, so per-open latency is the
+only variable a network filesystem changes: injecting 0.5 ms and 2 ms per open
+gives 64.79 ms and 240.25 ms. The cold local cache is still unmeasured.
+Darwin's `F_NOCACHE` is accepted and does nothing here, reading a 419 MB file
+in 26.5 ms with the flag against 27.8 ms without, which is 16 GB/s and above
+what the device can deliver. That prerequisite needs a host whose page cache
+can be purged.
+
+**The prefix is mostly a duplicate, which is what makes F unbuildable.** The
+residue is not arbitrary. It is the reconstructed signature, which cannot match
+the file because the parser drops the trailing colon, followed by the docstring
+re-quoted around itself. Both then appear again in the entity source appended
+straight after. Of 3,563 code chunks carrying a prefix, **2,616 (73.4%) have it
+wholly present in the body it precedes** and 3,213 have it at least partly
+present; 290,474 of the 536,057 prefix bytes are wholly redundant. This is B1's
+defect in a second place, text stored twice inside one chunk, and it is the
+reason 55.9% of chunks stopped being addressable. Not prepending what the body
+already carries would recover about 0.28 MB and make most of the corpus
+sliceable, so it is the prerequisite F actually has. It also changes what gets
+embedded, so it belongs behind the same eval gate as E.
+
+**Fail-closed is not a rare state.** A modified file makes every chunk in it
+unresolvable while `chunks_fts` still matches its terms, so search reports a
+hit that renders as nothing. The twelve paths edited during one working session
+on this repository hold 518 chunks, 7.6% of the index.
+
+**The cheaper way to the same bytes is compression.** It changes no plane, no
+semantics and no freshness contract. `zlib` at level 6 saves 2.38 MB with no
+new dependency, and the simulator carries it as a candidate; `zstandard` at level 10 with a 110 KB dictionary trained on the
+corpus saves 3.05 MB, within 0.45 MB of everything F can reach. Chunks are
+small and alike, which is why the shared dictionary is worth 0.68 MB over the
+plain stream. The exact plane then scans decompressed text in Python at 18.0 ms
+over all 6,782 chunks against 6.1 ms for `LIKE` today, still exact, with no
+file opened.
+
+**Recommendation, as written on the day of the measurement.** Stop prepending
+text the body already carries, re-measure, and size what is left against
+compression rather than against descriptors. If descriptors are still wanted
+afterwards, ship them the way D3 shipped, as a global
+`chunk_source: disk | stored` setting defaulting to `stored`, so the exact
+plane, `rebuild_fts` and the API's budget arithmetic keep a text column until a
+replacement plane exists and has been evaluated.
+
+**The simulator was producing the stale number and now cannot.**
+`scripts/storage_simulate.py` modelled this phase as
+`ALTER TABLE chunks DROP COLUMN content`. It now resolves each chunk against
+the indexed tree, keeps what a descriptor cannot address, and exits with an
+error rather than reporting a number when the tree it is pointed at is not the
+one that was indexed. Both candidates are listed, the unreachable ceiling
+labelled as such. This is the second time this script has priced a change it
+could not model (BL-12 was the first), and both times the number reached the
+plan before anyone checked the model.
+
+---
+
+**Decision, 2026-08-30: rejected under DR-4, and the escape hatch withdrawn.**
+
+The measurement above was written as a re-scoping. It is now a rejection, and
+the difference is the reason DR-4 exists.
+
+What changed is not a number. Every figure above stands. What changed is the
+rule they are read against. Read as a sizing exercise, this entry says F is
+worth 3.50 MB and needs prerequisites — which invites someone to discharge the
+prerequisites and ship it. Read against DR-4, the sizing is beside the point:
+F removes the exact plane's only implementation, the substitute answers
+mid-identifier fragments at 14.6% recall at the limit the engine passes, and no
+byte count buys that. The phase is closed.
+
+**The `chunk_source: disk | stored` escape hatch is withdrawn with it.** A
+default of `stored` looks safe, and that is what makes it the wrong shape here.
+It ships the descriptor path, its resolver, and its fail-closed rendering into
+nine consumers and six repository methods, then leaves them switched off — so
+the plane's cost is paid in code that nothing exercises, and the day someone
+flips the setting for footprint they take the recall loss with it. D3 could
+carry a setting because both of its modes serve correct text: `disk` fails
+closed on a verified read, `stored` serves the copy. F has no such pair. Its
+second mode is *worse retrieval*, and DR-4 does not make room for a mode like
+that, defaulted off or not.
+
+**What survives this entry, and is worth doing.** The prefix duplication is a
+real defect on its own terms — 2,616 of 3,563 code chunks prepend text their
+own body already carries, 290,474 redundant bytes, B1's defect in a second
+place. It is worth about 0.28 MB and it is why 55.9% of chunks stopped being
+sliceable. It is not filed in the backlog, because removing it changes what
+gets embedded and therefore what the semantic plane retrieves; under DR-4 that
+puts it behind the same eval gate as E, and E is roadmap work with a gate
+already attached. Size it there, not here.
+
+**What replaces F.** Compression of the same column: `zlib` at level 6 for
+2.38 MB with no new dependency, `zstandard` at level 10 with a trained
+dictionary for 3.05 MB — within 0.45 MB of everything F could ever have
+reached, changing no plane, no semantics, and no freshness contract. Neither is
+scheduled yet. Whoever schedules one starts from
+`python scripts/storage_simulate.py --index knowcode_index --repo-root .`,
+which carries both as candidates.
+
+---
+
+### Stream ledger — 2026-08-30, what is left and what closes it
+
+Written to answer one question: what remains in this plan that DR-4 permits.
+Every figure is `stat()` on generation `20260830T061050304877Z-8abc9f11` or a
+simulator run against it, not an estimate carried forward from §11.
+
+**Where the artifact stands.** 46.70 MB — `chunks.db` 37.32 MB, `knowledge.db`
+9.38 MB, no vector artifact. §12 projected 35.90 MB after Phase D. The 10.80 MB
+gap is not a phase that under-delivered: every phase was measured on landing
+and hit its number. It is that §12's projections run against the pre-B corpus,
+and B indexed 2.3x the prose. Whoever re-opens §12 should re-baseline it rather
+than reconcile it; the table describes a corpus that no longer exists.
+
+**Phase ledger.**
+
+| Phase | State |
+|---|---|
+| A1 | Retired. D1 stopped publishing the LanceDB artifact A1 was going to compact. |
+| A2, B, C1–C5, D1, D2, D3 | Shipped. |
+| E | Open, gated on P1's evaluation harness. Not lossless by construction. |
+| F | **Rejected** under DR-4, with its `chunk_source` escape hatch. |
+| G | Open. The only large lossless item left, and not inside a generation. |
+
+**Remaining and permitted — 2.53 MB, 5.4% of the generation.**
+
+| Item | Saving | Shape |
+|---|---:|---|
+| Deflate `chunks.content` | **2.38 MB** | The DR-4 replacement for F. `zstandard` level 10 with a trained dictionary reaches 3.05 MB and adds a dependency; `zlib` level 6 adds none. Costs a decompress per chunk read and moves the exact scan into Python — 18.0 ms against 6.1 ms over 6,782 chunks, still exact, no file opened. |
+| Compact `metadata_json` separators | **0.15 MB** | 144,439 raw bytes over 11,284 rows. Three sites dump with Python's default `", "` / `": "`: `sqlite_knowledge_store.py:389`, `:442`, `sqlite_chunk_repository.py:595`. No schema change, no version bump, no reader affected. |
+
+That is the whole of the in-generation headroom. It is not a shortlist.
+
+**What DR-4 puts out of reach, and why it is not an oversight.**
+
+*Durable fp32 embeddings — 26.72 MB, 57% of the generation.* This is the
+largest number the simulator prints and it is not available. The row that
+prints it is `ALTER TABLE chunks DROP COLUMN embedding`: a deletion, not a
+relocation. There is nowhere to relocate to. The raw payload is 26.49 MB across
+6,782 vectors, so SQLite's overhead on those BLOBs is 0.23 MB, and §5.2
+measures fp32 as 7% compressible. The bytes *are* the vectors. ADR 0003 keeps
+them and DR-4 agrees. (The simulator's label used to read "vectors moved out of
+SQLite", which invited exactly the wrong reading; it now says what the code
+does.)
+
+*Phase E — 7.59 MB.* Narrows the semantic candidate set. Permitted only on a
+measured no-loss result, which is a P1 dependency rather than a storage one.
+
+*Phase F — 3.50 MB, BL-3 — 18 MB.* Rejected. See DR-4.
+
+**The lever that is left is retention, not the generation.** Two retained
+generations hold **97 MB** for a 46.70 MB index — three hours apart, and nearly
+all of it identical bytes. Phase G is lossless by construction: content
+addressed by hash, stored once, generations holding manifests and deltas. It is
+worth more than every remaining in-generation item combined, and it is the only
+thing between here and closing this plan. §11 says not to start it until A–E
+have shipped and held. A–D have; E is gated on P1; F is gone. So G is either
+adopted as its own workstream or the plan retires without it.
+
+**Three items in this stream that save nothing and still block a clean close.**
+[BL-11](../engineering/backlog.md) — chunks are content-addressed by MD5, and a
+collision hands one chunk another chunk's vector through
+`_reuse_durable_embeddings`. [BL-8](../engineering/backlog.md) — a manifest
+cannot witness row loss in either database. [BL-5](../engineering/backlog.md) —
+this document's own code anchors are stale. The first is a correctness defect
+in the storage layer; the plan is not honestly closed while it is open.
+
+**Exit condition.** Ship the deflate and the separators, fix BL-11, then decide
+G. At that point one generation is roughly 44 MB, every remaining lever costs
+retrieval quality, and this document has nothing left to say.

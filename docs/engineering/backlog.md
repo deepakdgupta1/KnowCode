@@ -4,8 +4,10 @@ Known defects and deferred work that no current workstream owns. This exists so
 that something found while doing other work is not lost when that work ships.
 
 The [roadmap](../roadmap.md) says what the project is building next. This says
-what it already knows is wrong. An item leaves here when it is fixed, or when a
-roadmap workstream adopts it and the row points at that workstream.
+what it already knows is wrong. An item leaves here when it is fixed, when a
+roadmap workstream adopts it and the row points at that workstream, or when it
+is rejected outright. A rejected item still gets a Closed row, because a
+measured reason not to build something is worth more than silence.
 
 ## Conventions
 
@@ -17,8 +19,115 @@ roadmap workstream adopts it and the row points at that workstream.
   reproduce is a rumour.
 - An item deferred on purpose says why, so the next reader does not re-litigate
   the decision.
+- Ids are allocated once and never reused, including by a closed item. Check
+  both sections before taking the next number — concurrent sessions have
+  collided on one already (BL-17).
+- Nothing here may cost search or retrieval quality. An item whose fix trades
+  recall, precision, or exactness for footprint or speed is rejected, not
+  deferred, however small the measured loss. This is
+  [DR-4](../research/storage_optimization_2026_v4.md) in the storage plan; the
+  two documents state one rule.
 
 ## Open
+
+### BL-15 - The exact search mode treats `_` and `%` as wildcards
+
+**Severity:** High. **Found:** 2026-08-30, measuring what a replacement exact
+plane would have to offer for BL-14.
+
+`SqliteChunkRepository.search_exact` interpolates the caller's string straight
+into a `LIKE` pattern with no `ESCAPE` clause:
+
+```python
+f"SELECT {_SELECT_COLUMNS} FROM chunks WHERE content LIKE ? LIMIT ?",
+(f"%{pattern}%", limit),
+```
+
+In SQLite `LIKE`, `_` matches any single character and `%` matches any run.
+Both are ordinary characters in source code, and `_` is in most Python and Rust
+identifiers. So the mode named `exact` silently answers a different query than
+the one asked, and `ExactQueryEngine.search_scored` scores every row it returns
+`1.0`, which says the match was exact.
+
+Measured against generation `20260830T061050304877Z-8abc9f11`, unbounded:
+
+| Quoted query | Rows served | Rows containing the literal | False |
+|---|---:|---:|---:|
+| `"vector_"` | 927 | 278 | **649, 70%** |
+| `"HOSTILE_CONTEX"` | 17 | 16 | 1 |
+| `"search_ex"` | 6 | 6 | 0 |
+
+Over 74 sampled queries containing `_` or `%`, 11 were answered differently
+from their literal reading. The size of the error tracks how common the
+neighbouring characters are, so it is largest exactly where the identifier is
+generic.
+
+`LIKE` is also case-insensitive over ASCII by default, which the mode does not
+state either. That one may well be wanted; it just is not written down
+anywhere.
+
+Reproduce:
+
+```python
+from knowcode.retrieval.exact_query_engine import ExactQueryEngine
+from knowcode.storage.sqlite_chunk_repository import SqliteChunkRepository
+
+engine = ExactQueryEngine(SqliteChunkRepository(GEN / "chunks.db"))
+len(engine.search_scored('"vector_"', limit=10000))
+```
+
+Compare against `content LIKE '%vector\_%' ESCAPE '\'` on the same database.
+
+**Not fixed here on purpose, and no longer waiting on anything.** It was
+deferred to the decision BL-14 said had to be made about what semantics the
+exact plane offers. That decision is made: BL-14 and Phase F are rejected, the
+`content` column stays, and `LIKE` stays the exact plane's implementation. So
+the question this item was waiting on has an answer, and the answer is that
+`exact` means the literal string.
+
+The change is one `ESCAPE` clause and an escape of `%`, `_` and the escape
+character in the pattern. Write down the two semantics the mode then offers —
+literal substring, ASCII-case-insensitive — and pin them with a test that
+asserts a `_` in the query does not match a different character. It narrows
+what a quoted query returns, which is the point: every row it stops serving is
+one that does not contain what was asked for.
+
+### BL-17 - A watched edit never advances the entity graph
+
+**Severity:** Medium. **Found:** 2026-08-30, testing `entity_source` mode
+transitions across incremental builds. **Renumbered** from BL-16 on the same
+day: two sessions allocated that id concurrently, and the other one — the
+context bundle serving no source under `entity_source: disk` — had already
+reached shipped source comments. This item moved because it was the cheaper
+of the two to move, not because it was the later one.
+
+`StagedGenerationWriter` copies `knowledge.db` unchanged on a watch commit —
+its own manifest comment: "a file transaction rewrites chunks and vectors,
+never the graph". Entity rows, their digests, and their relationships
+therefore describe the last full build, no matter how many watched edits
+follow.
+
+Under `entity_source: stored` this was invisible: a query for an edited
+function's source served the pre-edit copy, presented as current. Under the
+default `disk` mode (D3) the same query fails closed to `None` — the stored
+digest predates the edit — which is honest, but it means entity source for
+any file edited since the last full build is unavailable until a rebuild.
+
+Reproduce:
+
+```bash
+pytest tests/unit/service/test_entity_source_transitions.py -q
+```
+
+Both incremental tests assert the frozen-row contract directly, including
+that a watch commit leaves `source_code` rows byte-identical.
+
+**Deferred on purpose.** The fix is for the watch path to re-derive the
+changed file's entities and relationships into the staged `knowledge.db`.
+That is a watch-pipeline change independent of D3 — the graph staleness
+predates it, and D3 only removed the stale text that hid it. Sequence it with
+any work that makes the graph incremental, and revisit the two transition
+tests then.
 
 ### BL-9 - A symbol named after its own file shadows the file's module entity
 
@@ -143,98 +252,6 @@ once for C5, and Phase E revisits embedding policy, which is the same reuse
 path. Doing it there costs one rebuild instead of two. `pack_content_hash`
 already packs both widths, so the storage layer needs no further change.
 
-### BL-14 - Phase F removes the only backing store for exact search
-
-**Severity:** Medium today, because F has not shipped. High the day it does.
-**Found:** 2026-08-30, tracing what D2 and F cost search and retrieval.
-
-§11 scopes Phase F as replacing `chunks.content` with byte-range descriptors,
-and names two consumers to migrate, `reranker.py:154` and `:217`. Both parts
-understate it. BL-13 covers the separate defect in D2; the two phases also
-interact, and that interaction is recorded there.
-
-**Exact search has no other implementation.**
-`ExactQueryEngine.search_scored` (`src/knowcode/retrieval/exact_query_engine.py`)
-calls `ChunkRepository.search_exact`, which is
-`SELECT ... FROM chunks WHERE content LIKE ?`. Remove the column and the mode
-has nothing behind it. It is not a corner feature: a quoted query routes to it
-in `src/knowcode/retrieval/orchestrator.py`, which sets
-`retrieval_mode = "exact"`.
-
-**FTS is not a drop-in replacement.** `chunks_fts` uses the `unicode61`
-tokenizer, so it matches whole tokens. `LIKE '%...%'` matches a literal
-substring anywhere, including inside an identifier. A search for a fragment such
-as `repo.search_ex` is answerable today and is not answerable by a phrase query.
-Any replacement plane has to state which of the two semantics it offers.
-
-**The blast radius is five repository methods, not two call sites.**
-`_SELECT_COLUMNS` in `src/knowcode/storage/sqlite_chunk_repository.py` includes
-`content`, and it is shared by `get`, `get_by_entity`, `search_by_tokens`,
-`search_exact`, and `get_all`. Every chunk read path selects the column, so
-each one needs the resolver, not only the two reranker lines.
-
-Reproduce, against any generation:
-
-```python
-import shutil, sqlite3
-from pathlib import Path
-from knowcode.storage.sqlite_chunk_repository import SqliteChunkRepository
-from knowcode.retrieval.exact_query_engine import ExactQueryEngine
-
-shutil.copy(GEN / "chunks.db", DST)
-con = sqlite3.connect(DST)
-with con:
-    for (n,) in con.execute(
-            "SELECT name FROM sqlite_master WHERE type='trigger'").fetchall():
-        con.execute(f"DROP TRIGGER {n}")
-    con.execute("ALTER TABLE chunks DROP COLUMN content")
-con.close()
-
-engine = ExactQueryEngine(SqliteChunkRepository(DST))
-engine.search_scored('"def rebuild_vector_plane"', limit=5)
-```
-
-Returns one hit before the column is dropped. Afterwards it raises
-`sqlite3.OperationalError: no such column: content`. The failure is at least
-loud, which is the one piece of good news here.
-
-**It weakens the argument Phase E rests on.** §7 justifies dropping vectors for
-small chunks by saying they stay reachable through the exact, path, and FTS
-planes. F removes the exact plane. E and F therefore have to be argued together
-rather than sized independently, because together they take two of the three
-legs out from under a small chunk.
-
-**A second failure mode arrives with the resolver.** F fails closed, returning
-nothing when a file has changed. The FTS index still holds that chunk's terms,
-so a modified file yields search hits whose content resolves to nothing. Search
-reports a hit and display has nothing to show. Today the same case returns a
-stale snippet, which §11 argues is worse. Both are defects; the trade should be
-stated rather than assumed.
-
-**Measured retrieval cost, so the tradeoff is not guessed.** Resolving chunk
-text from disk with hash verification, warm page cache, against the current
-column read:
-
-| Candidates | Distinct files | Column | From disk | Multiple |
-|---:|---:|---:|---:|---:|
-| 10 | 10 | 0.01 ms | 0.15 ms | 15x |
-| 50 | 43 | 0.03 ms | 0.61 ms | 21x |
-| 100 | 79 | 0.07 ms | 1.21 ms | 18x |
-
-The multiple is large and the absolute cost is small, so latency is not the
-argument against F on a warm cache. The cost is dominated by `open`, not by
-bytes read: seeking to a byte range rather than reading whole files moved 100
-candidates only from 1.57 ms to 1.21 ms, because the query still opens 79
-files. A cold page cache and a network filesystem were **not** measured, and
-both are strictly worse.
-
-**Before F ships it needs:** a replacement exact-match plane with stated
-semantics, a decision on what a hit with unresolvable content renders as, a
-cold-cache and network-filesystem measurement, and the resolver threaded
-through all five read paths rather than the two the plan names. Sequence it
-after that work, not before, or quoted queries stop working in the window
-between.
-
 ### BL-7 - Timing-sensitive tests flake under concurrent load
 
 **Severity:** Low, but it costs trust in the suite. **Found:** 2026-08-29, while
@@ -263,25 +280,6 @@ timeout converts a fast failure into a slow one.
 
 **Deferred on purpose.** It is test infrastructure, not product behaviour, and
 it was found while diagnosing something else.
-
-### BL-3 - An in-memory vector plane is the wrong default at scale
-
-**Severity:** Medium. **Found:** 2026-08-29, deliberate scope boundary of
-Phase D1.
-
-[ADR 9](adr/adr-0009-derived-vector-plane.md) makes the ANN index a plane
-rebuilt in memory from the durable chunk rows. At 6,874 vectors that costs about
-27 MB resident and 0.30 s per process open, which is free. Above roughly 100,000
-vectors it is not.
-
-Two pieces are specified in `storage_optimization_2026_v4.md` §5.3 and not
-built. A disk-backed int8 ANN cache outside `generations/`, keyed by the
-chunk-id digest the manifest already computes so retention never copies it,
-measured at 0.995 recall@10 for a quarter of the fp32 size. And an exhaustive
-fp32 scan below the threshold, where an index buys nothing at all.
-
-**Deferred on purpose.** Neither is needed for the 32.31 MB Phase D1 recovered,
-and building a cache tier before any repository needs one is speculative.
 
 ### BL-8 - A generation manifest cannot witness row loss in either database
 
@@ -370,3 +368,6 @@ the anchors are re-verified as part of adopting a later phase.
 | Publication asserted the presence of a cache and compared two manifest numbers to check chunk/vector membership | Phase D1, 2026-08-29. The guard now counts durable embeddings in `chunks.db`, which is what [ADR 3](adr/adr-0003-durable-embedding-representation.md) already required. |
 | Phase D2's contentless FTS table cannot delete a chunk (BL-13) | Phase D2, 2026-08-30. The index is declared `fts5(..., contentless_delete=1)`; the sync triggers are gone and every mutating path writes or deletes its FTS row in the chunk's own transaction, so `remove_by_file`, `replace_file`, and re-added chunk ids all retire their old terms. Pinned by `tests/unit/storage/test_contentless_fts.py` — the delete-stops-matching assertion a broken build cannot pass. The SQLite 3.43 floor is declared as `SqliteChunkRepository.MINIMUM_SQLITE_VERSION` and checked at open with an actionable message. `rebuild_fts()` re-tokenizes from `content` as the replacement for the retired `'rebuild'` statement, measured at 0.13 s over 3,022 chunks. |
 | The storage simulator models a pre-C2 knowledge.db (BL-12) | Fixed 2026-08-30, before sizing D2. `storage_simulate.py` probes the artifact schema: relative paths strip `entities` and the `eid` codebook rather than running `REPLACE` over integer edge keys, `integer_edges` reports itself already applied instead of emptying the graph through its TEXT-key joins, and the contentless fold skips once `tokens_text` is gone. `chunking_projection.py` composes against both schemas. Re-measured against generation `20260830T043703346316Z-4b8e0856` (C1–C5 in the baseline): D2 is worth 4.64 MB, not §11's stale 5.64 MB; D3's `source_code` drop re-measures at 3.70 MB. The shared `CONTENTLESS_FTS` DDL now carries `contentless_delete=1`. |
+| An in-memory vector plane is the wrong default at scale (BL-3) | **Rejected** 2026-08-30 under [DR-4](../research/storage_optimization_2026_v4.md). The item's substance was a disk-backed int8 ANN cache, measured in `storage_optimization_2026_v4.md` §5.2 at **recall@10 0.9950** against exhaustive fp32's 1.0000. That is a half-percent of top-10 recall traded for 18 MB, and no footprint number buys it. Its other half is already shipped: `VectorStore` builds `faiss.IndexIDMap2(faiss.IndexFlatIP(...))`, an exhaustive fp32 scan, so "skip the ANN index below the threshold" describes what runs today. What remains is a memory and open-time cost above roughly 100,000 vectors, which no repository this project indexes has reached. Re-file it as a footprint item if one does, with a width that keeps recall@10 at 1.0000. |
+| Phase F cannot be built as specified, and would cost more than it saves (BL-14) | **Rejected** 2026-08-30 under [DR-4](../research/storage_optimization_2026_v4.md), and with it Phase F and its `chunk_source` escape hatch. Replacing `chunks.content` with byte-range descriptors leaves the exact plane with no implementation: `ExactQueryEngine` is `SELECT ... FROM chunks WHERE content LIKE ?` and nothing else. Measured over 300 mid-identifier fragments with LIKE as ground truth, the shipped `chunks_fts` plane answers them at **57.8% recall unbounded and 14.6% at the engine's limit of 10**, returning nothing at all for 109 of 300; a trigram index that would answer them exactly costs 10.00 MB against the 4.32 MB column it replaces. F also fails closed on an edited file, so the twelve paths touched in one working session would render **518 chunks, 7.6% of the index**, as empty hits while `chunks_fts` still matched their terms, and it takes away `rebuild_fts`'s only input, which is what makes the term index reproducible from the artifact alone. The saving is 3.50 MB, not §11's 6.39 MB. `zlib` level 6 on the same column saves 2.38 MB and `zstandard` level 10 with a trained dictionary saves 3.05 MB, both changing no plane, no semantics, and no freshness contract — take the bytes there. Reproduce either with `python scripts/exact_plane_recall.py --index knowcode_index` and `python scripts/storage_simulate.py --index knowcode_index --repo-root .`. The plan's "F stays gated on BL-14's prerequisites" now resolves to this row: F does not ship. |
+| A fresh index under the default `entity_source` serves context with no source code (BL-16) | Fixed 2026-08-30, the day it was filed. `ContextSynthesizer` now chooses the read by *why* the text is missing rather than by whether the index is stale: a stale index still gets an unverified live slice, because the drift is what the caller asked to see; a fresh index with no stored copy (D3's `disk` default) gets `load_verified_source`, which serves the span only while it hashes to the digest taken at build time and nothing at all otherwise. `KnowCodeService.get_context` builds the loader unconditionally — gating its construction on staleness was the defect. Pinned by four rows added to `tests/unit/service/test_entity_source_resolution.py`, which now covers `get_context` alongside `get_entity_details`; the fresh-`disk` row failed before the fix. Both new guards were mutation-probed: swapping the verified read for an unverified one reddens the fail-closed row, and deleting the stale branch reddens the stale row. Full suite 1,857 passed, 3 xfailed. |
