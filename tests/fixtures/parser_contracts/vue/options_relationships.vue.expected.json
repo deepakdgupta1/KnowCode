@@ -2,14 +2,88 @@
   "schema_version": 1,
   "language": "vue",
   "entities": [
-    {"qualified_name": "OptionsRelationships", "kind": "class", "line_start": 1, "line_end": 16},
-    {"qualified_name": "OptionsRelationships.count", "kind": "variable", "line_start": 8, "line_end": 8},
-    {"qualified_name": "OptionsRelationships.increment", "kind": "method", "line_start": 11, "line_end": 13}
+    {
+      "qualified_name": "options_relationships",
+      "kind": "module",
+      "line_start": 1,
+      "line_end": 16
+    },
+    {
+      "qualified_name": "options_relationships.OptionsRelationships",
+      "kind": "class",
+      "line_start": 1,
+      "line_end": 16,
+      "metadata": {
+        "component_type": "vue_sfc",
+        "vue_api": "options",
+        "has_template": "true",
+        "has_script": "true",
+        "has_style": "false",
+        "script_lang": "js"
+      }
+    },
+    {
+      "qualified_name": "options_relationships.OptionsRelationships.count",
+      "kind": "variable",
+      "line_start": 8,
+      "line_end": 8,
+      "metadata": {
+        "vue_api": "options",
+        "declaration_type": "data",
+        "is_reactive": "true"
+      }
+    },
+    {
+      "qualified_name": "options_relationships.OptionsRelationships.increment",
+      "kind": "method",
+      "line_start": 11,
+      "line_end": 13,
+      "metadata": {
+        "vue_api": "options",
+        "declaration_type": "method"
+      }
+    }
   ],
   "relationships": [
-    {"source": "OptionsRelationships", "target": {"classification": "internal", "qualified_name": "OptionsRelationships.count"}, "kind": "contains"},
-    {"source": "OptionsRelationships", "target": {"classification": "internal", "qualified_name": "OptionsRelationships.increment"}, "kind": "contains"},
-    {"source": "OptionsRelationships", "target": {"classification": "internal", "qualified_name": "OptionsRelationships.increment"}, "kind": "calls", "metadata": {"binding_type": "event"}},
-    {"source": "OptionsRelationships", "target": {"classification": "internal", "qualified_name": "OptionsRelationships.count"}, "kind": "references", "metadata": {"binding_type": "model"}}
+    {
+      "source": "options_relationships",
+      "target": {
+        "classification": "internal",
+        "qualified_name": "options_relationships.OptionsRelationships"
+      },
+      "kind": "contains"
+    },
+    {
+      "source": "options_relationships.OptionsRelationships",
+      "target": {
+        "classification": "internal",
+        "qualified_name": "options_relationships.OptionsRelationships.count"
+      },
+      "kind": "contains"
+    },
+    {
+      "source": "options_relationships.OptionsRelationships",
+      "target": {
+        "classification": "internal",
+        "qualified_name": "options_relationships.OptionsRelationships.increment"
+      },
+      "kind": "contains"
+    },
+    {
+      "source": "options_relationships.OptionsRelationships",
+      "target": {
+        "classification": "internal",
+        "qualified_name": "options_relationships.OptionsRelationships.increment"
+      },
+      "kind": "calls"
+    },
+    {
+      "source": "options_relationships.OptionsRelationships",
+      "target": {
+        "classification": "internal",
+        "qualified_name": "options_relationships.OptionsRelationships.count"
+      },
+      "kind": "references"
+    }
   ]
 }

@@ -63,7 +63,7 @@ class _ScriptContext:
 
     file_path: Path
     component_id: str
-    component_name: str
+    component_qualified_name: str
     source_lines: list[str]
     symbols: VueSymbolTable
     errors: list[str]
@@ -123,10 +123,30 @@ class VueParser(TreeSitterParser):
         relationships: list[Relationship] = []
         source_lines = source_code.splitlines()
 
-        # Create component entity (the .vue file itself)
+        # The file itself, so its template, imports and top-of-file text have
+        # an entity to hang on (BL-10). The component is a declaration inside
+        # it and is scoped under it, which is what stops `Widget.vue` from
+        # minting one id for both (BL-9, ADR 11).
+        module_name = self._module_scope(file_path)
+        module_id = build_internal_entity_id(file_path, module_name)
+        module_entity = Entity(
+            id=module_id,
+            kind=EntityKind.MODULE,
+            name=module_name,
+            qualified_name=module_name,
+            location=Location(
+                file_path=str(file_path),
+                line_start=1,
+                line_end=len(source_lines) or 1,
+            ),
+        )
+        entities.append(module_entity)
+
+        # Create component entity (the .vue file's default export)
         component_name = self._get_component_name(file_path)
-        component_id = build_internal_entity_id(file_path, component_name)
-        symbols = VueSymbolTable(file_path, component_name)
+        component_qualified_name = f"{module_name}.{component_name}"
+        component_id = build_internal_entity_id(file_path, component_qualified_name)
+        symbols = VueSymbolTable(file_path, component_qualified_name)
 
         # Determine Vue API type (composition vs options)
         vue_api_type = (
@@ -137,7 +157,7 @@ class VueParser(TreeSitterParser):
             id=component_id,
             kind=EntityKind.CLASS,  # Vue components map to CLASS
             name=component_name,
-            qualified_name=component_name,
+            qualified_name=component_qualified_name,
             location=Location(
                 file_path=str(file_path),
                 line_start=1,
@@ -155,6 +175,13 @@ class VueParser(TreeSitterParser):
             },
         )
         entities.append(component_entity)
+        relationships.append(
+            Relationship(
+                source_id=module_id,
+                target_id=component_id,
+                kind=RelationshipKind.CONTAINS,
+            )
+        )
 
         # Parse component imports from every script block. A component may pair
         # a plain <script> with a <script setup>, and both can import. Imports
@@ -191,7 +218,7 @@ class VueParser(TreeSitterParser):
                 script_section,
                 file_path,
                 component_id,
-                component_name,
+                component_qualified_name,
                 source_lines,
                 symbols,
                 errors,
@@ -272,7 +299,7 @@ class VueParser(TreeSitterParser):
         rejects. It is reported through the parse result rather than producing a
         second entity under the same canonical ID.
         """
-        qualified_name = f"{context.component_name}.{namespace}{name}"
+        qualified_name = f"{context.component_qualified_name}.{namespace}{name}"
         entity_id = build_internal_entity_id(context.file_path, qualified_name)
         binding = VueBinding(
             name=name,
@@ -354,7 +381,7 @@ class VueParser(TreeSitterParser):
         script_section: VueSection,
         file_path: Path,
         parent_id: str,
-        component_name: str,
+        component_qualified_name: str,
         source_lines: list[str],
         symbols: VueSymbolTable,
         errors: list[str],
@@ -365,7 +392,7 @@ class VueParser(TreeSitterParser):
         context = _ScriptContext(
             file_path=file_path,
             component_id=parent_id,
-            component_name=component_name,
+            component_qualified_name=component_qualified_name,
             source_lines=source_lines,
             symbols=symbols,
             errors=errors,

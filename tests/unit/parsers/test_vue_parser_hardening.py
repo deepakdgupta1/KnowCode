@@ -62,7 +62,8 @@ def test_file_name_yielding_no_component_name_is_parsed(
 
     result = parser.parse_file(path)
 
-    assert len(result.entities) == 1
+    # The file entity plus the component it holds (BL-10).
+    assert len(result.entities) == 2
     component = result.entities[0]
     assert component.qualified_name
     assert classify_endpoint_id(component.id) is EndpointKind.INTERNAL
@@ -361,7 +362,7 @@ function save() { useStore() }
     draft_bindings = {
         r.metadata.get("binding_type")
         for r in result.relationships
-        if r.target_id.endswith("::Dense.draft")
+        if r.target_id.endswith("::Dense.Dense.draft")
         and r.kind is RelationshipKind.REFERENCES
     }
     assert draft_bindings == {"model", "css_variable"}

@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from knowcode.data_models import Entity, ParseResult
+from knowcode.data_models import EntityKind, Entity, ParseResult
 from knowcode.parsers.vue_parser import VueParser
 from knowcode.utils.entity_identity import build_external_reference_id
 
@@ -33,7 +33,13 @@ def _parse_source(tmp_path: Path, source: str, name: str = "Widget.vue") -> Pars
 
 
 def _entity(result: ParseResult, name: str) -> Entity:
-    matches = [entity for entity in result.entities if entity.name == name]
+    # Skip the file entity: it shares the component's name whenever the file is
+    # already PascalCase, and every caller here wants a declaration (BL-10).
+    matches = [
+        entity
+        for entity in result.entities
+        if entity.name == name and entity.kind is not EntityKind.MODULE
+    ]
     assert len(matches) == 1, f"expected exactly one {name!r} entity, got {matches}"
     return matches[0]
 

@@ -168,8 +168,8 @@ def test_every_reviewed_c2_construct_extracts_exactly(tmp_path: Path) -> None:
     assert ("core.Core.render", "implements", "core.Render") in edges
 
     # C2 Vue Composition API: template bindings resolve to internal entities.
-    assert {"Widget.onClick", "Widget.label"} <= qnames  # Vue has no module (BL-10)
-    assert ("Widget", "references", "Widget.label") in edges
+    assert {"widget.Widget.onClick", "widget.Widget.label"} <= qnames
+    assert ("widget.Widget", "references", "widget.Widget.label") in edges
 
 
 def test_decorated_python_entity_location_includes_its_first_decorator(

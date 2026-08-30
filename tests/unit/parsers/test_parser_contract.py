@@ -154,6 +154,7 @@ NAMED_AFTER_FILE = [
     (JavaParser, "public class doc {}\n", ".java"),
     (RustParser, "pub fn doc() {}\n", ".rs"),
     (RustParser, "pub struct doc;\n", ".rs"),
+    (VueParser, "<script setup>\nconst x = 1\n</script>\n", ".vue"),
 ]
 
 
@@ -167,6 +168,27 @@ def test_contract_a_symbol_named_after_its_file_does_not_shadow_the_module(
     entities = parser_class().parse_file(source).entities
 
     assert _colliding_ids(entities) == []
+
+
+# Nothing in the graph stands for a file whose parser emits no file-level
+# entity, so the chunker skips its module-header and imports chunks and the top
+# of the file goes unindexed. VueParser was the one parser that emitted neither
+# (BL-10), which is why this is a contract rather than a Vue test.
+@pytest.mark.parametrize("parser_class, code, ext", PARSERS)
+def test_contract_every_parser_emits_one_entity_for_the_file(
+    tmp_path, parser_class, code, ext
+):
+    source = tmp_path / f"sample{ext}"
+    source.write_text(code)
+
+    entities = parser_class().parse_file(source).entities
+    file_level = [
+        e for e in entities if e.kind in (EntityKind.MODULE, EntityKind.DOCUMENT)
+    ]
+
+    assert len(file_level) == 1, f"{parser_class.__name__} emitted {len(file_level)}"
+    assert file_level[0].location.line_start == 1
+    assert file_level[0].qualified_name == "sample"
 
 
 # The module entity has to survive intact, not merely avoid a duplicate ID. A

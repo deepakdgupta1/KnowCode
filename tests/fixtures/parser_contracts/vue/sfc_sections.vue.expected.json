@@ -2,13 +2,83 @@
   "schema_version": 1,
   "language": "vue",
   "entities": [
-    {"qualified_name": "SfcSections", "kind": "class", "line_start": 1, "line_end": 12},
-    {"qualified_name": "SfcSections.title", "kind": "variable", "line_start": 5, "line_end": 5},
-    {"qualified_name": "SfcSections.select", "kind": "function", "line_start": 6, "line_end": 8}
+    {
+      "qualified_name": "sfc_sections",
+      "kind": "module",
+      "line_start": 1,
+      "line_end": 12
+    },
+    {
+      "qualified_name": "sfc_sections.SfcSections",
+      "kind": "class",
+      "line_start": 1,
+      "line_end": 12,
+      "metadata": {
+        "component_type": "vue_sfc",
+        "vue_api": "composition",
+        "has_template": "true",
+        "has_script": "true",
+        "has_style": "true",
+        "script_lang": "ts"
+      }
+    },
+    {
+      "qualified_name": "sfc_sections.SfcSections.title",
+      "kind": "variable",
+      "line_start": 5,
+      "line_end": 5,
+      "metadata": {
+        "vue_api": "composition",
+        "declaration_type": "const",
+        "is_reactive": "true",
+        "exposed_to_template": "true"
+      }
+    },
+    {
+      "qualified_name": "sfc_sections.SfcSections.select",
+      "kind": "function",
+      "line_start": 6,
+      "line_end": 8,
+      "metadata": {
+        "vue_api": "composition",
+        "declaration_type": "function",
+        "is_reactive": "false",
+        "exposed_to_template": "true"
+      }
+    }
   ],
   "relationships": [
-    {"source": "SfcSections", "target": {"classification": "internal", "qualified_name": "SfcSections.title"}, "kind": "contains"},
-    {"source": "SfcSections", "target": {"classification": "internal", "qualified_name": "SfcSections.select"}, "kind": "contains"},
-    {"source": "SfcSections", "target": {"classification": "internal", "qualified_name": "SfcSections.title"}, "kind": "references", "metadata": {"binding_type": "css_variable"}}
+    {
+      "source": "sfc_sections",
+      "target": {
+        "classification": "internal",
+        "qualified_name": "sfc_sections.SfcSections"
+      },
+      "kind": "contains"
+    },
+    {
+      "source": "sfc_sections.SfcSections",
+      "target": {
+        "classification": "internal",
+        "qualified_name": "sfc_sections.SfcSections.title"
+      },
+      "kind": "contains"
+    },
+    {
+      "source": "sfc_sections.SfcSections",
+      "target": {
+        "classification": "internal",
+        "qualified_name": "sfc_sections.SfcSections.select"
+      },
+      "kind": "contains"
+    },
+    {
+      "source": "sfc_sections.SfcSections",
+      "target": {
+        "classification": "internal",
+        "qualified_name": "sfc_sections.SfcSections.title"
+      },
+      "kind": "references"
+    }
   ]
 }

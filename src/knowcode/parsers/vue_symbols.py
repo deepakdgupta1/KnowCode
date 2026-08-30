@@ -74,9 +74,9 @@ class VueSymbolTable:
     ambiguity to resolve.
     """
 
-    def __init__(self, file_path: str | Path, component_name: str) -> None:
+    def __init__(self, file_path: str | Path, component_qualified_name: str) -> None:
         self._file_path = file_path
-        self._component_name = component_name
+        self._component_qualified_name = component_qualified_name
         self._bindings: dict[str, VueBinding] = {}
         self._imports: dict[str, str] = {}
 
@@ -127,6 +127,6 @@ class VueSymbolTable:
         return build_unresolved_reference_id(
             VUE_LANGUAGE,
             self._file_path,
-            self._component_name,
+            self._component_qualified_name,
             symbol,
         )

@@ -207,7 +207,10 @@ const emit = defineEmits(['update', 'close'])
         assert declaration_names(result, "emit") == {"update", "close"}
         # Events live in their own name space so they cannot collide with a
         # method or ref of the same name.
-        component = result.entities[0].qualified_name
+        # entities[0] is the file entity now; the component is the CLASS (BL-10).
+        component = next(
+            e.qualified_name for e in result.entities if e.kind == EntityKind.CLASS
+        )
         assert {
             entity.qualified_name for entity in declarations_of(result, "emit")
         } == {f"{component}.emits.update", f"{component}.emits.close"}
@@ -923,7 +926,7 @@ const count = 0
         result = parser.parse_file(temp_path)
 
         # Check component metadata
-        component = result.entities[0]
+        component = next(e for e in result.entities if e.kind == EntityKind.CLASS)
         assert component.metadata["component_type"] == "vue_sfc"
         assert component.metadata["vue_api"] == "composition"
         assert component.metadata["has_template"] == "true"
@@ -978,7 +981,7 @@ export default {
         result = parser.parse_file(temp_path)
 
         # Check component metadata
-        component = result.entities[0]
+        component = next(e for e in result.entities if e.kind == EntityKind.CLASS)
         assert component.metadata["vue_api"] == "options"
 
         # Check data property metadata
@@ -1316,7 +1319,7 @@ const regularVar = 123
     try:
         result = parser.parse_file(temp_path)
 
-        component = result.entities[0]
+        component = next(e for e in result.entities if e.kind == EntityKind.CLASS)
 
         arrow_func = entity_named(result, "myArrowFunc")
         assert arrow_func.kind == EntityKind.FUNCTION

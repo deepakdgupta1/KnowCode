@@ -127,11 +127,11 @@ def test_composition_event_handler_resolves_to_the_extracted_function(
 
     result = parser.parse_file(path)
 
-    handler = entity_by_qualified_name(result, "Counter.increment")
+    handler = entity_by_qualified_name(result, "Counter.Counter.increment")
     assert handler.kind is EntityKind.FUNCTION
     edge = only_edge(result, RelationshipKind.CALLS, "event")
     assert edge.target_id == handler.id
-    assert edge.source_id == build_internal_entity_id(path, "Counter")
+    assert edge.source_id == build_internal_entity_id(path, "Counter.Counter")
 
 
 def test_composition_v_model_resolves_to_the_extracted_ref(
@@ -141,7 +141,7 @@ def test_composition_v_model_resolves_to_the_extracted_ref(
 
     result = parser.parse_file(path)
 
-    count = entity_by_qualified_name(result, "Counter.count")
+    count = entity_by_qualified_name(result, "Counter.Counter.count")
     assert count.kind is EntityKind.VARIABLE
     assert count.metadata["is_reactive"] == "true"
     assert only_edge(result, RelationshipKind.REFERENCES, "model").target_id == count.id
@@ -154,8 +154,8 @@ def test_composition_css_bindings_resolve_to_computed_and_prop_entities(
 
     result = parser.parse_file(path)
 
-    doubled = entity_by_qualified_name(result, "Counter.doubled")
-    label = entity_by_qualified_name(result, "Counter.label")
+    doubled = entity_by_qualified_name(result, "Counter.Counter.doubled")
+    label = entity_by_qualified_name(result, "Counter.Counter.label")
     assert label.metadata["declaration_type"] == "prop"
     css_targets = {
         edge.target_id
@@ -171,19 +171,30 @@ def test_composition_entity_ids_are_canonical_and_contained(
 
     result = parser.parse_file(path)
 
-    component_id = build_internal_entity_id(path, "Counter")
+    module_id = build_internal_entity_id(path, "Counter")
+    component_id = build_internal_entity_id(path, "Counter.Counter")
     for name in ("count", "doubled", "increment", "label"):
-        assert entity_by_qualified_name(result, f"Counter.{name}").id == (
-            build_internal_entity_id(path, f"Counter.{name}")
+        assert entity_by_qualified_name(result, f"Counter.Counter.{name}").id == (
+            build_internal_entity_id(path, f"Counter.Counter.{name}")
         )
     contained = {
         edge.target_id
         for edge in result.relationships
         if edge.kind is RelationshipKind.CONTAINS and edge.source_id == component_id
     }
+    # The module contains the component and the component contains everything
+    # the script declares. Nothing is left with no owner (BL-10).
     assert contained == {
-        entity.id for entity in result.entities if entity.id != component_id
+        entity.id
+        for entity in result.entities
+        if entity.id not in (component_id, module_id)
     }
+    module_contains = {
+        edge.target_id
+        for edge in result.relationships
+        if edge.kind is RelationshipKind.CONTAINS and edge.source_id == module_id
+    }
+    assert module_contains == {component_id}
 
 
 # --- Options API resolution ----------------------------------------------
@@ -223,7 +234,7 @@ def test_options_event_handler_resolves_to_a_method_entity(
 
     result = parser.parse_file(path)
 
-    increment = entity_by_qualified_name(result, "Widget.increment")
+    increment = entity_by_qualified_name(result, "Widget.Widget.increment")
     assert increment.kind is EntityKind.METHOD
     assert only_edge(result, RelationshipKind.CALLS, "event").target_id == increment.id
 
@@ -235,8 +246,8 @@ def test_options_model_and_css_resolve_to_data_and_computed_entities(
 
     result = parser.parse_file(path)
 
-    count = entity_by_qualified_name(result, "Widget.count")
-    doubled = entity_by_qualified_name(result, "Widget.doubled")
+    count = entity_by_qualified_name(result, "Widget.Widget.count")
+    doubled = entity_by_qualified_name(result, "Widget.Widget.doubled")
     assert count.metadata["declaration_type"] == "data"
     assert doubled.metadata["declaration_type"] == "computed"
     assert only_edge(result, RelationshipKind.REFERENCES, "model").target_id == count.id
@@ -253,14 +264,17 @@ def test_options_data_and_computed_entities_are_contained(
 
     result = parser.parse_file(path)
 
-    component_id = build_internal_entity_id(path, "Widget")
+    module_id = build_internal_entity_id(path, "Widget")
+    component_id = build_internal_entity_id(path, "Widget.Widget")
     contained = {
         edge.target_id
         for edge in result.relationships
         if edge.kind is RelationshipKind.CONTAINS and edge.source_id == component_id
     }
     assert contained == {
-        entity.id for entity in result.entities if entity.id != component_id
+        entity.id
+        for entity in result.entities
+        if entity.id not in (component_id, module_id)
     }
 
 
@@ -301,7 +315,7 @@ def test_undeclared_template_names_become_scoped_unresolved_references(
 
     edge = only_edge(result, kind, binding_type)
     assert edge.target_id == build_unresolved_reference_id(
-        "vue", path, "Undeclared", symbol
+        "vue", path, "Undeclared.Undeclared", symbol
     )
     assert classify_endpoint_id(edge.target_id) is EndpointKind.UNRESOLVED
     assert edge.metadata["resolution"] == "unresolved"
@@ -492,7 +506,7 @@ const value = useLocalThing()
         for edge in local_result.relationships
         if edge.kind is RelationshipKind.CALLS
     }
-    assert local_calls == {build_internal_entity_id(local, "Local.useLocalThing")}
+    assert local_calls == {build_internal_entity_id(local, "Local.Local.useLocalThing")}
 
 
 # --- determinism and collisions -------------------------------------------
@@ -531,9 +545,9 @@ function go() {}
         if entity.metadata.get("declaration_type") == "prop"
     ]
     assert props == [
-        "Deterministic.alpha",
-        "Deterministic.beta",
-        "Deterministic.gamma",
+        "Deterministic.Deterministic.alpha",
+        "Deterministic.Deterministic.beta",
+        "Deterministic.Deterministic.gamma",
     ]
 
 
