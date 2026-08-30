@@ -205,10 +205,12 @@ def compute_entity_content_hash(entity: Entity) -> str:
 def pack_content_hash(value: object) -> object:
     """Return a hex digest as its raw bytes, other values unchanged.
 
-    Entities are hashed with SHA-256 and chunks with MD5, so this packs any
-    even-length lowercase hex string rather than one fixed width. Those are
-    exactly the inputs :func:`unpack_content_hash` renders back character for
-    character. Anything else is stored as it arrived.
+    Entities and chunks are both hashed with SHA-256 (BL-11), but this stays
+    width-agnostic and packs any even-length lowercase hex string. Assuming one
+    width is what made C5 a net loss: a packer handling only 64 characters left
+    every 32-character chunk digest as text and paid for an index it never used.
+    Those are exactly the inputs :func:`unpack_content_hash` renders back
+    character for character. Anything else is stored as it arrived.
     """
     if isinstance(value, str) and value and len(value) % 2 == 0:
         if all(char in _LOWERCASE_HEX_DIGITS for char in value):

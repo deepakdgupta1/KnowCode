@@ -2316,3 +2316,53 @@ in the storage layer; the plan is not honestly closed while it is open.
 **Exit condition.** Ship the deflate and the separators, fix BL-11, then decide
 G. At that point one generation is roughly 44 MB, every remaining lever costs
 retrieval quality, and this document has nothing left to say.
+
+### BL-8 and BL-11 — closed 2026-08-31, and what that costs the budget
+
+The stream ledger above names three items that save nothing and still block a
+clean close. Two of them are now shut. BL-5, this document's stale code
+anchors, is the only one left.
+
+**BL-11 shipped. A chunk is content-addressed by SHA-256.** All four
+`hashlib.md5` sites in `Chunker` are gone, and the prose route stops
+re-hashing bytes `ProseChunker` has already digested. `Indexer.SCHEMA_VERSION`
+moves 5 to 6, because the digest is the embedding-reuse key that
+`_reuse_durable_embeddings` looks a chunk up by, so every generation rebuilds
+once rather than mixing widths.
+
+**It costs 0.24 MB, and that is the first phase in this plan to spend rather
+than save.** Measured by rewriting every `content_hash` in generation
+`20260830T061050304877Z-8abc9f11` to the real SHA-256 of the row's own
+`content` and vacuuming both copies: 39,129,088 bytes to 39,366,656, **+237,568
+bytes, 0.61%**. That is 108,512 bytes of column across 6,782 rows and the rest
+in the index over it. Spend it. DR-4 rejects a saving that costs retrieval
+quality, and the symmetric rule holds here: a collision in this column hands one
+chunk another chunk's vector and the chunk still retrieves, so the bytes buy the
+plane's correctness.
+
+**§6 and the C5 record still say chunk hashes are MD5.** Both statements were
+true when written and neither is edited. Read them as history: C5's packer
+decision turned on the two widths differing, and `pack_content_hash` stays
+width-agnostic even now that nothing emits 32 characters, because narrowing it
+to one width is exactly what made C5 a net loss of 36,864 bytes the first time.
+
+**BL-8 shipped, and its premise was half wrong.** `compact()` now brackets
+itself: it reads one digest per row set from its own writer connection before
+it does anything and compares after, so no number it checks is derived from the
+damaged artifact. Nothing is threaded in from the caller, which is why it holds
+on all three publication paths where §11's suggested chunk-count fix could not.
+The probe that proved the hole also corrected the item. On the full-build path
+`knowledge.db` was never blind, because `entity_ids` comes from the in-memory
+`GraphBuilder` at `service.py:957` and an entity-dropping probe was already
+refused as `entity id digest mismatch`. Only `StagedGenerationWriter.publish`
+reads entity ids back out of the artifact. `chunks.db` was blind everywhere.
+
+**The bracket costs 118 ms per publication**, measured with paired interleaved
+runs on the same generation: 29 ms on a 39.1 MB `chunks.db` and 89 ms on a
+9.8 MB `knowledge.db`. The `knowledge.db` half dominates because it scans
+24,417 edges twice.
+
+**Consequence for the remaining work.** The deflate of `chunks.content` and the
+`metadata_json` separator compaction both rewrite a staged artifact. Put them
+inside `_rewrite()` on the store that owns the file and they inherit the
+losslessness witness. Put them beside it and they do not.

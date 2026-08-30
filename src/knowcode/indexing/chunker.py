@@ -192,9 +192,10 @@ class Chunker:
             "line_range": f"{prose.start_line}-{prose.end_line}",
             "token_count": str(prose.token_count),
             "context_header": prose.context_header,
-            # md5 like every other chunk: this column is the embedding-reuse
-            # key, so two chunks holding the same text must hash the same.
-            "content_hash": hashlib.md5(prose.content.encode("utf-8")).hexdigest(),
+            # The ProseChunker already computed this over the same bytes.
+            # Hashing them a second time is a second place for the algorithm
+            # to drift, and this column is the embedding-reuse key (BL-11).
+            "content_hash": prose.content_hash,
             "last_modified": last_modified,
         }
         if parent_id:
@@ -241,7 +242,7 @@ class Chunker:
                     tokens=tokenize_code(content),
                     metadata={
                         "type": kind,
-                        "content_hash": hashlib.md5(
+                        "content_hash": hashlib.sha256(
                             content.encode("utf-8")
                         ).hexdigest(),
                     },
@@ -365,7 +366,7 @@ class Chunker:
             metadata = {
                 "kind": entity.kind.value,
                 "has_docstring": has_docstring,
-                "content_hash": hashlib.md5(content.encode("utf-8")).hexdigest(),
+                "content_hash": hashlib.sha256(content.encode("utf-8")).hexdigest(),
             }
             if last_modified:
                 metadata["last_modified"] = last_modified
@@ -390,7 +391,7 @@ class Chunker:
                     "kind": entity.kind.value,
                     "chunk_index": str(chunk_index),
                     "has_docstring": has_docstring,
-                    "content_hash": hashlib.md5(
+                    "content_hash": hashlib.sha256(
                         chunk_content.encode("utf-8")
                     ).hexdigest(),
                 }

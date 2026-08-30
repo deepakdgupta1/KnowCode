@@ -118,41 +118,6 @@ it.
 it is a parser change with its own contract tests rather than part of the
 chunking work that surfaced it.
 
-### BL-11 - A chunk is content-addressed by MD5
-
-**Severity:** Medium. **Found:** 2026-08-29, executing Phase C5.
-
-`Chunker` hashes chunk content with `hashlib.md5` in all four places it mints a
-`content_hash`, at `chunker.py:197`, `:244`, `:368` and `:393`. Entities use
-SHA-256 through `compute_entity_content_hash`, so the two halves of one index
-are addressed by digests of different strength.
-
-That hash is not decorative. `Indexer._reuse_durable_embeddings` looks a chunk
-up by it and, on a hit, attaches the stored embedding to the new chunk. A
-collision therefore hands one chunk another chunk's vector, and the chunk still
-retrieves, so nothing fails loudly. MD5 collisions are cheap to construct, which
-makes this reachable by a crafted source file rather than by chance alone.
-
-`ProseChunker` already computes SHA-256 for `ProseChunk.content_hash`
-(`prose_chunker.py:310`, `:346`), and `chunker.py:197` throws it away and
-re-hashes the same bytes with MD5. So the stronger digest is computed and
-discarded on the prose route.
-
-Reproduce:
-
-```bash
-sqlite3 <generation>/chunks.db "SELECT DISTINCT LENGTH(content_hash) FROM chunks"
-```
-
-That returns 16, the packed width of a 32-character MD5 digest. An entity digest
-in the same generation is 32 bytes.
-
-**Deferred on purpose.** Changing the digest changes every chunk's reuse key, so
-every generation must rebuild. Phase C already bumped `Indexer.SCHEMA_VERSION`
-once for C5, and Phase E revisits embedding policy, which is the same reuse
-path. Doing it there costs one rebuild instead of two. `pack_content_hash`
-already packs both widths, so the storage layer needs no further change.
-
 ### BL-7 - Timing-sensitive tests flake under concurrent load
 
 **Severity:** Low, but it costs trust in the suite. **Found:** 2026-08-29, while
@@ -203,6 +168,7 @@ the anchors are re-verified as part of adopting a later phase.
 
 | Item | Resolution |
 | --- | --- |
+| A chunk was content-addressed by MD5 (BL-11) | Fixed 2026-08-31. All four `hashlib.md5` sites in `Chunker` are SHA-256, so both halves of an index are addressed by the same digest, and the prose route stops re-hashing bytes `ProseChunker` has already digested. That digest is not decorative: `Indexer._reuse_durable_embeddings` looks a chunk up by it and, on a hit, attaches the stored embedding **without comparing content**, so a collision hands one chunk another chunk's vector and the chunk still retrieves. Digest strength is what stands in for that missing comparison, which is why it had to be the strong one. `Indexer.SCHEMA_VERSION` moves 5 to 6 and `SUPPORTED_SCHEMA_VERSIONS` holds only the current value, so **every existing generation needs one rebuild**; `knowcode doctor` reports it as `Unsupported index manifest schema version 5. Supported versions: [6]. Rebuild with knowcode build.` rather than failing obscurely. The storage layer needed no change, because `pack_content_hash` was already width-agnostic, and it stays that way even though nothing emits 32 characters now: narrowing it to one width is what made C5 a net loss of 36,864 bytes the first time. **Measured cost, 0.24 MB.** Rewriting every `content_hash` in generation `20260830T061050304877Z-8abc9f11` to the real SHA-256 of its own row's `content` and vacuuming both copies takes `chunks.db` from 39,129,088 to 39,366,656 bytes, **+237,568, 0.61%**. This is the first item in the storage stream that spends rather than saves, and the plan's §17 says why the trade is right. Verified end to end on a rebuilt corpus: both `chunks.content_hash` and `entities.content_hash` are 32 raw bytes, and all 30 stored digests equal `sha256` of the row's own stored content. Pinned by `tests/unit/indexing/test_chunk_content_hash.py`, whose assertions compare against the recomputed digest rather than against a width, so a different 64-character digest still fails them. The prose row is the odd one: once both routes agree on the algorithm no honest input distinguishes a reuse from a second hash, so it observes a `ProseChunk` whose recorded digest does not describe its content. Three mutation probes, each reddening only its own guard: `sha3_256` (same width, different digest), re-hashing on the prose route, and reverting the schema version. `test_md5_digest_is_stored_as_sixteen_bytes` is renamed and widened rather than deleted, because it is now the only place a packer narrowing would show. Full suite 1,935 passed, 3 xfailed. |
 | A generation manifest could not witness row loss in either database (BL-8) | Fixed 2026-08-31. The witness is temporal, not structural: `compact()` reads one digest per row set from its own writer connection before it does anything, and compares after, so the comparison cannot be satisfied by the damage. Nothing is threaded in from the caller, which is what makes it hold on all three publication paths where the rejected chunk-count fix could not: a full rebuild knows its corpus total, `index_incremental` knows only the files it touched, and a watch batch counts nothing at all. `rows_preserved` in `storage/rewrite_witness.py` is the bracket, `_rewrite()` on both stores is the named place a future staged rewrite goes so it lands inside the bracket rather than beside it, and `StagedRewriteError` names which row set moved. **The item's premise was half wrong, found by probe.** On the full-build path `knowledge.db` was never blind: `entity_ids` comes from the in-memory `GraphBuilder` at `service.py:957`, so an entity-dropping probe was already caught as `entity id digest mismatch` and refused to publish. Only `StagedGenerationWriter.publish` reads entity ids back out of the artifact, so the watch path was blind where the rebuild was not. `chunks.db` was blind on every path. **Reproduced end to end and re-run under the fix**: a probe deleting `WHERE rowid = (SELECT MIN(rowid) FROM chunks)` inside `compact` published a 30-chunk corpus as 29 with `validate_generation(verify_digests=True)` returning no failures; the same probe now refuses, the damaged `chunks.db` is discarded, and the build reports `rewriting staged chunks.db changed chunk_ids, embedded_chunk_ids`. **Three choices carry it.** The digest is over a sorted *list*, not `digest_ids`' set, because `relationships` has no unique constraint and a set cannot see one of two identical edges go. Edges are digested as raw integer triples with the `eid` codebook witnessed separately rather than joined into readable endpoints, because two thirds of endpoints have no `entities` row and a join hides an orphan on both sides of the comparison, which is the false negative BL-17 hit. And the chunk witness covers *which* chunks carry a durable embedding, not how many, which is the blind spot [ADR 9](adr/adr-0009-derived-vector-plane.md) records the D1 guard sharing. **What it does not close**: this witnesses the rewrite, not the whole build. Compaction remains the only step that rewrites a staged artifact, and `_rewrite()` is where the next one has to go to inherit the guard. Pinned by `tests/unit/storage/test_rewrite_witness.py`. Three mutation probes, each reddening only its own guard: digesting the set reddens the identical-edges row alone, joining edges through `entities` reddens the two codebook rows, and pointing the embedding witness at every chunk reddens the embedding row. Measured on generation `20260830T061050304877Z-8abc9f11` with paired interleaved runs, the bracket costs 29 ms on a 39.1 MB `chunks.db` and 89 ms on a 9.8 MB `knowledge.db`, once per publication. Full suite 1,930 passed, 3 xfailed. |
 | The exact search mode treated `_` and `%` as wildcards (BL-15) | Fixed 2026-08-31. Both SQLite stores had it, not one. `SqliteKnowledgeStore.search` built the same unescaped `LIKE` pattern, and its in-memory twin `KnowledgeStore.search` is `pattern_lower in name.lower()`, so two implementations of one Protocol disagreed and the in-memory one states the contract. `store.search` is reached from `mcp/server.py:185` with a raw user query and from `:427` with a `trace_calls` target, which is an identifier and so full of underscores. **The row counts understate it.** On generation `20260830T061050304877Z-8abc9f11` the quoted query `"vector_"` served 927 chunks of which 264 held the literal, and now serves 278 of which all 278 do. But `search_exact` has no `ORDER BY`, so scan order decides what the limit keeps: at the orchestrator's own breadth of `max(10, limit_entities * 5)` = 15, **none of the 15 rows contained the string asked for**, every one scored 1.0. All 15 do now. `storage/sqlite_like.py` holds the pattern builder and the `ESCAPE` clause in one place, because an escaped pattern run without the clause matches the escape character itself. Case-insensitivity over ASCII was kept on purpose and is now written into the `ChunkRepository.search_exact` contract rather than left implicit. Pinned by `tests/unit/storage/test_like_escaping.py`; the entity half is differential against the in-memory store, so no relabelling satisfies it. Two mutation probes: dropping the `%` and `_` escaping reddens exactly the five rows that were red before the fix, and emptying `LIKE_ESCAPE_CLAUSE` reddens all ten, which is what proves the two halves are coupled. Full suite 1,920 passed, 3 xfailed. |
 | Module chunks point at an entity that does not exist (BL-6) | Fixed 2026-08-29. Module-header and imports chunks hang on the file's MODULE entity, or its DOCUMENT entity where that is what the parser emits; prose chunks hang on the section whose span their lines fall in. Paired build: 495,985 chunk bytes off the graph to 0. `no chunk points at an entity that does not exist` is now a chunker contract for seven languages. Left BL-10. |

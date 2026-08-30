@@ -1400,20 +1400,20 @@ class TestContentHashColumn:
 
     DIGEST = "b" * 31 + "e"
 
-    def _hashed(self, chunk_id: str = "c1") -> CodeChunk:
+    def _hashed(self, chunk_id: str = "c1", digest: str | None = None) -> CodeChunk:
         return CodeChunk(
             id=chunk_id,
             entity_id="e1",
             content="body",
             tokens=["body"],
-            metadata={"content_hash": self.DIGEST, "kind": "function"},
+            metadata={"content_hash": digest or self.DIGEST, "kind": "function"},
         )
 
-    def _column(self, db_path: Path, name: str) -> object:
+    def _column(self, db_path: Path, name: str, chunk_id: str = "c1") -> object:
         con = sqlite3.connect(db_path)
         try:
             row = con.execute(
-                f"SELECT {name} FROM chunks WHERE chunk_id = ?", ("c1",)
+                f"SELECT {name} FROM chunks WHERE chunk_id = ?", (chunk_id,)
             ).fetchone()
         finally:
             con.close()
@@ -1452,14 +1452,20 @@ class TestContentHashColumn:
         assert retrieved is not None
         assert "content_hash" not in retrieved.metadata
 
-    def test_md5_digest_is_stored_as_sixteen_bytes(
+    def test_the_packer_does_not_assume_one_digest_width(
         self, repo: SqliteChunkRepository, db_path: Path
     ) -> None:
-        repo.add(self._hashed())
-
-        stored = self._column(db_path, "content_hash")
-        assert isinstance(stored, bytes)
-        assert len(stored) == 16
+        """Chunks and entities both hash with SHA-256 now (BL-11), and the
+        packer still has to be width-agnostic. Assuming 64 characters is what
+        made C5 a net loss: every 32-character digest stayed text and paid for
+        an index nothing used. Nothing in production emits 32 any more, so this
+        is the only place a narrowing would show.
+        """
+        for chunk_id, digest in (("c1", "b" * 31 + "e"), ("c2", "a" * 63 + "f")):
+            repo.add(self._hashed(chunk_id, digest))
+            stored = self._column(db_path, "content_hash", chunk_id)
+            assert isinstance(stored, bytes)
+            assert len(stored) == len(digest) // 2
 
     def test_digest_is_not_duplicated_into_metadata_json(
         self, repo: SqliteChunkRepository, db_path: Path
