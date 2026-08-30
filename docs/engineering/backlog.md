@@ -143,36 +143,6 @@ once for C5, and Phase E revisits embedding policy, which is the same reuse
 path. Doing it there costs one rebuild instead of two. `pack_content_hash`
 already packs both widths, so the storage layer needs no further change.
 
-### BL-12 - The storage simulator models a pre-C2 knowledge.db
-
-**Severity:** Medium. **Found:** 2026-08-29, measuring what C1 was worth before
-implementing it.
-
-`scripts/storage_simulate.py` is the tool the storage plan's per-item estimates
-come from, and its `knowledge.db` candidates no longer describe the artifact.
-`knowledge_candidates.relative_paths` strips a root prefix from
-`relationships.source_id` and `relationships.target_id`, which C2 turned into
-integer codebook keys, and it never touches `eid.entity_id`. In the current
-graph `eid` holds 17,024 of the 22,374 rows carrying root text, so the
-candidate misses three quarters of what it claims to measure while running a
-`REPLACE` against two integer columns.
-
-Its `chunks.db` candidates have a second problem. Rewriting an id column with
-`UPDATE` fires the three `chunks_fts` sync triggers, which rebuild FTS segments
-and grew `chunks_fts_data` by 1,327,104 bytes in the C1 measurement. Any
-candidate that rewrites a `chunks` column reports a saving reduced by that
-growth. `chunking_projection.py` already drops the triggers before composing;
-the simulator does not.
-
-Reproduce: run the simulator against a post-C2 generation and compare its
-`relative paths in entity ids and edge keys` row against a rewrite that strips
-`entities.entity_id`, `entities.file_path`, and `eid.entity_id` with the FTS
-triggers suspended. The Phase C1 execution log records both numbers.
-
-**Consequence.** D and E have not been re-measured since C2, C3, C4, C5, and C1
-landed, and §11's estimates for them predate all five. Fix the simulator before
-sizing either.
-
 ### BL-14 - Phase F removes the only backing store for exact search
 
 **Severity:** Medium today, because F has not shipped. High the day it does.
@@ -264,90 +234,6 @@ cold-cache and network-filesystem measurement, and the resolver threaded
 through all five read paths rather than the two the plan names. Sequence it
 after that work, not before, or quoted queries stop working in the window
 between.
-
-### BL-13 - Phase D2's contentless FTS table cannot delete a chunk
-
-**Severity:** Medium today, because D2 has not shipped. High the day it ships as
-§15 specifies. **Found:** 2026-08-30, listing the downsides of the pending
-storage phases.
-
-§15's DDL for D2 creates the replacement index as
-`fts5(tokens_text, content='')` and then drops `chunks.tokens_text`. A
-contentless FTS5 table declared that way cannot delete a row. A plain `DELETE`
-is refused, and the `'delete'` command requires the caller to supply the exact
-original tokens. D2 removes the column those tokens live in, so no caller can
-supply them.
-
-That breaks `remove_by_file` and `replace_file` in
-`src/knowcode/storage/sqlite_chunk_repository.py`, which are the watch and
-incremental-build paths, not a rare corner.
-
-**The failure is silent in one direction, which is the part that matters.** A
-`'delete'` carrying the wrong tokens is accepted without error and leaves the
-row matching its old terms. A stale chunk therefore keeps answering FTS queries
-after the file that produced it has been re-indexed, and nothing raises.
-
-§15 anticipates half of this. It notes the three triggers read
-`new.tokens_text`/`old.tokens_text` and says to tokenize on the fly or have the
-repository write the FTS row explicitly. Both answers address INSERT. Neither
-addresses DELETE, because the problem there is not where the text comes from,
-it is that the text is gone.
-
-Reproduce, on the SQLite this project already ships against (3.50.4):
-
-```python
-import sqlite3
-
-con = sqlite3.connect(":memory:")
-con.execute("CREATE VIRTUAL TABLE t USING fts5(txt, content='')")
-con.execute("INSERT INTO t(rowid, txt) VALUES (1, 'alpha beta')")
-try:
-    con.execute("DELETE FROM t WHERE rowid = 1")
-except sqlite3.OperationalError as exc:
-    print("DELETE:", exc)
-con.execute("INSERT INTO t(t, rowid, txt) VALUES ('delete', 1, 'wrong text')")
-print("still matching after a wrong-text delete:",
-      con.execute("SELECT count(*) FROM t WHERE t MATCH 'alpha'").fetchone()[0])
-```
-
-Prints `DELETE: cannot DELETE from contentless fts5 table: t` and then
-`still matching after a wrong-text delete: 1`.
-
-**The fix is one option in the DDL.** `contentless_delete=1`, added in SQLite
-3.43, makes a plain `DELETE` work and makes the `'delete'` command an error
-rather than a silent no-op. Declare the table as
-`fts5(tokens_text, content='', contentless_delete=1)` and let the delete
-triggers issue an ordinary `DELETE`.
-
-That raises the minimum SQLite this project needs, and nothing declares one
-today. No shipped code under `src/` uses a version-gated feature: `DROP COLUMN`
-appears only in `scripts/storage_simulate.py`,
-`scripts/chunking_projection.py`, and the plan's own DDL for D2 and D3, which
-would imply 3.35 once those ship. `contentless_delete=1` needs 3.43. Whoever
-ships D2 should declare that floor explicitly. The good news is that this one
-fails loudly: FTS5 rejects an option it does not know at
-`CREATE VIRTUAL TABLE` time with `unrecognized option: "contentless_delete"`,
-so an older runtime refuses to build the index rather than quietly building a
-broken one.
-
-**Also note what contentless mode costs beyond deletion.** Repairing a damaged
-FTS index today is one statement, `INSERT INTO chunks_fts(chunks_fts) VALUES
-('rebuild')`, measured at **0.04 s** over 6,620 chunks and 3.2 MB of tokens. A
-contentless table cannot do that, so recovery would re-tokenize every chunk
-from `content` instead.
-
-Phase F then removes `content` as well, and the two together are worse than
-either alone. With both landed the text lives in neither column, so repairing
-the term index means re-reading, re-parsing, re-chunking and re-tokenizing every
-source file, which is the whole indexing pipeline minus embeddings. The change
-that matters is not the extra seconds. **Recovery becomes partial.** Only files
-that still exist and still match their stored hash can be reconstructed, and
-nothing in the schema can represent a chunk that is known to have existed and
-cannot be rebuilt. Sequence D2 and F with that in mind, and see BL-14.
-
-Verifying D2 needs a pin that deletes a chunk and then asserts the FTS index no
-longer matches its terms. Asserting only that the insert path still finds new
-chunks passes on a broken build.
 
 ### BL-7 - Timing-sensitive tests flake under concurrent load
 
@@ -482,3 +368,5 @@ the anchors are re-verified as part of adopting a later phase.
 | Every embedding stored twice, 28.5% of a generation | Phase D1, 2026-08-29. [ADR 9](adr/adr-0009-derived-vector-plane.md). |
 | BL-2, a full rebuild reverting a concurrent watch publication | Fixed 2026-08-29. `build_generation` compare-and-swaps on `expect_current` and re-derives on the generation published in between, bounded by `_REBUILD_REBASE_ATTEMPTS`. The flaky convergence test went from 13 failures in 40 runs to 0 in 40. |
 | Publication asserted the presence of a cache and compared two manifest numbers to check chunk/vector membership | Phase D1, 2026-08-29. The guard now counts durable embeddings in `chunks.db`, which is what [ADR 3](adr/adr-0003-durable-embedding-representation.md) already required. |
+| Phase D2's contentless FTS table cannot delete a chunk (BL-13) | Phase D2, 2026-08-30. The index is declared `fts5(..., contentless_delete=1)`; the sync triggers are gone and every mutating path writes or deletes its FTS row in the chunk's own transaction, so `remove_by_file`, `replace_file`, and re-added chunk ids all retire their old terms. Pinned by `tests/unit/storage/test_contentless_fts.py` — the delete-stops-matching assertion a broken build cannot pass. The SQLite 3.43 floor is declared as `SqliteChunkRepository.MINIMUM_SQLITE_VERSION` and checked at open with an actionable message. `rebuild_fts()` re-tokenizes from `content` as the replacement for the retired `'rebuild'` statement, measured at 0.13 s over 3,022 chunks. |
+| The storage simulator models a pre-C2 knowledge.db (BL-12) | Fixed 2026-08-30, before sizing D2. `storage_simulate.py` probes the artifact schema: relative paths strip `entities` and the `eid` codebook rather than running `REPLACE` over integer edge keys, `integer_edges` reports itself already applied instead of emptying the graph through its TEXT-key joins, and the contentless fold skips once `tokens_text` is gone. `chunking_projection.py` composes against both schemas. Re-measured against generation `20260830T043703346316Z-4b8e0856` (C1–C5 in the baseline): D2 is worth 4.64 MB, not §11's stale 5.64 MB; D3's `source_code` drop re-measures at 3.70 MB. The shared `CONTENTLESS_FTS` DDL now carries `contentless_delete=1`. |

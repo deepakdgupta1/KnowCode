@@ -262,7 +262,10 @@ points at an entity that does not exist where 495,985 bytes did, and the
 generation fell 2.18 MB despite indexing 2.3 times as much prose. C
 re-encoded the artifacts without changing what they hold, worth 10.0 MB, and
 its last item made a generation's size independent of the directory it was
-built in.
+built in. D2 shipped 2026-08-30: the term index became a contentless FTS5
+table carrying `contentless_delete=1`, worth a measured 4.46 MB of `chunks.db`,
+with BL-13's deletion fix shipped inside it and the simulator BL-12 flagged
+repaired first to re-size the phase honestly.
 
 **Work, in order:**
 
@@ -295,8 +298,11 @@ built in.
    storage simulator no longer models a post-C2 `knowledge.db`
    ([BL-12](engineering/backlog.md)), and it removed the carrier BL-9 had been
    deferred onto.
-4. **Stop persisting the rest of the derived data.** `tokens_text` folds into a
-   contentless FTS table; `entities.source_code` resolves from disk against a
+4. **Stop persisting the rest of the derived data.** Half shipped 2026-08-30
+   as D2: `tokens_text` folds into a contentless FTS5 table declared with
+   `contentless_delete=1`, so deletion works and the sync triggers are
+   replaced by explicit FTS writes in each chunk transaction (BL-13, closed).
+   Remaining as D3: `entities.source_code` resolves from disk against a
    verified content hash, failing closed rather than serving stale source.
 5. **Embedding-selection policy,** gated on the retrieval evaluation harness.
    Chunks below a content-size threshold stay stored and stay reachable through

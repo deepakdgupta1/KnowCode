@@ -1803,3 +1803,78 @@ and D3 remain. The roadmap tracks this as
 |---|---:|---:|---:|---:|
 | baseline (2026-08-29 tree) | 48.93 | 31.93 | 32.31 | **113.18 MB** |
 | D1 — plane becomes derived | 48.36 | 30.51 | 0 | **78.87 MB** |
+
+---
+
+### Phase D2 — shipped 2026-08-30
+
+**Order taken.** BL-12's simulator was fixed first, because its own entry says
+to fix it before sizing D, and because the defect BL-13 filed lived in the
+simulator's shared `CONTENTLESS_FTS` DDL as much as in §15. Against the C1–C5
+baseline the simulator re-measured the fold at **4.64 MB**, not §11's 5.64 MB,
+which predates every C phase and a smaller tree. BL-13's fix then shipped as
+part of D2 itself, in one changeset — there is no order in which D2 lands
+first without it that does not silently corrupt search on the next re-index.
+
+**What was built.**
+
+- `chunks_fts` is contentless: `fts5(tokens_text, content='',
+  contentless_delete=1, tokenize='unicode61')`. The option is the whole fix —
+  a plain `DELETE` becomes legal, and the `'delete'` command that silently
+  no-ops on wrong tokens is refused instead.
+- The three sync triggers are gone. Every mutating path writes or deletes its
+  FTS row explicitly inside the same transaction as its chunk row: `add` and
+  `add_batch` purge the previous FTS rows for the ids they rewrite (INSERT OR
+  REPLACE hands a rewrite a fresh rowid, and the stale row would keep matching
+  the old terms forever), then insert the FTS row by joining the unique
+  `chunk_id` back to whatever rowid survived; `remove_by_file` and
+  `replace_file` delete the FTS rows by file before the chunk rows they
+  resolve through.
+- `tokens_text` is dropped from the table, the INSERT, and the hydration
+  select. A hydrated chunk carries `tokens=[]`: tokens are an indexing-time
+  derivation, and their durable form is now the FTS row. No reader under
+  `src/` consumed them at query time.
+- `rebuild_fts()` replaces the retired one-statement `'rebuild'`: it clears
+  the index and re-tokenizes every row from `chunks.content` through
+  `tokenize_code` — the same derivation the chunker used, so the rebuilt
+  index equals the written one. Measured in isolation at 0.13 s over 3,022
+  chunks and 1.8 MB of content, against 0.02 s for the old statement; the
+  loss is sub-second repair, and repair now requires application code rather
+  than any `sqlite3` shell.
+- Schema v4. A database still storing `tokens_text` (v3) fails closed with a
+  rebuild instruction, matching the v1 and v2 precedent.
+- The SQLite floor is declared: `SqliteChunkRepository.MINIMUM_SQLITE_VERSION
+  = (3, 43, 0)`, checked at open with a message naming the option and the
+  linked runtime. The venv ships 3.50.4. The failure was already loud
+  (`unrecognized option: "contentless_delete"`); now it is also actionable.
+
+**Baseline and result.** Two builds of this tree, the second with D2 as the
+only source change. The tree grew by 34 chunks between them (this change's own
+tests and docs), which works slightly against the saving.
+
+| Artifact | Before | After |
+|---|---:|---:|
+| `chunks.db` | 43.58 MB (6,712 chunks) | **38.90 MB** (6,746 chunks) |
+| `knowledge.db` | 13.61 MB | 13.68 MB (unrelated entity growth) |
+
+**4.46 MB off `chunks.db`** with 34 more chunks indexed; the simulator's
+constant-corpus figure is 4.64 MB. `tokens_text` is gone from the schema, the
+triggers are gone, and the FTS row count equals the chunk count.
+
+**Verification.** 1,837 unit and integration tests pass (the one red herring,
+`test_generation_hotswap` under load, is BL-7's documented flake and passes in
+isolation). The BL-13 pin is `tests/unit/storage/test_contentless_fts.py`: a
+removed file, a replaced file, and a re-added chunk id all stop matching their
+old terms while a sibling chunk keeps matching — the assertion BL-13 says a
+broken build cannot pass. The same module pins identifier splitting
+(`snake_case`, `camelCase`, dotted paths, compound forms) as the before/after
+gate, `rebuild_fts` reproducing the written index, `compact()` preserving the
+contentless index through `VACUUM` (checked empirically first: a
+`contentless_delete` table survives VACUUM with matches and bm25 intact), v3
+failing closed, and the version floor refusing to open below it. On the
+shipped artifact, FTS searches return the expected files, and the pre-D2
+generation fails closed when opened by the new code.
+
+**Left in Phase D.** D3 (`entities.source_code` resolved from disk, re-measured
+at 3.70 MB by the fixed simulator) remains. Phase F stays gated on BL-14's
+prerequisites; D2's landing makes none of them easier.

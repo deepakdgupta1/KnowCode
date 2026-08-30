@@ -12,8 +12,11 @@ def test_chunk_repository_basic() -> None:
     )
     repo.add(chunk)
 
-    assert repo.get("c1") == chunk
-    assert repo.get_by_entity("e1") == [chunk]
+    loaded = repo.get("c1")
+    # tokens are an indexing-time derivation of content; D2 persists them only
+    # inside the contentless FTS row, so hydration returns them empty.
+    assert loaded == CodeChunk(id="c1", entity_id="e1", content="content 1", tokens=[])
+    assert repo.get_by_entity("e1") == [loaded]
 
 
 def test_chunk_repository_token_search_limit() -> None:
