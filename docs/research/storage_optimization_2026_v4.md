@@ -1083,67 +1083,78 @@ explicitly rejects.
 
 ## 14. Appendix A: Code Anchor Index
 
-Every file and line the plan touches, as of commit `054eb99`. Line numbers
-drift; the symbol names are the durable reference.
+Every file the plan touches, by symbol. **This index carries no line numbers on
+purpose (BL-5).** It used to, and they drifted by roughly 250 lines while the
+prose beside them stayed true, so a reader who trusted a number landed in the
+wrong function while the symbol name would have taken them to the right one.
+A number that decays silently is worse than no number.
+
+`tests/unit/docs/test_storage_plan_anchors.py` reads this table and fails when
+a symbol here no longer exists. Every path is relative to `src/knowcode/`
+unless it starts with `scripts/`. A `—` in the symbol column means the row is
+about the file as a whole.
 
 **Chunking**
-| Anchor | What |
-|---|---|
-| `indexing/chunker.py:28` | `Chunker.process_parse_result` — entry point, gains prose dispatch (B2) |
-| `indexing/chunker.py:67` | `_emit_module_chunks` — becomes code-only (B2) |
-| `indexing/chunker.py:104` | `_extract_module_header` — the `import`/`from`/`class`/`def` break that truncates prose (§6.2) |
-| `indexing/chunker.py:148` | `_chunk_entity` — class-shell rule (B1), label-only skip (B3) |
-| `indexing/chunker.py:168` | `content += entity.name` — the bodiless-chunk fallback (§6.3) |
-| `indexing/chunker.py:194` | sliding window, `start += max_chunk_size - overlap` |
-| `indexing/prose_chunker.py:110` | `ProseChunker` — built, tested, unwired |
-| `parsers/markdown_parser.py:88` | `SECTION` entity per heading |
-| `parsers/yaml_parser.py:126` | `CONFIG_KEY` entity per key |
-| `data_models.py:137` | `ChunkingConfig` — `max_chunk_size=1000`, `overlap=100` |
+
+| File | Symbol | What |
+|---|---|---|
+| `indexing/chunker.py` | `Chunker.process_parse_result` | entry point; dispatches prose (B2, shipped) |
+| `indexing/chunker.py` | `Chunker._emit_module_chunks` | code-only since B2; skipped when no entity stands for the file (BL-6, BL-10) |
+| `indexing/chunker.py` | `Chunker._extract_module_header` | the `import`/`from`/`class`/`def` break that truncated prose (§6.2) |
+| `indexing/chunker.py` | `Chunker._chunk_entity` | class-shell rule (B1), label-only skip (B3) |
+| `indexing/prose_chunker.py` | `ProseChunker` | wired by B2 |
+| `parsers/markdown_parser.py` | `MarkdownParser.parse_file` | `SECTION` entity per heading, scoped by `HeadingScope` (BL-1) |
+| `parsers/yaml_parser.py` | `YamlParser.parse_file` | `CONFIG_KEY` entity per key |
+| `data_models.py` | `ChunkingConfig` | `max_chunk_size=1000`, `overlap=100` |
 
 **Indexing and publish**
-| Anchor | What |
-|---|---|
-| `indexing/indexer.py:61` | `Indexer.SCHEMA_VERSION = 2` |
-| `indexing/indexer.py:91` | `self.chunker = Chunker()` — the only construction site |
-| `indexing/indexer.py:153` | `chunks = self.chunker.process_parse_result(...)` |
-| `indexing/indexer.py:284` | `_reuse_durable_embeddings` |
-| `indexing/indexer.py:296` | `get_chunk_id_by_hash` call site (C5) |
-| `indexing/indexer.py:309` | `_embed_pending` — embeds `chunk.content`; planner hook (E1) |
-| `indexing/indexer.py:381` | `_recover_vectors_from_chunks` — the rebuild path (D1) |
-| `indexing/indexer.py:581` | `save()` — VACUUM/compaction must precede the manifest write (A1, A2) |
-| `indexing/generations.py:83` | `MANIFEST_SCHEMA_VERSION = 3` |
-| `indexing/generations.py:88` | `DEFAULT_RETAINED_GENERATIONS = 2` (§10) |
-| `indexing/generations.py:462` | `digest_ids` — chunk-set digest, a cache key for D1 |
-| `indexing/generations.py:484` | `digest_artifact` — why ordering matters |
-| `indexing/generations.py:767` | `publish_generation` — validate then move the pointer |
+
+| File | Symbol | What |
+|---|---|---|
+| `indexing/indexer.py` | `Indexer.SCHEMA_VERSION` | the gate that forces a rebuild; **7**, moved by C5, BL-11 and BL-9 |
+| `indexing/indexer.py` | `Indexer._reuse_durable_embeddings` | looks a chunk up by `content_hash` and attaches its vector without comparing content (BL-11) |
+| `indexing/indexer.py` | `Indexer._embed_pending` | embeds `chunk.content`; the planner hook (E1) |
+| `indexing/indexer.py` | `Indexer._recover_vectors_from_chunks` | the rebuild path (D1); scoped to one file transaction, not the corpus |
+| `indexing/indexer.py` | `Indexer.save` | compaction must precede the manifest write (A2) |
+| `indexing/generations.py` | `MANIFEST_SCHEMA_VERSION` | 3 |
+| `indexing/generations.py` | `DEFAULT_RETAINED_GENERATIONS` | 2 (§10) |
+| `indexing/generations.py` | `digest_ids` | id-set digest over a *set*; the manifest's parity key |
+| `indexing/generations.py` | `digest_artifact` | why ordering matters |
+| `indexing/generations.py` | `publish_generation` | validate, then move the pointer |
 
 **Storage**
-| Anchor | What |
-|---|---|
-| `storage/sqlite_chunk_repository.py:75` | `SCHEMA_VERSION = 2` |
-| `storage/sqlite_chunk_repository.py:371` | legacy-schema rejection path (migration policy) |
-| `storage/sqlite_chunk_repository.py:716` | `get_chunk_id_by_hash` — the `json_extract` lookup (C5) |
-| `storage/sqlite_knowledge_store.py:39` | `SCHEMA_VERSION = 1` |
-| `storage/lancedb_vector_store.py:215` | `flush()` — where `compact()` belongs (A1) |
-| `storage/lancedb_vector_store.py:291` | `self._table.add(rows)` — the un-compacted append |
-| `storage/lancedb_vector_store.py:383` | `save()` — compaction call site (A1) |
+
+| File | Symbol | What |
+|---|---|---|
+| `storage/sqlite_chunk_repository.py` | `SqliteChunkRepository.SCHEMA_VERSION` | 4; gates nothing on its own, see §11's correction |
+| `storage/sqlite_chunk_repository.py` | `SqliteChunkRepository.get_chunk_id_by_hash` | the reuse lookup; a column read since C5, not `json_extract` |
+| `storage/sqlite_chunk_repository.py` | `SqliteChunkRepository.compact` | the staged rewrite, bracketed by its own losslessness witness (A2, BL-8) |
+| `storage/sqlite_chunk_repository.py` | `SqliteChunkRepository._rewrite` | **where the deflate and the separator compaction go**, so they inherit that witness |
+| `storage/sqlite_knowledge_store.py` | `SqliteKnowledgeStore.SCHEMA_VERSION` | 1 |
+| `storage/sqlite_knowledge_store.py` | `SqliteKnowledgeStore.compact` | the `knowledge.db` half of the same pair |
+| `storage/rewrite_witness.py` | `rows_preserved` | the bracket itself (BL-8) |
+| `storage/lancedb_vector_store.py` | `LanceDBVectorStore.flush` | where `compact()` would have belonged (A1, retired by D1) |
+| `storage/lancedb_vector_store.py` | `LanceDBVectorStore.save` | no longer a published artifact (D1) |
 
 **Retrieval and consumers**
-| Anchor | What |
-|---|---|
-| `retrieval/reranker.py:154`, `:217`, `api/api.py:184`, `:203`, `:214`, `:220`, `:227`, `cli/cli.py:445` | the `chunk.content` readers, nine of them, not the two this row used to list (Phase F, BL-14) |
-| `service.py:1657` | the one `entity.source_code` reader (D3) |
-| `analysis/preflight.py:622` | reads `behavior["confidence"]` (retained, D1 of §2) |
-| `analysis/context_synthesizer.py:318` | renders `behavior` (retained) |
-| `analysis/documentation_synthesizer.py:272` | renders `behavior` (retained) |
-| `analysis/live_source_loader.py` | existing source loader — check before writing a new resolver |
+
+| File | Symbol | What |
+|---|---|---|
+| `retrieval/reranker.py` | `Reranker.rerank` | reads `chunk.content`; one of the readers Phase F would have broken (BL-14) |
+| `retrieval/exact_query_engine.py` | `ExactQueryEngine.search_scored` | the whole exact plane; `LIKE` over `content`, literal since BL-15 |
+| `service.py` | `KnowCodeService.get_entity_details` | the one `entity.source_code` reader (D3) |
+| `analysis/preflight.py` | `_score_behavior_analyzability` | reads `behavior["confidence"]` (retained, §2 D1) |
+| `analysis/context_synthesizer.py` | `ContextSynthesizer.synthesize` | renders `behavior` (retained) |
+| `analysis/documentation_synthesizer.py` | `DocumentationSynthesizer._render_entity` | renders `behavior` (retained) |
+| `analysis/live_source_loader.py` | `LiveSourceLoader` | the source resolver D3 reads through; bounded to the repository root (BL-25) |
 
 **Tools**
-| Anchor | What |
-|---|---|
-| `scripts/measure_storage.py` | layered byte breakdown |
-| `scripts/storage_simulate.py` | measured encoding and derived-data candidates |
-| `scripts/chunking_projection.py` | measured corrected-corpus projection |
+
+| File | Symbol | What |
+|---|---|---|
+| `scripts/measure_storage.py` | — | layered byte breakdown |
+| `scripts/storage_simulate.py` | — | measured encoding and derived-data candidates; schema-probing since BL-12 |
+| `scripts/chunking_projection.py` | — | measured corrected-corpus projection |
 
 ---
 
