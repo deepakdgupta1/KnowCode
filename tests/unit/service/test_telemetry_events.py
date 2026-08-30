@@ -156,7 +156,6 @@ def test_the_query_event_carries_metadata_not_the_query(
     assert record["retrieval_mode"] == "semantic"
     assert record["task_type"]
     assert record["sufficiency_score"] == 0.9
-    assert record["local_or_escalated"] in {"local", "escalated"}
     assert record["is_stale"] is False
     assert record["selected_entity_count"] == 1
     assert record["entry_point"] == "service"
@@ -194,3 +193,27 @@ def test_three_retrievals_count_as_three_queries(
         service.retrieve_context_for_query(QUERY)
 
     assert telemetry.get_telemetry_summary(tmp_path)["total_queries"] == 3
+
+
+def test_a_bare_retrieval_reports_no_routing_outcome(
+    service: KnowCodeService, tmp_path: Path
+) -> None:
+    """BL-22: this path reaches no routing decision, so it must assert none.
+
+    ``retrieve_context_for_query`` annotated ``local_or_escalated`` from
+    ``score >= sufficiency_threshold`` -- 0.8, where the gate that actually
+    routes is ``max(sufficiency_threshold, routing_quality_floor)`` = 0.9 *and*
+    membership in the always-empty ``local_answer_task_types``. So any
+    retrieval scoring 0.8 or above was tallied into the local-answer rate that
+    substantiates the product's token-savings claim, while the true local rate
+    was exactly zero. This fixture scores 0.9 and would have been counted.
+
+    The measurement stays; only the verdict moves, to the router that reaches
+    it (see ``tests/integration/test_agent_retrieval_contract.py``).
+    """
+    service.retrieve_context_for_query(QUERY)
+
+    record = _records(tmp_path)[0]
+    assert "local_or_escalated" not in record
+    assert record["sufficiency_score"] == 0.9
+    assert telemetry.get_telemetry_summary(tmp_path)["local_routing_rate"] == 0.0

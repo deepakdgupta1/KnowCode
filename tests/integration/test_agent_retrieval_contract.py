@@ -7,6 +7,10 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
+import pytest
+
+from knowcode import telemetry, telemetry_files, telemetry_policy
+
 from knowcode.config import AppConfig, ModelConfig
 from knowcode.data_models import CodeChunk, TaskType
 from knowcode.llm.agent import Agent
@@ -239,3 +243,54 @@ def test_forcing_the_llm_does_not_thin_the_bundle_it_gets(tmp_path: Path) -> Non
 
     assert result["source"] == "llm"
     assert service.retrieve_kwargs == [WIDEST_RUNG]
+
+
+def _query_events(store: Path) -> list[dict[str, Any]]:
+    """The counted query events one smart_answer wrote, flushed to disk."""
+    telemetry.shutdown_telemetry(timeout=5.0)
+    log = telemetry_files.telemetry_path(store)
+    if not log.exists():
+        return []
+    return [
+        record
+        for record in (
+            json.loads(line)
+            for line in log.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        )
+        if telemetry_policy.is_counted_query_event(record)
+    ]
+
+
+@pytest.mark.parametrize(
+    ("sufficiency", "allowlist"),
+    [
+        (0.95, []),
+        (0.85, []),
+        (0.95, [TaskType.LOCATE.value]),
+        (0.50, [TaskType.LOCATE.value]),
+    ],
+)
+def test_the_logged_routing_outcome_is_the_one_the_router_reached(
+    tmp_path: Path, sufficiency: float, allowlist: list[str]
+) -> None:
+    """BL-22: the verdict is annotated where routing happens, and only there.
+
+    Asserted against what the call actually returned rather than against a
+    recomputed threshold: a test that re-derived the expected verdict from
+    ``sufficiency >= 0.9`` would drift the same way the metric did. The
+    invariant is that telemetry and the answer agree, whatever the gate is.
+
+    The first two rows are the shipped configuration -- an empty allowlist, so
+    nothing can route locally however high it scores. Both were logged "local".
+    """
+    service = ContractService(tmp_path, sufficiency=sufficiency)
+    agent = _make_agent(service)
+    agent.config.local_answer_task_types = list(allowlist)
+
+    result = agent.smart_answer("Where is foo defined?")
+
+    events = _query_events(tmp_path)
+    assert len(events) == 1
+    expected = "local" if result["source"] == "local" else "escalated"
+    assert events[0]["local_or_escalated"] == expected

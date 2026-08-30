@@ -641,13 +641,21 @@ class KnowCodeService:
             )
             res["freshness"] = freshness
 
-            threshold = self.app_config.sufficiency_threshold
-            score = res.get("sufficiency_score", 0.0)
+            # Sufficiency is measured here; it is *routed on* elsewhere. This
+            # path reaches no decision -- MCP and REST callers land in it
+            # without any router above them -- so it annotates no
+            # `local_or_escalated`. It used to, from `score >=
+            # sufficiency_threshold` (0.8), while the gate that actually routes
+            # is max(sufficiency_threshold, routing_quality_floor) = 0.9 *and*
+            # membership in `local_answer_task_types`. Every retrieval scoring
+            # 0.8 or better was therefore tallied as answered locally when the
+            # true local-answer rate was zero, corrupting the very measurement
+            # the fail-closed gate depends on to open (BL-22). The verdict is
+            # annotated in `Agent._smart_answer`, where routing happens.
             scope.annotate(
                 verbosity=verbosity,
-                sufficiency_score=float(score),
+                sufficiency_score=float(res.get("sufficiency_score", 0.0)),
                 is_stale=bool(res["freshness"]["is_stale"]),
-                local_or_escalated="local" if score >= threshold else "escalated",
             )
 
             return res

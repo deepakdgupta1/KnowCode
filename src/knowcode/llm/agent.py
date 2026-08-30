@@ -13,6 +13,7 @@ from knowcode.llm.prompt_contract import (
     openai_messages,
 )
 from knowcode.data_models import TaskType
+from knowcode.telemetry import current_query_scope
 
 #: The retrieval ladder, cheapest rung first. Each rung is what one attempt
 #: asks retrieval for; the ladder climbs only while a *local* answer is still
@@ -331,12 +332,25 @@ class Agent:
         )
 
         # 3. Decide: local answer or LLM
-        if (
+        answered_locally = bool(
             not force_llm
             and routing_policy_allowed
             and avg_sufficiency >= threshold
             and context_str
-        ):
+        )
+
+        # The routing verdict is annotated here, where routing happens, and
+        # nowhere else -- one expression decides the branch and the metric, so
+        # they cannot disagree. Retrieval used to assert a verdict of its own
+        # from a bare sufficiency comparison against the wrong threshold, on a
+        # path that reaches no decision at all (BL-22).
+        scope = current_query_scope()
+        if scope is not None:
+            scope.annotate(
+                local_or_escalated="local" if answered_locally else "escalated"
+            )
+
+        if answered_locally:
             # Local-first: sufficient context found
             print("  ✅ Answering locally (sufficient context)")
 

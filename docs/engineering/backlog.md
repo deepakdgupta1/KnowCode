@@ -355,44 +355,6 @@ whole corpus as §5 implies.
 **Deferred on purpose.** Line anchors go stale on every commit. Fix them only if
 the anchors are re-verified as part of adopting a later phase.
 
-### BL-22 - Telemetry reports a routing decision the router did not make
-
-**Severity:** Medium. **Found:** 2026-08-30, same audit.
-
-`retrieve_context_for_query` annotates its telemetry scope with
-
-```python
-threshold = self.app_config.sufficiency_threshold      # service.py:644, 0.8
-local_or_escalated="local" if score >= threshold else "escalated"   # :650
-```
-
-The gate that actually routes, in `Agent.smart_answer`, is
-`max(sufficiency_threshold, routing_quality_floor)` = 0.9 **and** membership in
-`local_answer_task_types`, which is always empty (BL-19). So the field is
-computed against the wrong threshold, does not consult the allowlist at all,
-and is emitted from a path that makes no routing decision. `telemetry.py:398`
-tallies it into the `local` count — the local-answer rate that substantiates
-the product's token-savings claim.
-
-Any retrieval scoring 0.8 or above is logged as answered locally when the true
-local-answer rate is exactly zero. BL-20 compounds it by driving complete
-bundles to 1.00.
-
-Not yet observed in the wild: the repository's historical query events all
-scored below 0.8 and were logged correctly as escalated. That is luck, not
-correctness, and it stops being luck the moment BL-19 widens the bundles.
-
-Fix by annotating the routing outcome where routing happens — `smart_answer`,
-using the same expression the branch uses — and having the retrieval path
-either stop asserting a verdict it did not reach or emit something honestly
-named. `Scope.annotate` is last-write-wins (`telemetry.py:278`), so verify the
-nesting order gives the outer decision the final write before relying on it.
-Renaming touches `telemetry.py:398`, the field table in `docs/user/telemetry.md`
-at line 35, and the `jq` example at line 135.
-
-This is the measurement the fail-closed gate depends on for its eventual
-opening, so it should be correct before the eval program reads it.
-
 ### BL-23 - Freshness cannot see a deleted file
 
 **Severity:** Medium. **Found:** 2026-08-30, same audit.
@@ -482,3 +444,4 @@ to `None` like every other rejection in this class.
 | Dependency expansion relabelled a ranked hit as non-evidence (BL-18) | Fixed 2026-08-30, the day the business-logic audit filed it. `SearchEngine.search_scored` now emits every ranked hit as `retrieved`, in rank order, *before* expanding anything, and only then adds unseen callees as `dependency` with a zero score. The de-duplication guard can no longer reach a primary hit, so being some other hit's callee cannot cost a chunk its own retrieval evidence -- the loop order is what enforces it, which the docstring now says. Pinned by two tests in `tests/unit/retrieval/test_search_engine.py`: a three-link call chain with all three links ranked returned one `retrieved` label before the fix and three after, and a second test holds the other half, that a callee retrieval never ranked stays a `dependency` -- the guard against "fix" by relabelling everything `retrieved`. Both mutation-probed: moving the seeding loop back after expansion reddens the first, relabelling callees `retrieved` reddens only the second. The returned list changes from expansion-traversal order to rank order; `cli.py:438`, `mcp/server.py:343` and `api.py:195` all just iterate it, and `evidence[].rank` in the orchestrator now means retrieval rank, which is what it claimed. Full suite 1,866 passed, 3 xfailed. |
 | The retrieval ladder was gated on the fail-closed flag, so every LLM answer got rung one (BL-19) | Fixed 2026-08-30. Both broadening rungs were guarded by membership in `local_answer_task_types`, which `AppConfig._fail_closed` empties on every load and no blessed policy artifact repopulates, so retrieval always stopped at rung one and the model was asked to answer from one entity's signature and docstring -- no source, no dependencies, under 1,500 tokens. The three copy-pasted rung blocks are now one `LADDER_RUNGS` tuple and one loop that stops at the first rung clearing the threshold. The ladder is climbed only when stopping early is *possible* -- some task type may answer locally and the caller has not demanded the LLM; otherwise one retrieval runs at the widest rung. That is the same single attempt as before, at full breadth rather than minimal, so the fix costs no extra retrieval in today's universal case. `force_llm` no longer thins the bundle either: it means "do not answer locally", not "retrieve less". Pinned by two tests in `tests/integration/test_agent_retrieval_contract.py`, which assert the whole kwargs dict one attempt asks retrieval for rather than one field at a time -- a bundle is thin because of the *combination*. Three mutation probes, each reddening only its own test: giving the un-routable case the thinnest rung, removing the early stop, and letting `force_llm` climb. The existing `retrieve_calls == 1` and `== 3` assertions still hold, so the token saving on a populated allowlist is unchanged. `docs/product/business-logic.md` restates the ladder. Full suite 1,868 passed, 3 xfailed. |
 | Sufficiency saturated, and two task types cleared the routing gate with no source code (BL-20) | Fixed 2026-08-30. `_calculate_sufficiency` grew `max_score` inside the same branch that grew `score`, so the denominator described what the bundle happened to contain rather than what its task template asked for. Two consequences, both measured: every bundle holding everything its template named scored exactly 1.00 whatever the task type -- the number could not tell a rich `debug` bundle from a thin `locate` one -- and `extend` (0.91) and `locate` (1.00) cleared the 0.9 gate with no source code at all, `extend` while its own template asks for source. Both increments are now unconditional. With a fixed denominator the six task types land at 0.95-0.96 complete and 0.45-0.86 without source, so the gate discriminates in the direction it was built for. An entity with no docstring over 50 characters now tops out near 0.96 rather than 1.00, which is the honest reading. Pinned by `tests/unit/analysis/test_sufficiency_scoring.py`: source and docstring halves probed separately (each hoist reintroduced reddens one test and only one), an over-correction guard that a complete bundle still clears the gate, and an end-to-end EXTEND bundle through the real synthesizer that scored 0.91 before and blocks after. `docs/product/business-logic.md` now writes `max_score` out; leaving it undefined is what let the drift live. Full suite 1,881 passed, 3 xfailed. **Recalibrate the 0.9 floor** -- it was chosen against a formula that could only return 1.00 or block. |
+| Telemetry reported a routing decision the router did not make (BL-22) | Fixed 2026-08-30. `retrieve_context_for_query` annotated `local_or_escalated` from `score >= sufficiency_threshold` (0.8), while the gate that actually routes is `max(sufficiency_threshold, routing_quality_floor)` (0.9) *and* membership in the always-empty `local_answer_task_types` -- and it did so from a path that reaches no routing decision at all, which is where MCP and REST callers land. Every retrieval scoring 0.8 or better was tallied into the local-answer rate that substantiates the token-savings claim, while the true rate was zero. The verdict now comes from `Agent._smart_answer`, from the *same expression* that picks the branch, so the metric and the answer cannot disagree; retrieval annotates the sufficiency measurement and nothing else. Absent now means "nothing was answered", not "escalated". Pinned on both sides of the move: `tests/unit/service/test_telemetry_events.py` asserts a bare retrieval scoring 0.9 emits no verdict and leaves `local_routing_rate` at 0.0, and four parametrized rows in `tests/integration/test_agent_retrieval_contract.py` assert the logged verdict equals what `smart_answer` returned -- compared against the actual result, never against a recomputed threshold, which would have drifted the same way the metric did. Three mutation probes; the sharp one puts the old 0.8 expression in the *new* location and still reddens the two empty-allowlist rows. `docs/user/telemetry.md` documents the presence rule and guards its `jq` example with `has(...)`. Full suite 1,887 passed, 3 xfailed. |

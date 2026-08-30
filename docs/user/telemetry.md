@@ -32,7 +32,8 @@ through the CLI, the API, or MCP.
 | `retrieval_mode` | `semantic`, `lexical`, `exact`, or `none` |
 | `verbosity`, `max_tokens`, `total_tokens`, `truncated` | Requested and produced context size |
 | `sufficiency_score`, `sufficiency_bucket` | Context quality |
-| `local_or_escalated`, `is_stale` | Routing outcome and index freshness |
+| `is_stale` | Whether the index was behind the working tree |
+| `local_or_escalated` | The routing outcome — **present only when a router actually decided**, so `knowcode ask` carries it and a bare `retrieve_context` over MCP or REST does not. It is the same expression that picks the branch, so the metric and the answer cannot disagree ([BL-22](../engineering/backlog.md)). Absent is not `escalated`: it means nothing was answered. |
 | `selected_entity_count`, `evidence_count`, `error_count` | Result shape — counts, never ids |
 | `retrievals`, `duration_ms`, `outcome` | Attempts, latency, and `ok`/`error` |
 | `user_marked_miss` | Operator flag marking the answer as a miss; `telemetry show` totals these as "User-marked misses" |
@@ -132,8 +133,11 @@ and average sufficiency across all retained records:
 For per-record analysis, the file is ordinary JSONL:
 
 ```bash
-jq 'select(.event_type == "query") | {local_or_escalated, sufficiency_bucket, duration_ms}' knowcode_telemetry.jsonl
+jq 'select(.event_type == "query" and has("local_or_escalated")) | {local_or_escalated, sufficiency_bucket, duration_ms}' knowcode_telemetry.jsonl
 ```
+
+The `has(...)` guard keeps retrievals that answered nothing out of the tally;
+without it they read as escalations and depress the local rate.
 
 ## Upgrading from the pre-1 schema
 
