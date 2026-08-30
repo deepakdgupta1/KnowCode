@@ -34,6 +34,7 @@ See: docs/research/knowcode-architecture-synthesis.md §3.1
 
 from __future__ import annotations
 
+import itertools
 import json
 import math
 import sqlite3
@@ -60,6 +61,9 @@ from knowcode.utils.logger import get_logger
 from knowcode.utils.tokenizer import tokenize_code
 
 logger = get_logger(__name__)
+
+# One name per in-memory database, for the lifetime of the process (BL-7).
+_IN_MEMORY_SEQUENCE = itertools.count()
 
 # Columns selected for every CodeChunk hydration, in the order ``_row_to_chunk``
 # unpacks them. Keep the INSERT column list in the same relative order.
@@ -150,7 +154,14 @@ class SqliteChunkRepository(ChunkRepository):
         # connection of this one instance shares a single in-memory database
         # (file-backed databases are unaffected and keep their WAL isolation).
         self._in_memory = str(self._db_path) == ":memory:"
-        self._in_memory_uri = f"file:knowcode_chunk_{id(self)}?mode=memory&cache=shared"
+        # Named from a counter, never from ``id(self)``. CPython reuses an
+        # object's address as soon as the object at it is freed, and
+        # ``cache=shared`` then hands the next repository the dead one's
+        # database, rows and ``repo_root`` binding included (BL-7). Measured
+        # before this changed: 200 sequential repositories shared 4 names.
+        self._in_memory_uri = (
+            f"file:knowcode_chunk_{next(_IN_MEMORY_SEQUENCE)}?mode=memory&cache=shared"
+        )
 
         # Serialized writer connection (ADR 2). ``isolation_level="DEFERRED"``
         # is deferred mode so ``with self._writer_conn:`` issues a real
