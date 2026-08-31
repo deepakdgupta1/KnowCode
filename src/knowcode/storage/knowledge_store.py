@@ -21,6 +21,19 @@ from knowcode.utils.entity_identity import (
     normalize_file_identity,
 )
 
+#: Edge kinds that make one entity depend on another. Calls and imports were
+#: the original pair; inheritance, implementation and type use are structural
+#: dependencies all the same -- a subclass breaks when its base does -- so
+#: every dependency-flavoured surface walks all five. A tuple, not a set, so
+#: the SQL store can bind one placeholder per kind in a stable order.
+DEPENDENCY_EDGE_KINDS: tuple[RelationshipKind, ...] = (
+    RelationshipKind.CALLS,
+    RelationshipKind.IMPORTS,
+    RelationshipKind.INHERITS,
+    RelationshipKind.IMPLEMENTS,
+    RelationshipKind.USES_TYPE,
+)
+
 
 class KnowledgeStore:
     """In-memory knowledge store with JSON persistence."""
@@ -315,20 +328,29 @@ class KnowledgeStore:
         return None
 
     def get_dependencies(self, entity_id: str) -> list[Entity]:
-        """Get all dependencies of an entity (calls + imports)."""
+        """Get all dependencies of an entity.
+
+        Every dependency edge kind counts: calls, imports, inheritance,
+        implementation and type use. Answering with calls and imports only
+        reported a subclass as depending on nothing at all.
+        """
         dep_ids = set()
         for r in self.relationships:
             if r.source_id == entity_id:
-                if r.kind in {RelationshipKind.CALLS, RelationshipKind.IMPORTS}:
+                if r.kind in DEPENDENCY_EDGE_KINDS:
                     dep_ids.add(r.target_id)
         return [self.entities[did] for did in dep_ids if did in self.entities]
 
     def get_dependents(self, entity_id: str) -> list[Entity]:
-        """Get entities that depend on the given entity."""
+        """Get entities that depend on the given entity.
+
+        Every dependency edge kind counts: calls, imports, inheritance,
+        implementation and type use.
+        """
         dependent_ids = set()
         for r in self.relationships:
             if r.target_id == entity_id:
-                if r.kind in {RelationshipKind.CALLS, RelationshipKind.IMPORTS}:
+                if r.kind in DEPENDENCY_EDGE_KINDS:
                     dependent_ids.add(r.source_id)
         return [self.entities[did] for did in dependent_ids if did in self.entities]
 
@@ -377,7 +399,9 @@ class KnowledgeStore:
         """Multi-hop call graph traversal.
 
         Traverses the call graph from a starting entity to find all callers
-        or callees up to the specified depth.
+        or callees up to the specified depth. Only CALLS edges are walked:
+        this is the call graph. Dependency analysis (:meth:`get_impact`)
+        walks every dependency kind through :meth:`_traverse_edges`.
 
         Args:
             entity_id: Starting entity ID.
@@ -388,9 +412,38 @@ class KnowledgeStore:
         Returns:
             List of dicts with entity info and call_depth.
         """
+        return self._traverse_edges(
+            entity_id,
+            direction=direction,
+            kinds=(RelationshipKind.CALLS,),
+            depth=depth,
+            max_results=max_results,
+        )
+
+    def _traverse_edges(
+        self,
+        entity_id: str,
+        *,
+        direction: str,
+        kinds: tuple[RelationshipKind, ...],
+        depth: int,
+        max_results: int,
+    ) -> list[dict[str, Any]]:
+        """Multi-hop traversal over the given edge kinds.
+
+        Args:
+            entity_id: Starting entity ID.
+            direction: "callers" (edges into this) or "callees" (edges out).
+            kinds: Edge kinds eligible for a hop.
+            depth: Maximum traversal depth (1 = direct only).
+            max_results: Maximum results to return.
+
+        Returns:
+            List of dicts with entity info and call_depth.
+        """
         if direction not in ("callers", "callees"):
             raise ValueError(
-                f"direction must be 'callers' or 'callees', got {direction}"
+                f"direction must be 'callers' or 'callees', got: {direction}"
             )
 
         results: list[dict[str, Any]] = []
@@ -408,13 +461,13 @@ class KnowledgeStore:
                 next_ids = [
                     r.target_id
                     for r in self.relationships
-                    if r.source_id == current_id and r.kind == RelationshipKind.CALLS
+                    if r.source_id == current_id and r.kind in kinds
                 ]
             else:  # callers
                 next_ids = [
                     r.source_id
                     for r in self.relationships
-                    if r.target_id == current_id and r.kind == RelationshipKind.CALLS
+                    if r.target_id == current_id and r.kind in kinds
                 ]
 
             for next_id in next_ids:
@@ -445,8 +498,11 @@ class KnowledgeStore:
     def get_impact(self, entity_id: str, max_depth: int = 3) -> dict[str, Any]:
         """Analyze the impact of modifying or deleting an entity.
 
-        Returns direct dependents (callers, importers) and transitive dependents
-        up to max_depth, with a risk score based on impact breadth.
+        Returns direct dependents and transitive dependents up to max_depth,
+        with a risk score based on impact breadth. Every dependency edge kind
+        is walked -- callers, importers, subclasses, implementations and type
+        users -- because a base class change reaches its subclasses whether
+        or not anything calls anything.
 
         Args:
             entity_id: Entity to analyze impact for.
@@ -466,13 +522,21 @@ class KnowledgeStore:
             }
 
         # Get direct dependents (1-hop)
-        direct = self.trace_calls(
-            entity_id, direction="callers", depth=1, max_results=100
+        direct = self._traverse_edges(
+            entity_id,
+            direction="callers",
+            kinds=DEPENDENCY_EDGE_KINDS,
+            depth=1,
+            max_results=100,
         )
 
         # Get transitive dependents (multi-hop)
-        transitive = self.trace_calls(
-            entity_id, direction="callers", depth=max_depth, max_results=100
+        transitive = self._traverse_edges(
+            entity_id,
+            direction="callers",
+            kinds=DEPENDENCY_EDGE_KINDS,
+            depth=max_depth,
+            max_results=100,
         )
         # Remove direct from transitive
         direct_ids = {d["entity_id"] for d in direct}

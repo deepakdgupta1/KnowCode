@@ -238,3 +238,35 @@ def test_save_failure_during_serialization_preserves_the_previous_store(
 
     reloaded = KnowledgeStore.load(path)
     assert set(reloaded.entities) == {"file.py::foo"}
+
+
+def test_structural_edges_are_dependencies() -> None:
+    """INHERITS, IMPLEMENTS, USES_TYPE and IMPORTS edges count as dependencies."""
+    store = KnowledgeStore()
+
+    base = _make_entity("file.py::Base", EntityKind.CLASS, "Base")
+    sub = _make_entity("file.py::Sub", EntityKind.CLASS, "Sub")
+    user = _make_entity("file.py::user", EntityKind.FUNCTION, "user")
+    importer = _make_entity("other.py::importer", EntityKind.FUNCTION, "importer")
+    store.entities = {e.id: e for e in (base, sub, user, importer)}
+
+    store.relationships = [
+        Relationship(sub.id, base.id, RelationshipKind.INHERITS),
+        Relationship(user.id, base.id, RelationshipKind.USES_TYPE),
+        Relationship(importer.id, base.id, RelationshipKind.IMPORTS),
+    ]
+
+    assert [e.name for e in store.get_dependencies(sub.id)] == ["Base"]
+    assert {e.name for e in store.get_dependents(base.id)} == {
+        "Sub",
+        "user",
+        "importer",
+    }
+
+    impact = store.get_impact(base.id, max_depth=2)
+    assert impact["total_affected"] == 3
+    assert {d["name"] for d in impact["direct_dependents"]} == {
+        "Sub",
+        "user",
+        "importer",
+    }

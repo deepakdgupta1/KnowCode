@@ -29,7 +29,7 @@ from knowcode.data_models import (
     RelationshipKind,
 )
 from knowcode.errors import RepositoryClosedError
-from knowcode.storage.knowledge_store import KnowledgeStore
+from knowcode.storage.knowledge_store import DEPENDENCY_EDGE_KINDS, KnowledgeStore
 from knowcode.storage.rewrite_witness import digest_rows, rows_preserved
 from knowcode.storage.sqlite_like import LIKE_ESCAPE_CLAUSE, like_contains
 from knowcode.utils.entity_identity import (
@@ -80,14 +80,15 @@ _TARGETS_OF = f"""
 """
 
 _ONE_KIND = f"= {_KIND_OF}"
-_TWO_KINDS = f"IN ({_KIND_OF}, {_KIND_OF})"
+# One placeholder per dependency kind, bound in DEPENDENCY_EDGE_KINDS order.
+_DEPENDENCY_KINDS = f"IN ({', '.join([_KIND_OF] * len(DEPENDENCY_EDGE_KINDS))})"
 
 _CALLERS_SQL = _SOURCES_OF.format(distinct="", kinds=_ONE_KIND)
 _CALLEES_SQL = _TARGETS_OF.format(distinct="", kinds=_ONE_KIND)
 _PARENT_SQL = _SOURCES_OF.format(distinct="", kinds=_ONE_KIND)
 _CHILDREN_SQL = _TARGETS_OF.format(distinct="", kinds=_ONE_KIND)
-_DEPENDENCIES_SQL = _TARGETS_OF.format(distinct="DISTINCT", kinds=_TWO_KINDS)
-_DEPENDENTS_SQL = _SOURCES_OF.format(distinct="DISTINCT", kinds=_TWO_KINDS)
+_DEPENDENCIES_SQL = _TARGETS_OF.format(distinct="DISTINCT", kinds=_DEPENDENCY_KINDS)
+_DEPENDENTS_SQL = _SOURCES_OF.format(distinct="DISTINCT", kinds=_DEPENDENCY_KINDS)
 
 _IMPORTS_SQL = f"""
     SELECT t.entity_id AS target_id FROM relationships r
@@ -700,31 +701,31 @@ class SqliteKnowledgeStore:
         return [self._row_to_entity(row) for row in rows]
 
     def get_dependencies(self, entity_id: str) -> list[Entity]:
-        """Return entities this entity depends on."""
+        """Return entities this entity depends on.
+
+        Every dependency edge kind counts: calls, imports, inheritance,
+        implementation and type use.
+        """
         entity_id = self._store_id(entity_id)
         with self._read_lease() as conn:
             cursor = conn.execute(
                 _DEPENDENCIES_SQL,
-                (
-                    entity_id,
-                    RelationshipKind.CALLS.value,
-                    RelationshipKind.IMPORTS.value,
-                ),
+                (entity_id, *(kind.value for kind in DEPENDENCY_EDGE_KINDS)),
             )
             rows = cursor.fetchall()
         return [self._row_to_entity(row) for row in rows]
 
     def get_dependents(self, entity_id: str) -> list[Entity]:
-        """Return entities depending on this entity."""
+        """Return entities depending on this entity.
+
+        Every dependency edge kind counts: calls, imports, inheritance,
+        implementation and type use.
+        """
         entity_id = self._store_id(entity_id)
         with self._read_lease() as conn:
             cursor = conn.execute(
                 _DEPENDENTS_SQL,
-                (
-                    entity_id,
-                    RelationshipKind.CALLS.value,
-                    RelationshipKind.IMPORTS.value,
-                ),
+                (entity_id, *(kind.value for kind in DEPENDENCY_EDGE_KINDS)),
             )
             rows = cursor.fetchall()
         return [self._row_to_entity(row) for row in rows]
@@ -823,7 +824,30 @@ class SqliteKnowledgeStore:
         depth: int = 1,
         max_results: int = 50,
     ) -> list[dict[str, Any]]:
-        """Multi-hop call graph traversal using Recursive CTE."""
+        """Multi-hop call graph traversal using Recursive CTE.
+
+        Only CALLS edges are walked: this is the call graph. Dependency
+        analysis (:meth:`get_impact`) walks every dependency kind through
+        :meth:`_traverse_edges`.
+        """
+        return self._traverse_edges(
+            entity_id,
+            direction=direction,
+            kinds=(RelationshipKind.CALLS,),
+            depth=depth,
+            max_results=max_results,
+        )
+
+    def _traverse_edges(
+        self,
+        entity_id: str,
+        *,
+        direction: str,
+        kinds: tuple[RelationshipKind, ...],
+        depth: int,
+        max_results: int,
+    ) -> list[dict[str, Any]]:
+        """Multi-hop traversal over the given edge kinds using Recursive CTE."""
         entity_id = self._store_id(entity_id)
         if direction not in ("callers", "callees"):
             raise ValueError(
@@ -835,15 +859,22 @@ class SqliteKnowledgeStore:
         else:
             start_col, next_col = "target_id", "source_id"
 
+        kind_filter = (
+            f"= {_KIND_OF}"
+            if len(kinds) == 1
+            else f"IN ({', '.join([_KIND_OF] * len(kinds))})"
+        )
+        kind_values = tuple(kind.value for kind in kinds)
+
         query = f"""
             WITH RECURSIVE call_chain(endpoint, depth) AS (
                 SELECT {next_col}, 1 FROM relationships
-                WHERE {start_col} = {_EID_OF} AND kind = {_KIND_OF}
+                WHERE {start_col} = {_EID_OF} AND kind {kind_filter}
               UNION ALL
                 SELECT r.{next_col}, cc.depth + 1
                 FROM relationships r
                 JOIN call_chain cc ON r.{start_col} = cc.endpoint
-                WHERE r.kind = {_KIND_OF} AND cc.depth < ?
+                WHERE r.kind {kind_filter} AND cc.depth < ?
             )
             SELECT DISTINCT e.entity_id, e.name, e.qualified_name, e.kind,
                    e.file_path, e.line_start, MIN(cc.depth) as call_depth
@@ -860,8 +891,8 @@ class SqliteKnowledgeStore:
                 query,
                 (
                     entity_id,
-                    RelationshipKind.CALLS.value,
-                    RelationshipKind.CALLS.value,
+                    *kind_values,
+                    *kind_values,
                     depth,
                     max_results,
                 ),
@@ -882,7 +913,12 @@ class SqliteKnowledgeStore:
         return results
 
     def get_impact(self, entity_id: str, max_depth: int = 3) -> dict[str, Any]:
-        """Analyze the impact of modifying or deleting an entity."""
+        """Analyze the impact of modifying or deleting an entity.
+
+        Every dependency edge kind is walked -- callers, importers,
+        subclasses, implementations and type users -- because a base class
+        change reaches its subclasses whether or not anything calls anything.
+        """
         entity = self.get_entity(entity_id)
         if not entity:
             return {
@@ -893,11 +929,19 @@ class SqliteKnowledgeStore:
                 "error": "Entity not found",
             }
 
-        direct = self.trace_calls(
-            entity_id, direction="callers", depth=1, max_results=100
+        direct = self._traverse_edges(
+            entity_id,
+            direction="callers",
+            kinds=DEPENDENCY_EDGE_KINDS,
+            depth=1,
+            max_results=100,
         )
-        transitive = self.trace_calls(
-            entity_id, direction="callers", depth=max_depth, max_results=100
+        transitive = self._traverse_edges(
+            entity_id,
+            direction="callers",
+            kinds=DEPENDENCY_EDGE_KINDS,
+            depth=max_depth,
+            max_results=100,
         )
 
         direct_ids = {d["entity_id"] for d in direct}

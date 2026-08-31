@@ -750,3 +750,43 @@ def test_relationship_read_surface_is_pinned(tmp_path: Path) -> None:
         assert _read_surface(store) == EXPECTED_READ_SURFACE
     finally:
         store.close()
+
+
+def test_structural_edges_are_dependencies(tmp_path: Path) -> None:
+    """INHERITS, IMPLEMENTS, USES_TYPE and IMPORTS edges count as dependencies.
+
+    Calls and imports only used to answer, which reported a subclass as
+    depending on nothing at all (BL-30).
+    """
+    db_path = tmp_path / "knowledge.db"
+    store = SqliteKnowledgeStore(db_path)
+
+    base = _make_entity("file.py::Base", EntityKind.CLASS, "Base")
+    iface = _make_entity("file.py::Iface", EntityKind.CLASS, "Iface")
+    sub = _make_entity("file.py::Sub", EntityKind.CLASS, "Sub")
+    impl = _make_entity("file.py::Impl", EntityKind.CLASS, "Impl")
+    user = _make_entity("file.py::user", EntityKind.FUNCTION, "user")
+    importer = _make_entity("other.py::importer", EntityKind.FUNCTION, "importer")
+    for entity in (base, iface, sub, impl, user, importer):
+        store.add_entity(entity)
+
+    store.add_relationship(Relationship(sub.id, base.id, RelationshipKind.INHERITS))
+    store.add_relationship(Relationship(impl.id, iface.id, RelationshipKind.IMPLEMENTS))
+    store.add_relationship(Relationship(user.id, base.id, RelationshipKind.USES_TYPE))
+    store.add_relationship(Relationship(importer.id, base.id, RelationshipKind.IMPORTS))
+
+    assert [e.name for e in store.get_dependencies(sub.id)] == ["Base"]
+    assert [e.name for e in store.get_dependencies(impl.id)] == ["Iface"]
+    assert {e.name for e in store.get_dependents(base.id)} == {
+        "Sub",
+        "user",
+        "importer",
+    }
+
+    impact = store.get_impact(base.id, max_depth=2)
+    assert impact["total_affected"] == 3
+    assert {d["name"] for d in impact["direct_dependents"]} == {
+        "Sub",
+        "user",
+        "importer",
+    }
