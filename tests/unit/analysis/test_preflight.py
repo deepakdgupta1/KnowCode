@@ -450,6 +450,34 @@ class TestUnresolvedReferences:
         result = _score_unresolved_references(rels)
         assert result.score == 1.0
 
+    def test_unresolved_evidence_breaks_down_by_symbol_class(self) -> None:
+        """The evidence names how much of each hole is receiver-qualified.
+
+        A single unresolved number merges two very different defects: a bare
+        name that failed to link, and a ``receiver.method`` call whose binding
+        needs dataflow this graph does not have. The evidence split lets a
+        reader tell one from the other without re-deriving it from the store.
+        """
+        dotted = build_unresolved_reference_id(
+            "python", "/repo/app.py", "mod.f", "obj.run"
+        )
+        bare = build_unresolved_reference_id(
+            "python", "/repo/app.py", "mod.f", "helper"
+        )
+        ext = build_external_reference_id("builtins", "len")
+        rels = [
+            Relationship("a", "b", RelationshipKind.CALLS),
+            Relationship("f", dotted, RelationshipKind.CALLS),
+            Relationship("g", bare, RelationshipKind.CALLS),
+            Relationship("h", bare, RelationshipKind.CALLS),
+            Relationship("i", ext, RelationshipKind.CALLS),
+        ]
+        result = _score_unresolved_references(rels)
+        assert result.evidence["unresolved"] == 3
+        assert result.evidence["unresolved_attribute_calls"] == 1
+        assert result.evidence["unresolved_bare_names"] == 2
+        assert result.evidence["external_targets"] == 1
+
     def test_no_resolvable(self) -> None:
         rels = [
             Relationship("a", "b", RelationshipKind.CONTAINS),

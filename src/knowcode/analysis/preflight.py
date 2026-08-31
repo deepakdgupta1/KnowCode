@@ -683,8 +683,22 @@ def _score_unresolved_references(
             evidence={"total_resolvable": 0, "unresolved": 0},
         )
 
-    unresolved = sum(1 for r in resolvable if _target_is_unresolved(r.target_id))
+    unresolved_targets = [
+        r.target_id for r in resolvable if _target_is_unresolved(r.target_id)
+    ]
+    unresolved = len(unresolved_targets)
     resolved_ratio = 1.0 - (unresolved / total)
+
+    # A single number merges two different defects: a bare name that failed
+    # to link is fixable resolution work; a receiver-qualified symbol needs
+    # dataflow the graph does not have. The split keeps the evidence honest
+    # about both without changing what counts as resolved.
+    attribute_calls = sum(1 for t in unresolved_targets if _is_attribute_symbol(t))
+    external = sum(
+        1
+        for r in resolvable
+        if classify_endpoint_id(r.target_id) == EndpointKind.EXTERNAL
+    )
 
     return DimensionScore(
         dimension="unresolved_references",
@@ -695,8 +709,21 @@ def _score_unresolved_references(
             "total_resolvable": total,
             "unresolved": unresolved,
             "resolution_rate": round(resolved_ratio, 3),
+            "unresolved_attribute_calls": attribute_calls,
+            "unresolved_bare_names": unresolved - attribute_calls,
+            "external_targets": external,
         },
     )
+
+
+def _is_attribute_symbol(target_id: str) -> bool:
+    """Whether an unresolved target's symbol is receiver-qualified."""
+    if target_id.startswith("ref::"):
+        return "." in target_id[len("ref::") :]
+    parts = target_id.split("::")
+    if len(parts) == 5:
+        return "." in parts[4]
+    return False
 
 
 # ──────────────────────────────────────────────────────────────────────
