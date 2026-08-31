@@ -4,7 +4,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from knowcode.data_models import Entity, ParseResult, Relationship
+from knowcode.data_models import (
+    Entity,
+    EntityKind,
+    ParseResult,
+    Relationship,
+    RelationshipKind,
+)
 from knowcode.parsers import MarkdownParser, PythonParser, RstParser, YamlParser
 from knowcode.parsers.javascript_parser import JavaScriptParser
 from knowcode.parsers.typescript_parser import TypeScriptParser
@@ -15,7 +21,29 @@ from knowcode.indexing.scanner import FileInfo, Scanner
 from knowcode.analysis.signals import CoverageProcessor
 from knowcode.analysis.temporal import TemporalAnalyzer
 from knowcode.analysis.behavior import annotate_entity_behavior
-from knowcode.utils.entity_identity import ensure_entity_content_hash
+from knowcode.utils.entity_identity import (
+    build_external_reference_id,
+    ensure_entity_content_hash,
+)
+
+# Edges whose target is a callee or base name, where resolution matters.
+_REFERENCE_KINDS = frozenset({RelationshipKind.CALLS, RelationshipKind.INHERITS})
+
+# Entity kinds a name-based link may point at; modules, documents, and
+# sections are containers, not callees.
+_LINKABLE_KINDS = frozenset({EntityKind.FUNCTION, EntityKind.METHOD, EntityKind.CLASS})
+
+# Maps a repository file suffix onto the language component of the canonical
+# unresolved ids, so name links never cross languages.
+_LANGUAGE_BY_SUFFIX = {
+    ".py": "python",
+    ".js": "javascript",
+    ".jsx": "javascript",
+    ".ts": "typescript",
+    ".tsx": "typescript",
+    ".rs": "rust",
+    ".vue": "vue",
+}
 
 
 class GraphBuilder:
@@ -103,8 +131,11 @@ class GraphBuilder:
             self.parse_results.append(parse_result)
             self._merge_result(parse_result)
 
-        # Resolve references after all files are parsed
+        # Resolve references after all files are parsed: name-based linking
+        # first, then binding-driven classification, then scoped name links.
         self._resolve_references()
+        self._resolve_import_bound_references()
+        self._resolve_scoped_unresolved_references()
 
         return self
 
@@ -152,7 +183,8 @@ class GraphBuilder:
         Some parsers (like Tree-sitter) may produce relationships pointing to
         'ref::SomeName' because they don't know the full qualified name at parse time.
         This pass iterates through all relationships and attempts to link these
-        placeholders to concrete Entity IDs in the graph.
+        placeholders to concrete Entity IDs in the graph. An unlinked base whose
+        edge carries an import origin is classified through that origin.
         """
         resolved_relationships: list[Relationship] = []
 
@@ -171,12 +203,186 @@ class GraphBuilder:
                         )
                     )
                 else:
-                    # Keep as unresolved reference
-                    resolved_relationships.append(rel)
+                    rewritten = self._rewrite_bound_reference(rel)
+                    resolved_relationships.append(rewritten if rewritten else rel)
             else:
                 resolved_relationships.append(rel)
 
         self.relationships = resolved_relationships
+
+    def _resolve_import_bound_references(self) -> None:
+        """Classify unresolved edges whose metadata carries an import binding.
+
+        The Python parser records where a receiver (``json.loads``) or an
+        imported name (``from os.path import join``) came from. Only the
+        builder can decide whether that module lives in this repository: an
+        in-repo module links to the unique entity carrying the symbol — never
+        a guess — and any other module becomes ``external::<module>::<symbol>``,
+        an answer rather than a hole.
+        """
+        paths = {
+            Path(entity.location.file_path).as_posix()
+            for entity in self.entities.values()
+        }
+        module_files: dict[str, set[str]] = {}
+        by_last_name: dict[str, list[tuple[str, str]]] = {}
+        for entity_id, entity in self.entities.items():
+            last = entity.qualified_name.rsplit(".", 1)[-1]
+            by_last_name.setdefault(last, []).append(
+                (Path(entity.location.file_path).as_posix(), entity_id)
+            )
+
+        def candidates_for(module: str) -> set[str]:
+            cached = module_files.get(module)
+            if cached is None:
+                rel = module.replace(".", "/")
+                suffixes = (f"{rel}.py", f"{rel}/__init__.py")
+                cached = {
+                    path
+                    for path in paths
+                    if any(
+                        path == suffix or path.endswith(f"/{suffix}")
+                        for suffix in suffixes
+                    )
+                }
+                module_files[module] = cached
+            return cached
+
+        resolved: list[Relationship] = []
+        for rel in self.relationships:
+            if (
+                rel.kind in _REFERENCE_KINDS
+                and rel.target_id.startswith("unresolved::")
+                and (
+                    "receiver_module" in rel.metadata or "imported_from" in rel.metadata
+                )
+            ):
+                rewritten = self._rewrite_bound_reference(
+                    rel, candidates_for, by_last_name
+                )
+                resolved.append(rewritten if rewritten else rel)
+            else:
+                resolved.append(rel)
+        self.relationships = resolved
+
+    def _rewrite_bound_reference(
+        self,
+        rel: Relationship,
+        candidates_for=None,
+        by_last_name: dict[str, list[tuple[str, str]]] | None = None,
+    ) -> Relationship | None:
+        """Rewrite one import-bound edge, or return None to keep it verbatim.
+
+        The module comes from the edge's binding metadata. A module outside
+        the repository yields an ``external::`` target. A module inside the
+        repository yields a link only when exactly one entity in the module's
+        files carries the symbol; ambiguity keeps the hole.
+        """
+        module = rel.metadata.get("receiver_module") or rel.metadata.get(
+            "imported_from"
+        )
+        if module is None:
+            return None
+        symbol = rel.metadata.get("imported_symbol")
+        if symbol is None:
+            raw = rel.target_id.split("::")[-1]
+            # A receiver edge carries the whole callee; the receiver itself is
+            # not part of the symbol (``np.array`` on module ``numpy`` is
+            # ``array``).
+            symbol = raw.split(".", 1)[1] if "." in raw else raw
+
+        if candidates_for is None:
+            paths = {
+                Path(entity.location.file_path).as_posix()
+                for entity in self.entities.values()
+            }
+            rel_suffix = module.replace(".", "/")
+            suffixes = (f"{rel_suffix}.py", f"{rel_suffix}/__init__.py")
+            candidates = {
+                path
+                for path in paths
+                if any(
+                    path == suffix or path.endswith(f"/{suffix}") for suffix in suffixes
+                )
+            }
+        else:
+            candidates = candidates_for(module)
+
+        if not candidates:
+            return Relationship(
+                source_id=rel.source_id,
+                target_id=build_external_reference_id(module, symbol),
+                kind=rel.kind,
+                metadata=rel.metadata,
+            )
+
+        if by_last_name is None:
+            by_last_name = {}
+            for entity_id, entity in self.entities.items():
+                last = entity.qualified_name.rsplit(".", 1)[-1]
+                by_last_name.setdefault(last, []).append(
+                    (Path(entity.location.file_path).as_posix(), entity_id)
+                )
+        matches = [
+            entity_id
+            for path, entity_id in by_last_name.get(symbol, [])
+            if path in candidates
+        ]
+        if len(matches) == 1:
+            return Relationship(
+                source_id=rel.source_id,
+                target_id=matches[0],
+                kind=rel.kind,
+                metadata=rel.metadata,
+            )
+        return None
+
+    def _resolve_scoped_unresolved_references(self) -> None:
+        """Link bare unresolved names to a unique same-language entity.
+
+        Only edges without binding knowledge and without a receiver arrive
+        here: a bare callee the file did not define — typically a relative
+        import or a same-package call. A link happens only when exactly one
+        linkable entity of the same language carries that name in the whole
+        graph; ambiguity keeps the hole rather than guessing.
+        """
+        name_index: dict[tuple[str, str], list[str]] = {}
+        for entity_id, entity in self.entities.items():
+            if entity.kind not in _LINKABLE_KINDS:
+                continue
+            language = _LANGUAGE_BY_SUFFIX.get(
+                Path(entity.location.file_path).suffix, ""
+            )
+            if language:
+                name_index.setdefault((language, entity.name), []).append(entity_id)
+
+        resolved: list[Relationship] = []
+        for rel in self.relationships:
+            target = rel.target_id
+            if (
+                rel.kind not in _REFERENCE_KINDS
+                or not target.startswith("unresolved::")
+                or rel.metadata.get("receiver_unknown")
+            ):
+                resolved.append(rel)
+                continue
+            parts = target.split("::")
+            if len(parts) != 5 or "." in parts[4]:
+                resolved.append(rel)
+                continue
+            matches = name_index.get((parts[1], parts[4]), [])
+            if len(matches) == 1:
+                resolved.append(
+                    Relationship(
+                        source_id=rel.source_id,
+                        target_id=matches[0],
+                        kind=rel.kind,
+                        metadata=rel.metadata,
+                    )
+                )
+            else:
+                resolved.append(rel)
+        self.relationships = resolved
 
     def _find_entity_by_name(self, name: str) -> Optional[str]:
         """Find entity ID by name or qualified name."""
