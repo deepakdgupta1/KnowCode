@@ -422,10 +422,12 @@ class TestUnresolvedReferences:
         assert result.score == 0.5
 
     def test_canonical_unresolved_ids_count_as_unresolved(self) -> None:
-        """Current parsers emit scoped ``unresolved::`` ids, not ``ref::``.
+        """The scoped ``unresolved::`` spelling scores, not just ``ref::``.
 
-        Matching only the legacy prefix scored a graph with three unresolved
-        edges out of five as perfectly resolved (BL-28).
+        Rust, JavaScript, TypeScript and Vue mint ``unresolved::`` ids;
+        matching only the ``ref::`` spelling that Python and Java emit
+        scored a graph with three unresolved edges out of five as perfectly
+        resolved (BL-28).
         """
         unres = build_unresolved_reference_id(
             "python", "/repo/app.py", "mod.f", "Missing"

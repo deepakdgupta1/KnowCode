@@ -6,7 +6,7 @@ from typing import Any, Optional
 from knowcode.service import KnowCodeService
 from knowcode.config import AppConfig, ModelConfig
 from knowcode.llm.rate_limiter import RateLimiter
-from knowcode.llm.routing import litellm_base_url
+from knowcode.llm.routing import DEFAULT_LITELLM_BASE_URL
 from knowcode.llm.prompt_contract import (
     build_prompt_request,
     format_provider_error,
@@ -106,7 +106,7 @@ class Agent:
                 # GLM traffic belongs on the local LiteLLM proxy. With the
                 # override unset the proxy address is the default; None here
                 # used to send a GLM key to api.openai.com for an opaque 401.
-                base_url = os.environ.get("GLM_BASE_URL") or litellm_base_url()
+                base_url = os.environ.get("GLM_BASE_URL") or DEFAULT_LITELLM_BASE_URL
 
             client = _create_openai_client(api_key=api_key, base_url=base_url)
 

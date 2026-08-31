@@ -639,12 +639,15 @@ def _score_behavior_analyzability(
 def _target_is_unresolved(target_id: str) -> bool:
     """Classify one edge target as resolved or not.
 
-    Current parsers emit canonical unresolved ids through
-    ``build_unresolved_reference_id`` -- ``unresolved::<language>::<file>::
-    <scope>::<symbol>`` -- which ``classify_endpoint_id`` recognises. The
-    bare ``ref::Name`` form is the legacy spelling older graphs still carry;
-    matching only that prefix scored every canonical unresolved edge as
-    resolved and reported a perfect resolution rate on graphs full of holes.
+    Two unresolved spellings are live in the graph today, not one legacy
+    and one current. The scoped canonical form -- ``unresolved::<language>
+    ::<file>::<scope>::<symbol>`` from ``build_unresolved_reference_id`` --
+    is what the Rust, JavaScript, TypeScript and Vue parsers mint. The bare
+    ``ref::Name`` form is what the Python and Java parsers emit at parse
+    time; ``GraphBuilder._resolve_references`` links what it can and keeps
+    the rest verbatim. Matching only one spelling scored every edge of the
+    other as resolved and reported a perfect resolution rate on graphs
+    full of holes.
     """
     if classify_endpoint_id(target_id) == EndpointKind.UNRESOLVED:
         return True
@@ -656,11 +659,11 @@ def _score_unresolved_references(
 ) -> DimensionScore:
     """Fraction of references that remain unresolved after graph building.
 
-    An unresolved target -- the canonical ``unresolved::`` ids and the legacy
-    ``ref::`` form -- means the ``GraphBuilder`` could not resolve a call or
-    type reference to a concrete entity in the graph. ``external::`` targets
-    are resolved on purpose: the symbol is known to live outside the
-    repository.
+    An unresolved target -- the scoped ``unresolved::`` ids and the bare
+    ``ref::`` markers, both still emitted by current parsers -- means the
+    ``GraphBuilder`` could not resolve a call or type reference to a
+    concrete entity in the graph. ``external::`` targets are resolved on
+    purpose: the symbol is known to live outside the repository.
     """
     # Only consider relationship kinds where resolution matters
     resolvable_kinds = {

@@ -1430,7 +1430,10 @@ class KnowCodeService:
             raise ValueError(
                 "Index embedding configuration mismatch. "
                 f"{details}. Rebuild the semantic index with `knowcode index` "
-                "using the same embedding model and settings."
+                "using the same embedding model and settings. (An index built "
+                "offline before the dummy fallback was labelled [BL-27] "
+                "records the configured model rather than the fallback; one "
+                "rebuild re-labels it.)"
             )
 
     def analyze(

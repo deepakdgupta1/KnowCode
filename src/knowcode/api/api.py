@@ -23,11 +23,47 @@ _service: Optional[KnowCodeService] = None
 # over-counts by roughly 4x depending on the language, which is how a
 # 200-token request used to ship a 216-character chunk and call it within
 # budget.
-_TOKEN_COUNTER = TokenCounter()
+#
+# The counter is loaded lazily, not at import: tiktoken fetches its encoding
+# blob on first construction, and doing that while the module imports would
+# make a cold, offline machine unable to import the API at all. If the
+# encoding genuinely cannot be loaded, fall back to a quarter-of-characters
+# estimate -- a coarse cap still holds the budget, which is what the
+# endpoint promises, and the alternative is failing the request over a
+# tokenizer.
+_TOKEN_COUNTER: Optional[TokenCounter] = None
+
+
+def _load_token_counter() -> Optional[TokenCounter]:
+    """Return the shared counter, or None when the encoding cannot load."""
+    global _TOKEN_COUNTER
+    if _TOKEN_COUNTER is None:
+        try:
+            _TOKEN_COUNTER = TokenCounter()
+        except Exception:  # noqa: BLE001 - cold offline machine, no BPE blob
+            return None
+    return _TOKEN_COUNTER
+
+
+def _count_tokens(text: str) -> int:
+    """Count tokens in text, estimating only when tiktoken cannot load."""
+    counter = _load_token_counter()
+    if counter is None:
+        return len(text) // 4
+    return counter.count_tokens(text)
+
+
+def _truncate_to_tokens(text: str, max_tokens: int) -> str:
+    """Truncate text to max_tokens, estimating only when tiktoken cannot load."""
+    counter = _load_token_counter()
+    if counter is None:
+        return text[: max_tokens * 4]
+    return counter.truncate(text, max_tokens)
+
 
 #: Smallest token remainder worth a truncated chunk. Below this the caller
 #: gets fewer, whole chunks instead of a sliver of the next one. Replaces a
-#: 100-*character* gate that meant something different on every input.
+# 100-*character* gate that meant something different on every input.
 _MIN_TRUNCATABLE_TOKENS = 25
 
 
@@ -228,14 +264,14 @@ def query_context(
     total_tokens = 0
     capped_results: list[ChunkResult] = []
     for result_chunk in results:
-        chunk_tokens = _TOKEN_COUNTER.count_tokens(result_chunk.content)
+        chunk_tokens = _count_tokens(result_chunk.content)
         if total_tokens + chunk_tokens > max_tokens_budget:
             remaining = max_tokens_budget - total_tokens
             if remaining > _MIN_TRUNCATABLE_TOKENS:
                 capped_results.append(
                     ChunkResult(
                         id=result_chunk.id,
-                        content=_TOKEN_COUNTER.truncate(result_chunk.content, remaining)
+                        content=_truncate_to_tokens(result_chunk.content, remaining)
                         + "\n... [TRUNCATED]",
                         entity_id=result_chunk.entity_id,
                         score=result_chunk.score,

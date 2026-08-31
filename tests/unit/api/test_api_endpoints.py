@@ -388,3 +388,36 @@ def test_freshness_endpoint() -> None:
     assert resp.is_stale is False
     # Correct assertion
     assert resp.last_index_rebuild == 200
+
+
+def test_query_context_caps_by_estimate_when_tiktoken_cannot_load(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A tokenizer that cannot load degrades to an estimate, not a failure."""
+    long_content = " ".join(f"word{i}" for i in range(90))
+
+    class UnavailableTokenCounter:
+        def __init__(self) -> None:
+            raise RuntimeError("encoding blob unavailable offline")
+
+    monkeypatch.setattr(api, "TokenCounter", UnavailableTokenCounter)
+    monkeypatch.setattr(api, "_TOKEN_COUNTER", None)
+
+    req = _mock_request()
+    service = DummyService()
+    service._engine._chunks = [
+        CodeChunk(id="c1", entity_id="e1", content=long_content, tokens=[])
+    ]
+    service._engine.chunk_repo = DummyChunkRepo(service._engine._chunks)
+
+    resp = api.query_context(
+        request=req,
+        payload=api.QueryRequest(query="hi", limit=1, max_tokens=30),
+        service=service,  # type: ignore
+    )
+
+    assert resp.chunks, "the response degrades to an estimated cap, not an error"
+    served = resp.chunks[0].content
+    assert served.endswith("\n... [TRUNCATED]")
+    body = served[: -len("\n... [TRUNCATED]")]
+    assert len(body) <= 30 * 4

@@ -96,6 +96,9 @@ class RetrievalOrchestrator:
     ) -> dict[str, Any]:
         """Retrieve an evidence-backed context bundle for a query.
 
+        ``max_tokens`` is a hard cap: per-entity budgets are an even split
+        of it, and once it is spent no further bundle is synthesized.
+
         The whole retrieval runs inside one telemetry query scope (Step 20).
         The scope is joined rather than opened when a caller above already has
         one, so an agent's three retrieval attempts stay one counted query, and
