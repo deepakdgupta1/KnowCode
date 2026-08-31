@@ -88,6 +88,12 @@ month-old code against a fresh store with no signal of the drift
   alone reinstalls from the cached wheel and reproduces the staleness:
   `uv cache clean knowcode && uv tool install --force --python 3.11 '<checkout>[mcp]'`.
 
+Drift is no longer silent, though ([BL-32](../engineering/backlog.md), fixed):
+every generation manifest names the code that built it, `knowcode doctor`
+fails a Builder drift check when the running code disagrees with the store,
+and the server prints a one-line warning banner at startup. The launch shapes
+above remain the cure; the check is what tells you that you need it.
+
 Restart the IDE or agent host after changing its MCP config. On macOS, if
 the stdio server is not spawned correctly from a GUI client, the wrapper
 script `bin/knowcode-mcp.sh` works around provenance checks.
