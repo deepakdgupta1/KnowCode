@@ -30,12 +30,46 @@ measured reason not to build something is worth more than silence.
 
 ## Open
 
-Nothing. Every item filed here has been fixed or rejected with a measured reason. The Closed table below is the record.
+### BL-32 - An MCP server installed from a local checkout keeps serving the code it was built with
+
+**Severity:** High — a real defect with a workaround. **Found:** 2026-08-31,
+while reconciling the quality audit's 84% unresolved-reference figure with
+`knowcode_inspect preflight`, which reported 99.75% resolved on the same graph.
+
+`uvx --from <checkout>[mcp] knowcode mcp-server` does not build from the
+checkout on each launch: uv resolves the requirement onto the named tool
+environment at `~/.local/share/uv/tools/knowcode` and reuses that environment
+indefinitely for a path source. On this machine the MCP server kept executing
+pre-audit code for hours while the repository moved fifteen commits ahead, and
+reported the pre-BL-28 perfect resolution rate — the exact false green the
+audit had just closed — over a graph the repository's own build scored 0.158.
+Nothing signalled the mismatch: the server never compares its own build
+against the store it serves, and `--refresh` does not rebuild a tool
+environment.
+
+Reproduce: edit `src/knowcode/analysis/preflight.py` in a checkout, run
+`uvx --from '<checkout>[mcp]' knowcode --version`, then grep for the edit
+under `~/.local/share/uv/tools/knowcode/lib/*/site-packages/knowcode/` — it
+will not be there.
+
+Workaround until the guard ships: after pulling, `uv cache clean knowcode`
+and reinstall (`uv tool install --force --python 3.11 '<checkout>[mcp]'`) —
+the clean is not optional, `--force` alone reinstalls from the cached wheel
+and reproduces the staleness — or run the server from the checkout's own venv
+(`bin/knowcode-mcp.sh`), which always executes the working tree.
+
+Deliberately not fixed alongside BL-31: the durable fix is a readiness/doctor
+check that fingerprints the running package against the store's generation
+and fails loudly on drift, plus a documented launch path that cannot go stale.
+That is new surface in `readiness.py`/`doctor`, not a one-line repair, and
+rushing it at the tail of a resolution fix is how the audit's other findings
+happened.
 
 ## Closed
 
 | Item | Resolution |
 | --- | --- |
+| 84% of this repository's own call edges were unresolved holes (BL-31) | Fixed 2026-08-31, the day the corrected preflight exposed it. BL-28 made the measurement honest; the honest measurement then said 15,648 of 18,584 resolvable edges (84.2%, score 0.158) pointed nowhere — the graph `trace_calls` and dependency expansion walk was mostly missing on the project's own code. The holes decomposed into classes with different owners: 2,928 builtin calls (`len`, `print`, `ValueError`) recorded as holes although the symbol is known to live outside the repository; 2,557 bare names whose entity existed in the graph but was never linked, because `_resolve_references` only inspected `ref::` spellings while current parsers mint scoped `unresolved::` ids; 1,214 `self.method()` calls bindable from the caller's own scope; and roughly 9,000 receiver-qualified calls (`json.loads`, `click.echo`, `m.get`) whose import bindings the parser knew and discarded. Three fixes shipped. The Python parser records what the file already knows: builtins become `external::builtins::*`, `self.m()` binds to the sibling method, and import bindings — plus a `receiver_unknown` flag for `expr.attr()` calls — ride on the edge as metadata. `GraphBuilder` classifies those bindings with repository knowledge: an in-repo module links the unique entity carrying the symbol, never a guess; any other module becomes `external::<module>::<symbol>`, an answer rather than a hole; and a bare name links only when exactly one linkable same-language entity carries it. Preflight's evidence now splits `unresolved_attribute_calls` from `unresolved_bare_names` and counts `external_targets`. Resolution rate 0.158 → 0.555 (10,449/18,818; 4,591 external answers); the remaining 8,369 holes are 7,206 receiver-unknown calls — binding those needs the type inference this graph deliberately does not do — and 1,163 ambiguous or unknown bare names. Pinned by thirteen tests in `tests/unit/parsers/test_python_parser.py`, twelve in `tests/unit/indexing/test_graph_builder_unresolved.py` (ambiguity, cross-language, and receiver-expression guards included), and the evidence-split test in `tests/unit/analysis/test_preflight.py`. Full suite 2,053 passed. |
 | Dependency and impact analysis ignored structural dependencies (BL-30) | Fixed 2026-08-31, the day the quality audit filed it. `get_dependencies` and `get_dependents` walked CALLS+IMPORTS only, and `get_impact` was built on callers-only `trace_calls` despite its own docstring promising importers — a real `Sub --INHERITS--> Base` edge produced empty dependency and dependent lists and `total_affected=0`, so impact analysis was blind to exactly the change a base class is most exposed to. One shared `DEPENDENCY_EDGE_KINDS` tuple (CALLS, IMPORTS, INHERITS, IMPLEMENTS, USES_TYPE) in `knowledge_store.py` now drives both stores: the SQL fragment binds one placeholder per kind in a stable order, and the traversal CTE is generalized into `_traverse_edges` so impact walks all five kinds while `trace_calls` remains the call graph it documents itself to be — the API endpoint and MCP tool over it are unchanged. Pinned by `test_structural_edges_are_dependencies` against both the in-memory and SQLite stores in `tests/unit/storage/`, asserting the inheritance, implementation, type-use and import edges appear in dependencies, dependents *and* impact. Full suite 2,026 passed. |
 | Token budgets were not enforced end-to-end (BL-29) | Fixed 2026-08-31. Two halves of one contract. The orchestrator's 200-token per-entity floor let `max_tokens=300` over 3 entities become three 200-token bundles reporting `total_tokens=600`; the REST `/context/query` endpoint did not pass its budget into retrieval at all, then capped the response by counting *characters* against a token budget — a 200-token request shipped a 216-character truncated chunk and called it within budget. The floor is gone: the budget is split as `max(1, min(2000, max_tokens // limit_entities))`, and the bundle loop asks each entity for no more than the total has left, dropping entities the budget cannot pay for and flagging `truncated` when it does — so a caller-supplied `per_entity_max_tokens` can no longer outbid the total either. The endpoint passes `max_tokens` into retrieval and caps chunk content with the same tiktoken `TokenCounter` the synthesizer uses, with a 25-token minimum remainder below which it ships fewer whole chunks instead of a sliver. Pinned by `tests/unit/retrieval/test_orchestrator_budget.py` (small budget split not overshot, explicit allowance capped by the total, ordinary 3000-over-3 budget unchanged) and three endpoint tests in `tests/unit/api/test_api_endpoints.py`. Full suite 2,026 passed. |
 | Preflight scored canonical unresolved references as resolved (BL-28) | Fixed 2026-08-31. `_score_unresolved_references` matched only the `ref::` spelling, and that is not the one most parsers leave behind: Rust, JavaScript, TypeScript and Vue mint `build_unresolved_reference_id`'s scoped `unresolved::<language>::<file>::<scope>::<symbol>` targets, while Python and Java emit bare `ref::Name` markers that `GraphBuilder` resolves what it can and keeps verbatim — on a mixed-language fixture with 3 of 5 resolvable edges unresolved, preflight reported 5/5 resolved, score 1.0, and the recommendation that names the problem never fired. Targets are now classified through `classify_endpoint_id`: `EndpointKind.UNRESOLVED` and the `ref::` spelling both count, and `external::` targets stay resolved on purpose, because a symbol known to live outside the repository is an answer, not a hole. The same fixture now scores 0.4. Pinned by two tests beside the legacy-prefix ones in `tests/unit/analysis/test_preflight.py`, one holding the external-target half against a future "fix" that counts them. Full suite 2,026 passed. |

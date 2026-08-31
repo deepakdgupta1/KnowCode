@@ -73,6 +73,21 @@ Pin a single repository instead by passing an absolute `--store`:
 }
 ```
 
+## Running from a checkout
+
+A server launched with `uvx --from <checkout>[mcp]` does **not** pick up edits
+in the checkout: uv resolves that requirement onto a cached tool environment
+(`~/.local/share/uv/tools/knowcode`) and reuses it indefinitely for a path
+source, and `--refresh` does not rebuild it. The server will happily run
+month-old code against a fresh store with no signal of the drift
+([BL-32](../engineering/backlog.md)). Two launch shapes avoid the trap:
+
+- The repository's own venv, which always executes the working tree:
+  `bin/knowcode-mcp.sh mcp-server --store /absolute/path/to/repository`.
+- A reinstall after each pull — the cache clean is load-bearing, `--force`
+  alone reinstalls from the cached wheel and reproduces the staleness:
+  `uv cache clean knowcode && uv tool install --force --python 3.11 '<checkout>[mcp]'`.
+
 Restart the IDE or agent host after changing its MCP config. On macOS, if
 the stdio server is not spawned correctly from a GUI client, the wrapper
 script `bin/knowcode-mcp.sh` works around provenance checks.

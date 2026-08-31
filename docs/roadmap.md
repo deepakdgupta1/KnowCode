@@ -408,11 +408,17 @@ The next trust release ships only when all of the following are true:
 4. Freshness and language-coverage checks report no unresolved correctness
    warnings for the target repository.
 5. No `Critical` item is open in the [engineering backlog](engineering/backlog.md).
-   None is open: BL-26 through BL-30, opened and closed on 2026-08-31 by the
-   model-traffic and quality audit, were the last five. (Read the backlog
-   rather than trusting this line: it named `BL-1` long after Phase B fixed
-   it on 2026-08-29, and it claimed nothing was open right up until an audit
-   found more.)
+   None is: the only open item is [BL-32](engineering/backlog.md) (High, the
+   MCP tool environment serving stale code), and it is not Critical.
+   (Read the backlog rather than trusting this line: it named `BL-1` long
+   after Phase B fixed it on 2026-08-29, and it claimed nothing was open
+   right up until an audit found more.)
+6. Preflight on this repository's own graph keeps the unresolved-reference
+   resolution rate at 0.555 or better — the [BL-31](engineering/backlog.md)
+   baseline, ratcheted. Of the 8,369 holes at that baseline, 7,206 were
+   receiver-unknown calls that need type inference to bind; a change to the
+   rate in either direction updates the baseline here in the same commit that
+   moved it.
 
 P3 through P7 improve efficiency, adoption, and footprint, but they are not
 permitted to weaken these release gates.
