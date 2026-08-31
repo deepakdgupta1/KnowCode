@@ -11,11 +11,24 @@ from knowcode.service import KnowCodeService
 from knowcode.data_models import TaskType
 from knowcode.api.rate_limit import limiter, STANDARD_LIMIT, EXPENSIVE_LIMIT
 from knowcode.errors import KnowCodePrerequisiteError
+from knowcode.utils.token_counter import TokenCounter
 
 router = APIRouter(prefix="/api/v1")
 
 # Global service instance (will be initialized by main.py)
 _service: Optional[KnowCodeService] = None
+
+# The budget is denominated in tokens everywhere upstream of the response, so
+# the response is capped in tokens too. Counting characters both under- and
+# over-counts by roughly 4x depending on the language, which is how a
+# 200-token request used to ship a 216-character chunk and call it within
+# budget.
+_TOKEN_COUNTER = TokenCounter()
+
+#: Smallest token remainder worth a truncated chunk. Below this the caller
+#: gets fewer, whole chunks instead of a sliver of the next one. Replaces a
+#: 100-*character* gate that meant something different on every input.
+_MIN_TRUNCATABLE_TOKENS = 25
 
 
 def get_service() -> KnowCodeService:
@@ -146,8 +159,12 @@ def query_context(
     # the next generation's chunks and silently drop the misses.
     with service.generation_lease():
         try:
+            # The requested budget travels into retrieval, so entity selection
+            # and bundle synthesis work against the same cap the response is
+            # held to below.
             retrieval = service.retrieve_context_for_query(
                 query=payload.query,
+                max_tokens=max_tokens_budget,
                 task_type=task_override,
                 limit_entities=limit,
                 expand_deps=expand_deps,
@@ -207,24 +224,26 @@ def query_context(
                 for c in fallback_chunks
             ]
 
-    # --- Response capping: truncate chunk content to stay within token budget ---
-    total_chars = 0
+    # --- Response capping: fit chunk content to the token budget ---
+    total_tokens = 0
     capped_results: list[ChunkResult] = []
     for result_chunk in results:
-        if total_chars + len(result_chunk.content) > max_tokens_budget:
-            remaining = max_tokens_budget - total_chars
-            if remaining > 100:  # Only include if meaningful content fits
+        chunk_tokens = _TOKEN_COUNTER.count_tokens(result_chunk.content)
+        if total_tokens + chunk_tokens > max_tokens_budget:
+            remaining = max_tokens_budget - total_tokens
+            if remaining > _MIN_TRUNCATABLE_TOKENS:
                 capped_results.append(
                     ChunkResult(
                         id=result_chunk.id,
-                        content=result_chunk.content[:remaining] + "\n... [TRUNCATED]",
+                        content=_TOKEN_COUNTER.truncate(result_chunk.content, remaining)
+                        + "\n... [TRUNCATED]",
                         entity_id=result_chunk.entity_id,
                         score=result_chunk.score,
                     )
                 )
             break
         capped_results.append(result_chunk)
-        total_chars += len(result_chunk.content)
+        total_tokens += chunk_tokens
 
     return QueryResponse(
         chunks=capped_results,

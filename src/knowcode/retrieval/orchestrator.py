@@ -169,7 +169,12 @@ class RetrievalOrchestrator:
             }
 
         if per_entity_max_tokens is None:
-            per_entity_max_tokens = max(200, min(2000, max_tokens // limit_entities))
+            # The budget is a cap, not a hint. An even split of it across the
+            # requested entities can never overshoot, which a 200-token floor
+            # could: 300 tokens over 3 entities used to buy three 200-token
+            # bundles and report 600. A caller who asks for thin bundles gets
+            # thin bundles.
+            per_entity_max_tokens = max(1, min(2000, max_tokens // limit_entities))
 
         selected_entity_ids: list[str] = []
         evidence: list[dict[str, Any]] = []
@@ -247,10 +252,18 @@ class RetrievalOrchestrator:
         truncated = False
 
         for entity_id in selected_entity_ids:
+            # The cap also holds against a caller-supplied per-entity budget:
+            # no bundle is asked for more tokens than the total has left, and
+            # entities the budget cannot pay for are dropped rather than
+            # billed above it.
+            remaining_budget = max_tokens - total_tokens
+            if remaining_budget <= 0:
+                truncated = True
+                break
             try:
                 bundle = self._service.get_context(
                     entity_id,
-                    max_tokens=per_entity_max_tokens,
+                    max_tokens=min(per_entity_max_tokens, remaining_budget),
                     task_type=resolved_task_type,
                     summarize=(verbosity == "minimal"),
                     is_stale=is_stale,

@@ -93,6 +93,7 @@ class DummyService:
         self.store = DummyStore()
         self._engine = DummySearchEngine()
         self.leases = 0
+        self.retrieval_max_tokens = 0
 
     @contextmanager
     def generation_lease(self):  # type: ignore
@@ -147,8 +148,10 @@ class DummyService:
         task_type: Any = None,
         limit_entities: int = 5,
         expand_deps: bool = True,
+        max_tokens: int = 4000,
     ) -> dict[str, Any]:
         _ = (query, limit_entities, expand_deps)
+        self.retrieval_max_tokens = max_tokens
         task_name = task_type.value if task_type else "general"
         return {
             "task_type": task_name,
@@ -218,6 +221,66 @@ def test_query_and_entity_endpoints() -> None:
 
     entity = api.get_entity(request=req, entity_id="e1", service=service)  # type: ignore
     assert entity["id"] == "e1"
+
+
+# --- Token budgets reach retrieval and hold on the response (BL-29) ------
+
+
+def test_query_context_passes_the_budget_into_retrieval() -> None:
+    """The endpoint's max_tokens is the retrieval budget, not just a cap."""
+    req = _mock_request()
+    service = DummyService()
+
+    api.query_context(
+        request=req,
+        payload=api.QueryRequest(query="hi", limit=1, max_tokens=250),
+        service=service,  # type: ignore
+    )
+    assert service.retrieval_max_tokens == 250
+
+
+def test_query_context_caps_the_response_in_tokens() -> None:
+    """A 30-token budget serves at most 30 tokens, not 30 characters."""
+    from knowcode.utils.token_counter import TokenCounter
+
+    req = _mock_request()
+    service = DummyService()
+    # ~180 tokens of a few hundred characters: the shape a character cap
+    # miscounts in both directions at once.
+    long_content = " ".join(f"word{i}" for i in range(90))
+    service._engine._chunks = [
+        CodeChunk(id="c1", entity_id="e1", content=long_content, tokens=[])
+    ]
+    service._engine.chunk_repo = DummyChunkRepo(service._engine._chunks)
+
+    resp = api.query_context(
+        request=req,
+        payload=api.QueryRequest(query="hi", limit=1, max_tokens=30),
+        service=service,  # type: ignore
+    )
+    assert resp.chunks, "a 30-token remainder is worth a truncated chunk"
+    served = resp.chunks[0].content
+    assert served.endswith("\n... [TRUNCATED]")
+    body = served[: -len("\n... [TRUNCATED]")]
+    assert TokenCounter().count_tokens(body) <= 30
+
+
+def test_query_context_drops_a_chunk_that_only_fits_as_a_sliver() -> None:
+    """Below the minimum truncatable remainder, fewer whole chunks ship."""
+    req = _mock_request()
+    service = DummyService()
+    long_content = " ".join(f"word{i}" for i in range(90))
+    service._engine._chunks = [
+        CodeChunk(id="c1", entity_id="e1", content=long_content, tokens=[])
+    ]
+    service._engine.chunk_repo = DummyChunkRepo(service._engine._chunks)
+
+    resp = api.query_context(
+        request=req,
+        payload=api.QueryRequest(query="hi", limit=1, max_tokens=10),
+        service=service,  # type: ignore
+    )
+    assert resp.chunks == []
 
 
 def test_query_context_returns_412_for_missing_index() -> None:

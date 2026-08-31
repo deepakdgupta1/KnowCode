@@ -602,6 +602,7 @@ class KnowCodeService:
         Args:
             query: Natural-language query.
             max_tokens: Overall token budget across all returned entity bundles.
+                A hard cap: the reported total_tokens never exceeds it.
             task_type: Optional task type override; if omitted, query is classified.
             limit_entities: Maximum number of unique entities to include.
             per_entity_max_tokens: Optional per-entity token budget; defaults to an even split.
