@@ -32,6 +32,10 @@ from knowcode.data_models import (
     RelationshipKind,
 )
 from knowcode.indexing.scanner import FileInfo
+from knowcode.utils.entity_identity import (
+    build_external_reference_id,
+    build_unresolved_reference_id,
+)
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -416,6 +420,33 @@ class TestUnresolvedReferences:
         ]
         result = _score_unresolved_references(rels)
         assert result.score == 0.5
+
+    def test_canonical_unresolved_ids_count_as_unresolved(self) -> None:
+        """Current parsers emit scoped ``unresolved::`` ids, not ``ref::``.
+
+        Matching only the legacy prefix scored a graph with three unresolved
+        edges out of five as perfectly resolved (BL-28).
+        """
+        unres = build_unresolved_reference_id(
+            "python", "/repo/app.py", "mod.f", "Missing"
+        )
+        rels = [
+            Relationship("a", "b", RelationshipKind.CALLS),
+            Relationship("b", "c", RelationshipKind.INHERITS),
+            Relationship("s", unres, RelationshipKind.INHERITS),
+            Relationship("f", unres, RelationshipKind.CALLS),
+            Relationship("g", unres, RelationshipKind.USES_TYPE),
+        ]
+        result = _score_unresolved_references(rels)
+        assert result.score == 0.4
+        assert result.evidence["unresolved"] == 3
+
+    def test_external_targets_count_as_resolved(self) -> None:
+        """An ``external::`` target is resolved on purpose, not a hole."""
+        ext = build_external_reference_id("stdlib", "print")
+        rels = [Relationship("a", ext, RelationshipKind.CALLS)]
+        result = _score_unresolved_references(rels)
+        assert result.score == 1.0
 
     def test_no_resolvable(self) -> None:
         rels = [

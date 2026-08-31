@@ -18,6 +18,7 @@ from typing import Any, Mapping, Optional
 
 from knowcode.data_models import Entity, EntityKind, Relationship, RelationshipKind
 from knowcode.indexing.scanner import FileInfo, Scanner
+from knowcode.utils.entity_identity import EndpointKind, classify_endpoint_id
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -635,13 +636,31 @@ def _score_behavior_analyzability(
     )
 
 
+def _target_is_unresolved(target_id: str) -> bool:
+    """Classify one edge target as resolved or not.
+
+    Current parsers emit canonical unresolved ids through
+    ``build_unresolved_reference_id`` -- ``unresolved::<language>::<file>::
+    <scope>::<symbol>`` -- which ``classify_endpoint_id`` recognises. The
+    bare ``ref::Name`` form is the legacy spelling older graphs still carry;
+    matching only that prefix scored every canonical unresolved edge as
+    resolved and reported a perfect resolution rate on graphs full of holes.
+    """
+    if classify_endpoint_id(target_id) == EndpointKind.UNRESOLVED:
+        return True
+    return target_id.startswith("ref::")
+
+
 def _score_unresolved_references(
     relationships: list[Relationship],
 ) -> DimensionScore:
     """Fraction of references that remain unresolved after graph building.
 
-    ``ref::SomeName`` targets indicate the ``GraphBuilder`` could not resolve
-    a call or type reference to a concrete entity in the graph.
+    An unresolved target -- the canonical ``unresolved::`` ids and the legacy
+    ``ref::`` form -- means the ``GraphBuilder`` could not resolve a call or
+    type reference to a concrete entity in the graph. ``external::`` targets
+    are resolved on purpose: the symbol is known to live outside the
+    repository.
     """
     # Only consider relationship kinds where resolution matters
     resolvable_kinds = {
@@ -661,7 +680,7 @@ def _score_unresolved_references(
             evidence={"total_resolvable": 0, "unresolved": 0},
         )
 
-    unresolved = sum(1 for r in resolvable if r.target_id.startswith("ref::"))
+    unresolved = sum(1 for r in resolvable if _target_is_unresolved(r.target_id))
     resolved_ratio = 1.0 - (unresolved / total)
 
     return DimensionScore(
