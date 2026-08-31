@@ -332,3 +332,62 @@ def test_voyageai_builds_one_client_under_concurrent_embeds(
     )
 
     assert built == 1
+
+
+# --- VoyageAI can route through the LiteLLM proxy (BL-26) ------------------
+
+
+def test_voyage_provider_reads_proxy_base_url_from_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("VOYAGE_API_KEY_1", "test-key")
+    monkeypatch.setenv("VOYAGE_BASE_URL", "http://127.0.0.1:4000")
+    model = ModelConfig(
+        name="voyage-code-3", provider="voyageai", api_key_env="VOYAGE_API_KEY_1"
+    )
+
+    provider = build_provider_from_model(model)
+
+    assert isinstance(provider, VoyageAIEmbeddingProvider)
+    assert provider.base_url == "http://127.0.0.1:4000"
+
+
+def test_voyage_proxy_embeddings_keep_input_type(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """input_type rides in the request body through the OpenAI-compatible path."""
+    from types import SimpleNamespace
+
+    monkeypatch.setenv("VOYAGE_API_KEY_1", "test-key")
+    captured: dict[str, Any] = {}
+
+    class FakeEmbeddings:
+        def create(self, **kwargs: Any) -> Any:
+            captured.update(kwargs)
+            return SimpleNamespace(data=[SimpleNamespace(embedding=[1.0, 0.0])])
+
+    provider = VoyageAIEmbeddingProvider(
+        EmbeddingConfig(), base_url="http://127.0.0.1:4000"
+    )
+    provider._proxy_client = SimpleNamespace(embeddings=FakeEmbeddings())
+
+    provider.embed_single("query text")
+
+    assert captured["model"] == "voyage/voyage-code-3"
+    assert captured["extra_body"] == {"input_type": "query"}
+
+
+def test_voyage_provider_without_proxy_env_keeps_the_native_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No VOYAGE_BASE_URL means the default direct VoyageAI route is kept."""
+    monkeypatch.setenv("VOYAGE_API_KEY_1", "test-key")
+    monkeypatch.delenv("VOYAGE_BASE_URL", raising=False)
+    model = ModelConfig(
+        name="voyage-code-3", provider="voyageai", api_key_env="VOYAGE_API_KEY_1"
+    )
+
+    provider = build_provider_from_model(model)
+
+    assert isinstance(provider, VoyageAIEmbeddingProvider)
+    assert provider.base_url is None

@@ -145,16 +145,25 @@ class VoyageAIEmbeddingProvider(EmbeddingProvider):
         self,
         config: EmbeddingConfig,
         api_key_env: str = "VOYAGE_API_KEY_1",
+        base_url: str | None = None,
     ) -> None:
         """Create a VoyageAI-backed embedding provider.
 
         Args:
             config: Embedding configuration settings.
             api_key_env: Environment variable containing the VoyageAI API key.
+            base_url: When set, send embeddings through the OpenAI-compatible
+                endpoint at this address (the LiteLLM proxy) instead of the
+                native VoyageAI SDK client. The proxy is the route model
+                traffic is required to take where one is deployed; without it
+                the SDK client remains the default so a direct VoyageAI key
+                keeps working unchanged.
         """
         super().__init__(config)
         self.api_key_env = api_key_env
+        self.base_url = base_url
         self.client: Any = None
+        self._proxy_client: Any = None
         # See OpenAIEmbeddingProvider: concurrent batches race this, and here
         # the loser also repeats the credential lookup.
         self._client_lock = threading.Lock()
@@ -179,10 +188,52 @@ class VoyageAIEmbeddingProvider(EmbeddingProvider):
 
             return self.client
 
+    def _get_proxy_client(self) -> Any:
+        """Return an OpenAI-compatible client aimed at ``base_url``."""
+        client = self._proxy_client
+        if client is not None:
+            return client
+
+        with self._client_lock:
+            if self._proxy_client is None:
+                api_key = os.environ.get(self.api_key_env)
+                if not api_key:
+                    raise ValueError(
+                        f"{self.api_key_env} environment variable is not set."
+                    )
+                self._proxy_client = _create_openai_client(
+                    api_key=api_key, base_url=self.base_url
+                )
+            return self._proxy_client
+
+    def _embed_via_proxy(self, texts: list[str], input_type: str) -> list[list[float]]:
+        """Embed through the OpenAI-compatible proxy endpoint.
+
+        The model name carries the ``voyage/`` prefix LiteLLM routes on, and
+        ``input_type`` travels in the request body -- the one Voyage-specific
+        field the OpenAI schema has no slot for -- so proxied embeddings keep
+        the query/document distinction the native client sends.
+        """
+        client = self._get_proxy_client()
+        response = client.embeddings.create(
+            model=f"voyage/{self.config.model_name}",
+            input=texts,
+            extra_body={"input_type": input_type},
+        )
+        embeddings = [item.embedding for item in response.data]
+        if not embeddings:
+            return []
+        if self.config.normalize:
+            embeddings = [self._normalize(e) for e in embeddings]
+        return cast(list[list[float]], embeddings)
+
     def embed(self, texts: list[str]) -> list[list[float]]:
         """Generate document embeddings for a batch of texts."""
         if not texts:
             return []
+
+        if self.base_url:
+            return self._embed_via_proxy(texts, "document")
 
         client = self._get_client()
         embeddings = client.embed(
@@ -200,6 +251,13 @@ class VoyageAIEmbeddingProvider(EmbeddingProvider):
 
     def embed_single(self, text: str) -> list[float]:
         """Generate a query embedding for a single text input."""
+        if self.base_url:
+            embeddings = self._embed_via_proxy([text], "query")
+            if not embeddings:
+                return []
+            emb = embeddings[0]
+            return self._normalize(emb) if self.config.normalize else emb
+
         client = self._get_client()
         embeddings = client.embed(
             texts=[text],
@@ -270,7 +328,11 @@ def build_provider_from_model(model: ModelConfig) -> EmbeddingProvider:
             model_name=model.name,
             dimension=resolve_embedding_dimension(provider, model.name),
         )
-        return VoyageAIEmbeddingProvider(config, api_key_env=model.api_key_env)
+        return VoyageAIEmbeddingProvider(
+            config,
+            api_key_env=model.api_key_env,
+            base_url=os.environ.get("VOYAGE_BASE_URL"),
+        )
 
     if provider in {"openai", "openrouter", "mistralai"}:
         base_url = (

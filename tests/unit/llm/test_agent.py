@@ -682,3 +682,54 @@ def test_smart_answer_emits_telemetry(tmp_path: Path) -> None:
     assert len(queries) == 1
     assert queries[0]["entry_point"] == "agent"
     assert queries[0]["query_id"] == agent_decisions[0]["query_id"]
+
+
+# --- GLM traffic belongs on the LiteLLM proxy (BL-26) ----------------------
+
+
+class _RoutingService:
+    """Smallest service stand-in that satisfies Agent's constructor."""
+
+    store_path = Path(".")
+
+
+def _glm_agent(provider: str) -> Agent:
+    return Agent(
+        _RoutingService(),
+        AppConfig(
+            models=[
+                ModelConfig(name="glm-5", provider=provider, api_key_env="GLM_API_KEY")
+            ]
+        ),
+    )
+
+
+def test_glm_client_targets_litellm_proxy_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With GLM_BASE_URL unset the proxy address is the default, never None.
+
+    ``base_url=None`` aimed the OpenAI client at api.openai.com with a GLM
+    key it cannot accept, for an opaque auth failure.
+    """
+    monkeypatch.setenv("GLM_API_KEY", "test-key")
+    monkeypatch.delenv("GLM_BASE_URL", raising=False)
+
+    agent = _glm_agent("z-ai")
+    client = agent._get_client(agent.config.models[0])
+
+    assert client is not None
+    assert str(client.base_url).rstrip("/") == "http://127.0.0.1:4000"
+
+
+def test_glm_base_url_env_overrides_the_proxy_address(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GLM_API_KEY", "test-key")
+    monkeypatch.setenv("GLM_BASE_URL", "https://proxy.example.internal/v1")
+
+    agent = _glm_agent("glm")
+    client = agent._get_client(agent.config.models[0])
+
+    assert client is not None
+    assert str(client.base_url).startswith("https://proxy.example.internal/v1")
