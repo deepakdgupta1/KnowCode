@@ -20,8 +20,10 @@ link them to local entities; imports point at the ``external`` namespace.
 from __future__ import annotations
 
 import ast
+import builtins
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any, NamedTuple
 
 from knowcode.data_models import (
     Entity,
@@ -41,6 +43,29 @@ from knowcode.utils.entity_identity import (
 
 _SCOPE_BOUNDARIES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)
 _FUNCTION_DEFS = (ast.FunctionDef, ast.AsyncFunctionDef)
+
+# A builtin call is a symbol known to live outside the repository: it belongs
+# in the ``external`` namespace, not in the unresolved one. The non-dunder
+# ``builtins`` inventory is stable across the supported interpreters.
+_PYTHON_BUILTINS = frozenset(name for name in dir(builtins) if not name.startswith("_"))
+
+
+class ImportBindings(NamedTuple):
+    """Absolute-import bindings visible to scopes in one parsed file.
+
+    ``modules`` maps the bound name of ``import X [as name]`` to the imported
+    module path; ``import a.b`` binds only ``a``. ``members`` maps the bound
+    name of ``from M import n [as name]`` to the origin module and the
+    original member name. Relative imports (level > 0) resolve against the
+    current package, which a single file cannot know; they stay unbound and
+    ride the ordinary unresolved path.
+    """
+
+    modules: dict[str, str]
+    members: dict[str, tuple[str, str]]
+
+
+_EMPTY_BINDINGS = ImportBindings({}, {})
 
 
 class PythonParser:
@@ -95,6 +120,8 @@ class PythonParser:
         )
 
         # Imports are attributed to the module. Names are external symbols.
+        module_bindings: dict[str, str] = {}
+        member_bindings: dict[str, tuple[str, str]] = {}
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:
@@ -107,6 +134,12 @@ class PythonParser:
                             kind=RelationshipKind.IMPORTS,
                         )
                     )
+                    if alias.asname:
+                        module_bindings[alias.asname] = alias.name
+                    else:
+                        # ``import a.b`` binds the first component only.
+                        root = alias.name.split(".")[0]
+                        module_bindings[root] = root
             elif isinstance(node, ast.ImportFrom):
                 if node.module:
                     relationships.append(
@@ -118,6 +151,14 @@ class PythonParser:
                             kind=RelationshipKind.IMPORTS,
                         )
                     )
+                    if node.level == 0:
+                        for alias in node.names:
+                            if alias.name != "*":
+                                member_bindings[alias.asname or alias.name] = (
+                                    node.module,
+                                    alias.name,
+                                )
+        import_bindings = ImportBindings(module_bindings, member_bindings)
 
         self._process_scope(
             body=tree.body,
@@ -131,6 +172,7 @@ class PythonParser:
             parent_is_class=False,
             is_module=True,
             scope_chain=[],
+            import_bindings=import_bindings,
             entities=entities,
             relationships=relationships,
         )
@@ -162,6 +204,7 @@ class PythonParser:
         parent_is_class: bool,
         is_module: bool,
         scope_chain: list[dict[str, str]],
+        import_bindings: ImportBindings,
         entities: list[Entity],
         relationships: list[Relationship],
     ) -> None:
@@ -193,6 +236,7 @@ class PythonParser:
                     parent_id,
                     parent_qname,
                     extended_chain,
+                    import_bindings,
                     entities,
                     relationships,
                 )
@@ -206,6 +250,7 @@ class PythonParser:
                     parent_id,
                     parent_qname,
                     extended_chain,
+                    import_bindings,
                     entities,
                     relationships,
                 )
@@ -234,6 +279,7 @@ class PythonParser:
                 caller_qname=parent_qname,
                 scope_chain=extended_chain,
                 file_path=file_path,
+                import_bindings=import_bindings,
                 relationships=relationships,
             )
 
@@ -249,6 +295,7 @@ class PythonParser:
         parent_id: str,
         parent_qname: str,
         scope_chain: list[dict[str, str]],
+        import_bindings: ImportBindings,
         entities: list[Entity],
         relationships: list[Relationship],
     ) -> None:
@@ -285,11 +332,20 @@ class PythonParser:
         for base in node.bases:
             base_name = self._get_name(base)
             if base_name:
+                origin = import_bindings.members.get(base_name)
                 relationships.append(
                     Relationship(
                         source_id=class_id,
                         target_id=f"ref::{base_name}",
                         kind=RelationshipKind.INHERITS,
+                        metadata=(
+                            {
+                                "imported_from": origin[0],
+                                "imported_symbol": origin[1],
+                            }
+                            if origin is not None
+                            else {}
+                        ),
                     )
                 )
 
@@ -302,6 +358,7 @@ class PythonParser:
             parent_is_class=True,
             is_module=False,
             scope_chain=scope_chain,
+            import_bindings=import_bindings,
             entities=entities,
             relationships=relationships,
         )
@@ -315,6 +372,7 @@ class PythonParser:
         parent_id: str,
         parent_qname: str,
         scope_chain: list[dict[str, str]],
+        import_bindings: ImportBindings,
         entities: list[Entity],
         relationships: list[Relationship],
     ) -> None:
@@ -358,6 +416,7 @@ class PythonParser:
             parent_is_class=False,
             is_module=False,
             scope_chain=scope_chain,
+            import_bindings=import_bindings,
             entities=entities,
             relationships=relationships,
         )
@@ -413,6 +472,7 @@ class PythonParser:
         caller_qname: str,
         scope_chain: list[dict[str, str]],
         file_path: Path,
+        import_bindings: ImportBindings,
         relationships: list[Relationship],
     ) -> None:
         """Extract CALLS relationships from a scope's own body only."""
@@ -424,13 +484,22 @@ class PythonParser:
                 callee = self._get_call_name(call_node)
                 if not callee:
                     continue
+                # ``expr.attr()`` loses its receiver entirely: the callee name
+                # alone must never be mistaken for a call to a bare ``attr``.
+                receiver_unknown = isinstance(call_node.func, ast.Attribute) and (
+                    self._get_name(call_node.func.value) is None
+                )
+                target_id, metadata = self._resolve_call(
+                    callee, caller_qname, scope_chain, file_path, import_bindings
+                )
+                if receiver_unknown:
+                    metadata = {**metadata, "receiver_unknown": True}
                 relationships.append(
                     Relationship(
                         source_id=caller_id,
-                        target_id=self._resolve_call(
-                            callee, caller_qname, scope_chain, file_path
-                        ),
+                        target_id=target_id,
                         kind=RelationshipKind.CALLS,
+                        metadata=metadata,
                     )
                 )
 
@@ -449,17 +518,54 @@ class PythonParser:
         caller_qname: str,
         scope_chain: list[dict[str, str]],
         file_path: Path,
-    ) -> str:
-        """Resolve a callee to an internal entity id or a scoped unresolved id."""
-        # Attribute/method calls (self.run, obj.method, a.b.c) cannot be bound to
-        # a local definition without dataflow; record them as scoped references.
+        import_bindings: ImportBindings,
+    ) -> tuple[str, dict[str, Any]]:
+        """Resolve a callee to an endpoint id plus binding metadata.
+
+        Local definitions win over imports, imports win over builtins. A bare
+        builtin is a symbol known to live outside the repository, so it points
+        at the ``external`` namespace directly. What this file cannot decide —
+        whether an imported module or name lives in the repository — rides on
+        the edge as metadata for ``GraphBuilder``, which sees every file.
+        """
+
+        def unresolved(symbol: str) -> str:
+            return build_unresolved_reference_id(
+                self.language_name, file_path, caller_qname, symbol
+            )
+
         if "." not in callee:
             for symbols in reversed(scope_chain):
                 if callee in symbols:
-                    return build_internal_entity_id(file_path, symbols[callee])
-        return build_unresolved_reference_id(
-            self.language_name, file_path, caller_qname, callee
-        )
+                    return build_internal_entity_id(file_path, symbols[callee]), {}
+            origin = import_bindings.members.get(callee)
+            if origin is not None:
+                return unresolved(callee), {
+                    "imported_from": origin[0],
+                    "imported_symbol": origin[1],
+                }
+            if callee in _PYTHON_BUILTINS:
+                return build_external_reference_id("builtins", callee), {}
+            return unresolved(callee), {}
+
+        if callee.startswith("self."):
+            method = callee[len("self.") :]
+            class_qname = caller_qname.rsplit(".", 1)[0] if "." in caller_qname else ""
+            # A method's qname is module-rooted (``pkg.Class.method``), so its
+            # enclosing class spans at least two components. ``self`` outside a
+            # class must never bind to a module-level name of the same name.
+            if class_qname.count(".") >= 1:
+                wanted = f"{class_qname}.{method}"
+                for symbols in reversed(scope_chain):
+                    if symbols.get(method) == wanted:
+                        return build_internal_entity_id(file_path, wanted), {}
+            return unresolved(callee), {}
+
+        receiver = callee.split(".", 1)[0]
+        module = import_bindings.modules.get(receiver)
+        if module is not None:
+            return unresolved(callee), {"receiver_module": module}
+        return unresolved(callee), {}
 
     # ------------------------------------------------------------------
     # Source/model helpers

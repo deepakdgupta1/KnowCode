@@ -429,3 +429,272 @@ def test_calls_with_unnameable_targets_are_skipped(tmp_path: Path) -> None:
         if rel.kind is RelationshipKind.CALLS and rel.source_id == f_id
     ]
     assert calls == []
+
+
+# ---------------------------------------------------------------------------
+# Builtin externalisation, self-method binding, and import bindings
+# ---------------------------------------------------------------------------
+
+
+def test_builtin_calls_resolve_to_external_ids(tmp_path: Path) -> None:
+    """A bare call to a Python builtin is an answer, not a hole: it points at
+    ``external::builtins::<name>`` instead of a scoped unresolved id."""
+    src = tmp_path / "builtin_calls.py"
+    src.write_text(
+        "def f(x):\n    print(x)\n    return len(x)\n",
+        encoding="utf-8",
+    )
+    result = PythonParser().parse_file(src)
+    f_id = next(e.id for e in result.entities if e.qualified_name == "builtin_calls.f")
+    targets = sorted(
+        rel.target_id
+        for rel in result.relationships
+        if rel.kind is RelationshipKind.CALLS and rel.source_id == f_id
+    )
+    assert targets == ["external::builtins::len", "external::builtins::print"]
+    assert all(
+        classify_endpoint_id(target) is EndpointKind.EXTERNAL for target in targets
+    )
+
+
+def test_local_definition_shadows_builtin(tmp_path: Path) -> None:
+    """A local ``len`` definition wins over the builtin of the same name."""
+    src = tmp_path / "shadow.py"
+    src.write_text(
+        "def run(x):\n    return len(x)\n\n\ndef len(y):\n    return y\n",
+        encoding="utf-8",
+    )
+    result = PythonParser().parse_file(src)
+    run_id = next(e.id for e in result.entities if e.qualified_name == "shadow.run")
+    calls = [
+        rel
+        for rel in result.relationships
+        if rel.kind is RelationshipKind.CALLS and rel.source_id == run_id
+    ]
+    assert len(calls) == 1
+    assert calls[0].target_id.endswith(".len")
+    assert classify_endpoint_id(calls[0].target_id) is EndpointKind.INTERNAL
+
+
+def test_self_method_call_binds_to_sibling_method(tmp_path: Path) -> None:
+    """``self.helper()`` from a method binds to the sibling method entity."""
+    src = tmp_path / "thing.py"
+    src.write_text(
+        "class Thing:\n"
+        "    def run(self):\n"
+        "        self.helper()\n"
+        ""
+        "\n"
+        "    def helper(self):\n"
+        "        pass\n",
+        encoding="utf-8",
+    )
+    result = PythonParser().parse_file(src)
+    run_id = next(
+        e.id for e in result.entities if e.qualified_name == "thing.Thing.run"
+    )
+    calls = [
+        rel
+        for rel in result.relationships
+        if rel.kind is RelationshipKind.CALLS and rel.source_id == run_id
+    ]
+    assert len(calls) == 1
+    assert calls[0].target_id.endswith(".Thing.helper")
+    assert classify_endpoint_id(calls[0].target_id) is EndpointKind.INTERNAL
+
+
+def test_missing_self_method_stays_unresolved(tmp_path: Path) -> None:
+    src = tmp_path / "missing.py"
+    src.write_text(
+        "class Thing:\n    def run(self):\n        self.absent()\n",
+        encoding="utf-8",
+    )
+    result = PythonParser().parse_file(src)
+    run_id = next(
+        e.id for e in result.entities if e.qualified_name == "missing.Thing.run"
+    )
+    calls = [
+        rel
+        for rel in result.relationships
+        if rel.kind is RelationshipKind.CALLS and rel.source_id == run_id
+    ]
+    assert len(calls) == 1
+    assert classify_endpoint_id(calls[0].target_id) is EndpointKind.UNRESOLVED
+
+
+def test_self_call_in_module_function_never_binds(tmp_path: Path) -> None:
+    """``self.`` outside a class has no enclosing class; it must not bind to a
+    same-named module-level function."""
+    src = tmp_path / "flat.py"
+    src.write_text(
+        "def f(self):\n    return self.g()\n\n\ndef g():\n    return 1\n",
+        encoding="utf-8",
+    )
+    result = PythonParser().parse_file(src)
+    f_id = next(e.id for e in result.entities if e.qualified_name == "flat.f")
+    calls = [
+        rel
+        for rel in result.relationships
+        if rel.kind is RelationshipKind.CALLS and rel.source_id == f_id
+    ]
+    assert len(calls) == 1
+    assert classify_endpoint_id(calls[0].target_id) is EndpointKind.UNRESOLVED
+
+
+def test_self_call_shadowed_by_nested_def_stays_unresolved(tmp_path: Path) -> None:
+    """A nested ``helper`` inside the caller is not ``Thing.helper``; the
+    self-call must keep its unresolved form."""
+    src = tmp_path / "nested_shadow.py"
+    src.write_text(
+        "class Thing:\n"
+        "    def run(self):\n"
+        "        def helper():\n"
+        "            pass\n"
+        ""
+        "\n"
+        "        self.helper()\n",
+        encoding="utf-8",
+    )
+    result = PythonParser().parse_file(src)
+    run_id = next(
+        e.id for e in result.entities if e.qualified_name == "nested_shadow.Thing.run"
+    )
+    calls = [
+        rel
+        for rel in result.relationships
+        if rel.kind is RelationshipKind.CALLS and rel.source_id == run_id
+    ]
+    assert len(calls) == 1
+    assert classify_endpoint_id(calls[0].target_id) is EndpointKind.UNRESOLVED
+
+
+def test_module_receiver_call_records_binding(tmp_path: Path) -> None:
+    """``json.loads(...)`` keeps its unresolved id but carries the receiver's
+    import binding so GraphBuilder can classify it with repo knowledge."""
+    src = tmp_path / "receiver.py"
+    src.write_text(
+        "import json\n\n\ndef f(s):\n    return json.loads(s)\n",
+        encoding="utf-8",
+    )
+    result = PythonParser().parse_file(src)
+    f_id = next(e.id for e in result.entities if e.qualified_name == "receiver.f")
+    calls = [
+        rel
+        for rel in result.relationships
+        if rel.kind is RelationshipKind.CALLS and rel.source_id == f_id
+    ]
+    assert len(calls) == 1
+    assert classify_endpoint_id(calls[0].target_id) is EndpointKind.UNRESOLVED
+    assert calls[0].metadata["receiver_module"] == "json"
+
+
+def test_aliased_module_receiver_records_imported_module(tmp_path: Path) -> None:
+    src = tmp_path / "aliasmod.py"
+    src.write_text(
+        "import numpy as np\n\n\ndef f(x):\n    return np.array(x)\n",
+        encoding="utf-8",
+    )
+    result = PythonParser().parse_file(src)
+    f_id = next(e.id for e in result.entities if e.qualified_name == "aliasmod.f")
+    calls = [
+        rel
+        for rel in result.relationships
+        if rel.kind is RelationshipKind.CALLS and rel.source_id == f_id
+    ]
+    assert len(calls) == 1
+    assert calls[0].metadata["receiver_module"] == "numpy"
+
+
+def test_from_import_call_records_origin(tmp_path: Path) -> None:
+    """``from os.path import join`` binds ``join`` to its origin module; the
+    call edge carries that origin for GraphBuilder to classify."""
+    src = tmp_path / "fromimport.py"
+    src.write_text(
+        "from os.path import join\n\n\ndef f(p):\n    return join('a', p)\n",
+        encoding="utf-8",
+    )
+    result = PythonParser().parse_file(src)
+    f_id = next(e.id for e in result.entities if e.qualified_name == "fromimport.f")
+    calls = [
+        rel
+        for rel in result.relationships
+        if rel.kind is RelationshipKind.CALLS and rel.source_id == f_id
+    ]
+    assert len(calls) == 1
+    assert calls[0].metadata["imported_from"] == "os.path"
+    assert calls[0].metadata["imported_symbol"] == "join"
+
+
+def test_aliased_from_import_records_original_name(tmp_path: Path) -> None:
+    src = tmp_path / "aliasfrom.py"
+    src.write_text(
+        "from os.path import join as j\n\n\ndef f(p):\n    return j('a', p)\n",
+        encoding="utf-8",
+    )
+    result = PythonParser().parse_file(src)
+    f_id = next(e.id for e in result.entities if e.qualified_name == "aliasfrom.f")
+    calls = [
+        rel
+        for rel in result.relationships
+        if rel.kind is RelationshipKind.CALLS and rel.source_id == f_id
+    ]
+    assert len(calls) == 1
+    assert calls[0].metadata["imported_from"] == "os.path"
+    assert calls[0].metadata["imported_symbol"] == "join"
+
+
+def test_local_definition_shadows_from_import(tmp_path: Path) -> None:
+    src = tmp_path / "shadowimport.py"
+    src.write_text(
+        "from os.path import join\n\n\ndef f(p):\n    return join('a', p)\n\n\ndef join(a, b):\n    return a + b\n",
+        encoding="utf-8",
+    )
+    result = PythonParser().parse_file(src)
+    f_id = next(e.id for e in result.entities if e.qualified_name == "shadowimport.f")
+    calls = [
+        rel
+        for rel in result.relationships
+        if rel.kind is RelationshipKind.CALLS and rel.source_id == f_id
+    ]
+    assert len(calls) == 1
+    assert calls[0].target_id.endswith(".join")
+    assert classify_endpoint_id(calls[0].target_id) is EndpointKind.INTERNAL
+    assert calls[0].metadata == {}
+
+
+def test_imported_base_class_records_origin(tmp_path: Path) -> None:
+    """``class Color(Enum)`` keeps ``ref::Enum`` but carries where Enum came
+    from, so the builder can tell stdlib bases from repo bases."""
+    src = tmp_path / "colors.py"
+    src.write_text(
+        "from enum import Enum\n\n\nclass Color(Enum):\n    pass\n",
+        encoding="utf-8",
+    )
+    result = PythonParser().parse_file(src)
+    inherits = [
+        rel for rel in result.relationships if rel.kind is RelationshipKind.INHERITS
+    ]
+    assert len(inherits) == 1
+    assert inherits[0].target_id == "ref::Enum"
+    assert inherits[0].metadata["imported_from"] == "enum"
+    assert inherits[0].metadata["imported_symbol"] == "Enum"
+
+
+def test_receiver_expression_call_is_flagged_not_name_called(tmp_path: Path) -> None:
+    """``Path(p).read_text()`` loses its receiver; the edge is flagged so
+    scoped name matching never mistakes it for a call to a bare ``read_text``."""
+    src = tmp_path / "chain.py"
+    src.write_text(
+        "def f(p):\n    return open(p).read()\n",
+        encoding="utf-8",
+    )
+    result = PythonParser().parse_file(src)
+    f_id = next(e.id for e in result.entities if e.qualified_name == "chain.f")
+    calls = [
+        rel
+        for rel in result.relationships
+        if rel.kind is RelationshipKind.CALLS and rel.source_id == f_id
+    ]
+    by_symbol = {rel.target_id.rsplit("::", 1)[-1]: rel for rel in calls}
+    assert by_symbol["read"].metadata["receiver_unknown"] is True
+    assert "receiver_unknown" not in by_symbol["open"].metadata
