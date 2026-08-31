@@ -318,6 +318,10 @@ is a different axis from making a generation smaller. The plan's §17 closing
 ledger carries the full accounting, measured rather than projected; read it
 before §11, whose targets are sized against the pre-B corpus.
 
+The [engineering backlog](engineering/backlog.md) is empty as of 2026-08-31.
+Every defect it held has been fixed or rejected with a measured reason, so
+nothing outside this list is known to be wrong. Put the next finding there.
+
 **Work, in order:**
 
 1. ~~**Document identity and chunking correctness.**~~ Shipped 2026-08-29 as
@@ -374,9 +378,10 @@ before §11, whose targets are sized against the pre-B corpus.
 7. **Decide Phase G, or retire the plan without it.** Content addressed across
    retained generations, so retention costs the delta rather than the whole.
    Lossless by construction and worth more than everything above combined, but
-   larger than the rest of the plan put together. `BL-11` — chunks
-   content-addressed by MD5, where a collision hands one chunk another chunk's
-   vector — should close before the stream does either way.
+   larger than the rest of the plan put together. The correctness debt that was
+   meant to close before the stream does either way is now paid: a chunk is
+   content-addressed by SHA-256 (BL-11) and a staged rewrite witnesses its own
+   losslessness (BL-8).
 
 **Exit criteria:** every tracked document in a repository is retrievable, one
 generation is a small multiple of the source it describes rather than an order
