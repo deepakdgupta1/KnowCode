@@ -357,6 +357,39 @@ def build_provider_from_model(model: ModelConfig) -> EmbeddingProvider:
     raise ValueError(f"Unsupported embedding provider: {model.provider}")
 
 
+def _dummy_embedding_provider() -> EmbeddingProvider:
+    """Build the no-key fallback, labelled as what it is.
+
+    The dummy used to inherit ``EmbeddingConfig``'s voyageai defaults, so a
+    generation built without a key persisted ``provider=voyageai,
+    model_name=voyage-code-3`` -- metadata indistinguishable from a real
+    VoyageAI build. Index compatibility then accepted the dummy-built index
+    once a key appeared, and dense retrieval compared real query vectors
+    against sha256 pseudo-vectors with no warning. The honest labels make
+    that mismatch visible exactly where it is checked. The dimension stays
+    1024 so a dummy-built index remains self-consistent for offline use.
+    """
+    return DummyEmbeddingProvider(
+        EmbeddingConfig(
+            provider="dummy",
+            model_name="deterministic-sha256",
+            dimension=1024,
+        )
+    )
+
+
+def effective_embedding_config(app_config: AppConfig | None) -> EmbeddingConfig:
+    """Return the configuration ``create_embedding_provider`` would use.
+
+    Key-aware, like the factory it mirrors: with no usable embedding model
+    in the environment the expected configuration is the honestly-labelled
+    dummy, because that is what the runtime would actually query with. An
+    expectation copied from the config but ignoring the environment
+    diagnosed indexes the running stack could never produce or consume.
+    """
+    return create_embedding_provider(app_config=app_config).config
+
+
 def create_embedding_provider(
     app_config: AppConfig | None = None,
     embedding_config: EmbeddingConfig | None = None,
@@ -382,7 +415,7 @@ def create_embedding_provider(
 
             return build_provider_from_model(model)
 
-    return DummyEmbeddingProvider(EmbeddingConfig())
+    return _dummy_embedding_provider()
 
 
 def create_prose_embedding_provider(
@@ -422,8 +455,8 @@ def create_prose_embedding_provider(
     # No usable prose model — fall back to the code embedder, then the dummy.
     if app_config and (app_config.embedding_models or app_config.models):
         code_provider = create_embedding_provider(app_config=app_config)
-        # create_embedding_provider already returns DummyEmbeddingProvider when
-        # nothing is usable, so no further fallback is required here.
+        # create_embedding_provider already returns the honestly-labelled
+        # dummy when nothing is usable, so no further fallback is required.
         return code_provider
 
-    return DummyEmbeddingProvider(EmbeddingConfig())
+    return _dummy_embedding_provider()

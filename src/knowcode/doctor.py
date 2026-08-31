@@ -14,10 +14,10 @@ from pathlib import Path
 from typing import Any, Literal, Optional
 
 from knowcode.config import AppConfig
-from knowcode.data_models import EmbeddingConfig
 from knowcode.indexing import generations
 from knowcode.indexing.generations import ResolvedGeneration
 from knowcode.indexing.indexer import Indexer
+from knowcode.llm.embedding import effective_embedding_config
 from knowcode.mcp.tools import PRIMARY_TOOL_NAME
 from knowcode.readiness import (
     IDEAL_SETUP_FEATURE_KEYS,
@@ -735,7 +735,12 @@ def _check_semantic_index(context: ReadinessContext, checks: list[DoctorCheck]) 
     chunk_failures, _chunk_version = _inspect_chunk_store(index_path)
     failures.extend(chunk_failures)
 
-    expected_embedding = _expected_embedding_config(context.config)
+    # The expectation is what the runtime would query with, not what the
+    # config file names: without a usable key that is the honestly-labelled
+    # dummy, and an index built offline is self-consistent rather than
+    # broken. With a key, a dummy-built index fails here -- and at retrieval
+    # -- instead of serving pseudo-vectors to a real model.
+    expected_embedding = effective_embedding_config(context.config)
     recorded_embedding = manifest.get("embedding", {})
     if isinstance(recorded_embedding, dict):
         for key in ("provider", "model_name", "dimension", "normalize"):
@@ -998,45 +1003,6 @@ def _resolve_config_path(config_path: str | Path | None) -> Optional[Path]:
         return home
 
     return None
-
-
-def _expected_embedding_config(config: AppConfig) -> EmbeddingConfig:
-    """Return the embedding config implied by AppConfig without reading env vars."""
-    if not config.embedding_models:
-        return EmbeddingConfig()
-
-    model = config.embedding_models[0]
-    provider = model.provider.lower()
-    if provider in {"voyageai", "voyage"}:
-        return EmbeddingConfig(
-            provider="voyageai",
-            model_name=model.name,
-            dimension=_voyage_dimension(model.name),
-        )
-
-    return EmbeddingConfig(
-        provider="openai",
-        model_name=model.name,
-        dimension=_openai_dimension(model.name),
-    )
-
-
-def _voyage_dimension(model_name: str) -> int:
-    """Return known VoyageAI embedding dimension."""
-    try:
-        from knowcode.llm.embedding import _VOYAGE_EMBED_DIMENSIONS
-    except ImportError:
-        return 1024
-    return int(_VOYAGE_EMBED_DIMENSIONS.get(model_name, 1024))
-
-
-def _openai_dimension(model_name: str) -> int:
-    """Return known OpenAI-compatible embedding dimension."""
-    try:
-        from knowcode.llm.embedding import _OPENAI_EMBED_DIMENSIONS
-    except ImportError:
-        return 1536
-    return int(_OPENAI_EMBED_DIMENSIONS.get(model_name, 1536))
 
 
 def _read_json_object(path: Path) -> dict[str, Any]:

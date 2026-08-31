@@ -334,6 +334,53 @@ def test_voyageai_builds_one_client_under_concurrent_embeds(
     assert built == 1
 
 
+# --- The no-key fallback is labelled as what it is (BL-27) -----------------
+
+
+def test_dummy_fallback_reports_dummy_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A dummy-built generation must not claim to be a VoyageAI build."""
+    monkeypatch.delenv("VOYAGE_API_KEY_1", raising=False)
+    model = ModelConfig(
+        name="voyage-code-3", provider="voyageai", api_key_env="VOYAGE_API_KEY_1"
+    )
+
+    provider = create_embedding_provider(app_config=AppConfig(embedding_models=[model]))
+
+    assert isinstance(provider, DummyEmbeddingProvider)
+    assert provider.config.provider == "dummy"
+    assert provider.config.model_name == "deterministic-sha256"
+
+
+def test_dummy_metadata_cannot_pass_for_real_voyage_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The fields index compatibility compares must differ, dummy vs real."""
+    monkeypatch.delenv("VOYAGE_API_KEY_1", raising=False)
+    model = ModelConfig(
+        name="voyage-code-3", provider="voyageai", api_key_env="VOYAGE_API_KEY_1"
+    )
+    dummy = create_embedding_provider(app_config=AppConfig(embedding_models=[model]))
+
+    monkeypatch.setenv("VOYAGE_API_KEY_1", "test-key")
+    real = build_provider_from_model(model)
+
+    mismatches = [
+        key
+        for key in ("provider", "model_name", "dimension", "normalize")
+        if getattr(dummy.config, key) != getattr(real.config, key)
+    ]
+    assert mismatches, "dummy and real embedding metadata must not be interchangeable"
+
+
+def test_prose_dummy_fallback_reports_dummy_metadata() -> None:
+    """The prose fallback inherits the same honest labels."""
+    provider = create_prose_embedding_provider(app_config=None)
+    assert isinstance(provider, DummyEmbeddingProvider)
+    assert provider.config.provider == "dummy"
+
+
 # --- VoyageAI can route through the LiteLLM proxy (BL-26) ------------------
 
 
