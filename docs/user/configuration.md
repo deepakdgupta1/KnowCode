@@ -69,8 +69,9 @@ defaults use:
 | Variable | Used for |
 |---|---|
 | `GLM_API_KEY` | Default chat model (`z-ai` provider) for `ask` |
-| `GLM_BASE_URL` | Optional endpoint override for OpenAI-compatible providers |
+| `GLM_BASE_URL` | Optional address override for the LiteLLM proxy that GLM/z-ai chat traffic targets (default `http://127.0.0.1:4000`) |
 | `VOYAGE_API_KEY_1` | voyage-code-3 embeddings + rerank-2.5 cross-encoder |
+| `VOYAGE_BASE_URL` | Optional: route voyage embeddings through an OpenAI-compatible proxy (e.g. the LiteLLM proxy at `http://127.0.0.1:4000`); unset = direct VoyageAI API |
 | `GOOGLE_API_KEY` | Optional Gemini chat models |
 | `KNOWCODE_ROUTING_POLICY_ARTIFACT` / `KNOWCODE_ROUTING_POLICY_SHA256` | Path + expected SHA-256 of the machine-verified routing policy artifact (see [retrieval evals](../engineering/testing.md)) |
 | `KNOWCODE_TELEMETRY_RAW` | `1` enables opt-in raw query capture — see [telemetry](telemetry.md#opt-in-raw-query-capture) |
