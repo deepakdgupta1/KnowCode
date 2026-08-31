@@ -56,11 +56,12 @@ import shutil
 import sqlite3
 import threading
 import time
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from knowcode.utils.atomic_write import atomic_write_json
+from knowcode.utils.code_identity import package_code_fingerprint
 from knowcode.utils.entity_identity import absolutize_id
 from knowcode.utils.logger import get_logger
 
@@ -221,6 +222,11 @@ class GenerationManifest:
     vector: Mapping[str, Any]
     schema_versions: Mapping[str, int]
     artifacts: tuple[ArtifactDigest, ...]
+    #: Names the code that built this generation (BL-32): a content
+    #: fingerprint of the builder's package source. Absent on generations
+    #: that predate the stamp — an additive, optional field, so manifests
+    #: stay readable by older and newer binaries alike.
+    builder: Mapping[str, Any] = field(default_factory=dict)
 
     @property
     def has_semantic_index(self) -> bool:
@@ -234,7 +240,7 @@ class GenerationManifest:
         return replace(self, counts=merged)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "schema_version": self.schema_version,
             "generation_id": self.generation_id,
             "created_at": self.created_at,
@@ -246,6 +252,11 @@ class GenerationManifest:
             "schema_versions": dict(self.schema_versions),
             "artifacts": [artifact.to_dict() for artifact in self.artifacts],
         }
+        if self.builder:
+            # Additive and omitted-when-absent: an unstamped manifest keeps
+            # the exact shape older binaries already read.
+            payload["builder"] = dict(self.builder)
+        return payload
 
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> "GenerationManifest":
@@ -276,6 +287,10 @@ class GenerationManifest:
             )
             counts = {str(k): int(v) for k, v in dict(payload["counts"]).items()}
             digests = {str(k): str(v) for k, v in dict(payload["digests"]).items()}
+            builder_raw = payload.get("builder", {})
+            if not isinstance(builder_raw, Mapping):
+                raise TypeError(f"builder must be an object, got {type(builder_raw)!r}")
+            builder = {str(k): v for k, v in dict(builder_raw).items()}
         except (KeyError, TypeError, ValueError) as exc:
             raise ValueError(
                 f"Malformed generation manifest: {exc}. {_REBUILD_HINT}"
@@ -295,6 +310,7 @@ class GenerationManifest:
                 for k, v in dict(payload.get("schema_versions", {})).items()
             },
             artifacts=artifacts,
+            builder=builder,
         )
 
 
@@ -630,8 +646,14 @@ def build_manifest(
     embedding: Mapping[str, Any],
     vector: Mapping[str, Any],
     schema_versions: Mapping[str, int] | None = None,
+    builder: Mapping[str, Any] | None = None,
 ) -> GenerationManifest:
-    """Describe a staged generation, digesting its immutable artifacts."""
+    """Describe a staged generation, digesting its immutable artifacts.
+
+    ``builder`` names the code doing the building (BL-32): a content
+    fingerprint of the builder's package source, so a reader can prove it is
+    running the code that built the store it reads.
+    """
     artifact_names: list[str] = []
     if kind == KIND_FULL:
         artifact_names.append(INDEX_MANIFEST)
@@ -655,6 +677,7 @@ def build_manifest(
         vector=dict(vector),
         schema_versions=dict(schema_versions or {}),
         artifacts=digest_artifacts(staging, artifact_names),
+        builder=dict(builder or {}),
     )
 
 
@@ -1043,6 +1066,45 @@ def resolve_current_generation(
         logger.debug("Rejected index generation %s: %s", generation_id, failures)
 
     return None
+
+
+def builder_drift_message(manifest: GenerationManifest) -> str | None:
+    """A one-line drift warning for ``manifest``, or None when code matches.
+
+    An unstamped manifest — a generation that predates BL-32 — is silence
+    here: doctor reports it as a rebuild-worthy warning, but a banner should
+    not speculate about stores that simply cannot say.
+    """
+    stamped = manifest.builder.get("code_fingerprint")
+    if not isinstance(stamped, str) or not stamped:
+        return None
+    running = package_code_fingerprint()
+    if running == stamped:
+        return None
+    return (
+        f"this store was built by different code ({stamped}) than this server "
+        f"is running ({running}), so answers may describe a graph this code "
+        f"did not build (BL-32). Reinstall from the checkout - "
+        f"'uv cache clean knowcode && uv tool install --force --python 3.11 "
+        f'"<checkout>[mcp]"\' - or rebuild the store with the running code.'
+    )
+
+
+def current_builder_drift(index_root: str | Path) -> str | None:
+    """Drift warning for the current generation under ``index_root``.
+
+    Best-effort by design: this backs the MCP server's startup banner, where
+    a readiness problem must never block serving. Unreadable, absent, or
+    unstamped state is silence; only a fingerprint that disagrees with the
+    running package speaks.
+    """
+    try:
+        generation = resolve_current_generation(index_root)
+    except Exception:  # pragma: no cover - defensive: banners never block
+        return None
+    if generation is None:
+        return None
+    return builder_drift_message(generation.manifest)
 
 
 def retire_generations(

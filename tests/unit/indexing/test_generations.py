@@ -89,6 +89,7 @@ def _stage(
     entity_ids: list[str] | None = None,
     chunk_ids: list[str] | None = None,
     kind: str = generations.KIND_FULL,
+    builder: dict | None = None,
 ) -> tuple[Path, GenerationManifest]:
     """Stage a structurally complete generation and return its path/manifest."""
     entity_ids = ["m.py::alpha"] if entity_ids is None else entity_ids
@@ -113,6 +114,7 @@ def _stage(
         vector_count=len(chunk_ids) if kind == generations.KIND_FULL else 0,
         embedding={"provider": "dummy", "model_name": "m", "dimension": 4},
         vector={"backend": "faiss", "dimension": 4, "schema_version": 3},
+        builder=builder,
     )
     generations.write_manifest(staging, manifest)
     return staging, manifest
@@ -663,3 +665,100 @@ def test_semantic_artifacts_do_not_carry_a_vector_plane_forward(tmp_path: Path) 
     assert set(generations.SEMANTIC_ARTIFACTS).isdisjoint(
         set(generations.NATIVE_VECTOR_ARTIFACTS)
     )
+
+
+# ----------------------------------------------------------------------
+# Builder fingerprint stamp (BL-32: a store must name the code that built it)
+# ----------------------------------------------------------------------
+
+
+def test_build_manifest_stamps_the_builder_when_given(tmp_path: Path) -> None:
+    staging, _ = _stage(tmp_path)
+    manifest = generations.build_manifest(
+        staging,
+        generation_id=generations.staging_generation_id(staging),
+        kind=generations.KIND_GRAPH_ONLY,
+        entity_ids=[],
+        relationship_count=0,
+        chunk_ids=[],
+        vector_count=0,
+        embedding={},
+        vector={},
+        builder={"code_fingerprint": "sha256:abc", "code_files": 7},
+    )
+    payload = manifest.to_dict()
+    assert payload["builder"] == {"code_fingerprint": "sha256:abc", "code_files": 7}
+    assert generations.GenerationManifest.from_dict(payload).builder == {
+        "code_fingerprint": "sha256:abc",
+        "code_files": 7,
+    }
+
+
+def test_manifest_without_a_builder_keeps_its_exact_shape(tmp_path: Path) -> None:
+    """The stamp is additive: unstamped manifests stay byte-for-byte familiar.
+
+    Readers older than the stamp ignore the key, and this reader treats its
+    absence as predates fingerprinting rather than as corruption.
+    """
+    staging, _ = _stage(tmp_path)
+    manifest = generations.build_manifest(
+        staging,
+        generation_id=generations.staging_generation_id(staging),
+        kind=generations.KIND_GRAPH_ONLY,
+        entity_ids=[],
+        relationship_count=0,
+        chunk_ids=[],
+        vector_count=0,
+        embedding={},
+        vector={},
+    )
+    assert "builder" not in manifest.to_dict()
+    assert manifest.builder == {}
+    assert generations.GenerationManifest.from_dict(manifest.to_dict()).builder == {}
+
+
+def test_manifest_rejects_a_malformed_builder(tmp_path: Path) -> None:
+    payload = _manifest_payload(tmp_path)
+    payload["builder"] = "sha256:abc"
+
+    with pytest.raises(ValueError, match="Malformed generation manifest"):
+        generations.GenerationManifest.from_dict(payload)
+
+
+def test_current_builder_drift_names_a_mismatched_fingerprint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    index_root = tmp_path / "knowcode_index"
+    staging, manifest = _stage(
+        index_root,
+        kind=generations.KIND_GRAPH_ONLY,
+        builder={"code_fingerprint": "sha256:built", "code_files": 3},
+    )
+    generations.publish_generation(index_root, staging, manifest)
+
+    monkeypatch.setattr(
+        generations, "package_code_fingerprint", lambda: "sha256:running"
+    )
+    drift = generations.current_builder_drift(index_root)
+    assert drift is not None
+    assert "sha256:built" in drift
+    assert "sha256:running" in drift
+
+
+def test_current_builder_drift_is_silent_when_code_matches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    index_root = tmp_path / "knowcode_index"
+    staging, manifest = _stage(
+        index_root,
+        kind=generations.KIND_GRAPH_ONLY,
+        builder={"code_fingerprint": "sha256:same", "code_files": 3},
+    )
+    generations.publish_generation(index_root, staging, manifest)
+
+    monkeypatch.setattr(generations, "package_code_fingerprint", lambda: "sha256:same")
+    assert generations.current_builder_drift(index_root) is None
+
+
+def test_current_builder_drift_is_silent_without_a_generation(tmp_path: Path) -> None:
+    assert generations.current_builder_drift(tmp_path / "knowcode_index") is None

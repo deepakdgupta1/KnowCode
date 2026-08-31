@@ -122,6 +122,7 @@ def _publish_generation(
     dimension: int = 1024,
     backend: str | None = None,
     kind: str = generations.KIND_FULL,
+    builder: dict | None = None,
 ) -> Path:
     """Publish a complete generation the way a real build does (Step 14)."""
     with generations.staged_generation(index_root) as staging:
@@ -146,6 +147,7 @@ def _publish_generation(
                 "normalize": True,
             },
             vector={"backend": backend or "faiss", "dimension": dimension},
+            builder=builder,
         )
         published = generations.publish_generation(index_root, staging.path, manifest)
         staging.published = True
@@ -191,6 +193,7 @@ def test_doctor_passes_with_valid_store_index_and_config(tmp_path: Path) -> None
         "API keys",
         "Knowledge store",
         "Index generation",
+        "Builder drift",
         "Semantic index",
         "Disk footprint",
         "Agent rules",
@@ -541,3 +544,65 @@ def test_doctor_checks_rules_freshness_and_unsupported_extensions(
     assert checks2["Agent rules"]["status"] == "pass"
     assert checks2["Supported languages"]["status"] == "warn"
     assert "Go" in checks2["Supported languages"]["message"]
+
+
+# ----------------------------------------------------------------------
+# Builder drift (BL-32: stale tool environments served false greens)
+# ----------------------------------------------------------------------
+
+
+def test_doctor_fails_when_running_code_differs_from_the_store_builder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = tmp_path / "aimodels.yaml"
+    _write_config(config)
+    _publish_generation(
+        tmp_path / "knowcode_index",
+        builder={"code_fingerprint": "sha256:built-elsewhere", "code_files": 3},
+    )
+    monkeypatch.setattr(
+        doctor_module, "package_code_fingerprint", lambda: "sha256:running-here"
+    )
+
+    report = doctor_module.run_doctor(store_path=tmp_path, config_path=config)
+
+    check = next(c for c in report.checks if c.name == "Builder drift")
+    assert check.status == "fail"
+    assert "sha256:built-elsewhere" in check.message
+    assert "sha256:running-here" in check.message
+    assert report.ok is False
+
+
+def test_doctor_passes_when_running_code_matches_the_store_builder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = tmp_path / "aimodels.yaml"
+    _write_config(config)
+    _publish_generation(
+        tmp_path / "knowcode_index",
+        builder={"code_fingerprint": "sha256:same", "code_files": 3},
+    )
+    monkeypatch.setattr(
+        doctor_module, "package_code_fingerprint", lambda: "sha256:same"
+    )
+
+    report = doctor_module.run_doctor(store_path=tmp_path, config_path=config)
+
+    check = next(c for c in report.checks if c.name == "Builder drift")
+    assert check.status == "pass"
+
+
+def test_doctor_warns_when_generation_predates_the_builder_stamp(
+    tmp_path: Path,
+) -> None:
+    """A generation built before BL-32 carries no fingerprint; that is a
+    warning to rebuild, not corruption."""
+    config = tmp_path / "aimodels.yaml"
+    _write_config(config)
+    _publish_generation(tmp_path / "knowcode_index")
+
+    report = doctor_module.run_doctor(store_path=tmp_path, config_path=config)
+
+    check = next(c for c in report.checks if c.name == "Builder drift")
+    assert check.status == "warn"
+    assert "predates" in check.message

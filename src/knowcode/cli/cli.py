@@ -1044,6 +1044,13 @@ def mcp_server(store: Optional[str], config: Optional[str], legacy_tools: bool) 
         )
         if store_ready:
             click.echo("   Store: ready", err=True)
+            # BL-32: a uvx path-source install keeps serving the tool
+            # environment it was built with; say so when the store disagrees.
+            from knowcode.indexing.generations import current_builder_drift
+
+            drift = current_builder_drift(store_path / "knowcode_index")
+            if drift:
+                click.echo(f"   WARNING: {drift}", err=True)
         else:
             # Not an error: this is the bootstrap path the build action exists
             # to serve. Retrieval actions report it with an actionable hint.

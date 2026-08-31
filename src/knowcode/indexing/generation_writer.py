@@ -59,10 +59,13 @@ def build_semantic_manifest(
     Shared by the full build and the watch batch so the two cannot drift into
     describing the same artifacts differently — a generation whose recorded
     chunk schema disagrees with the file it names fails closed on load, and
-    finding that out from two constructors is strictly worse than one.
+    finding that out from two constructors is strictly worse than one. The
+    manifest also names the code doing the building (BL-32), so a reader can
+    prove it is running the code that built the store it reads.
     """
     from knowcode.indexing.indexer import Indexer
     from knowcode.storage.sqlite_chunk_repository import SqliteChunkRepository
+    from knowcode.utils.code_identity import builder_metadata
 
     return generations.build_manifest(
         staging,
@@ -78,6 +81,7 @@ def build_semantic_manifest(
             "chunks": SqliteChunkRepository.SCHEMA_VERSION,
             "index_manifest": Indexer.SCHEMA_VERSION,
         },
+        builder=builder_metadata(),
     )
 
 

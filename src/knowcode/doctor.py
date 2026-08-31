@@ -26,6 +26,7 @@ from knowcode.readiness import (
     missing_features,
 )
 from knowcode.storage.knowledge_store import KnowledgeStore
+from knowcode.utils.code_identity import package_code_fingerprint
 from knowcode.storage.sqlite_knowledge_store import SqliteKnowledgeStore
 from knowcode.storage.vector_backends import inspect_vector_index
 
@@ -159,6 +160,7 @@ def run_doctor(
     _check_python_runtime(checks)
 
     _check_index_generation(context, checks)
+    _check_builder_drift(context, checks)
     _check_semantic_index(context, checks)
 
     _check_disk_footprint(
@@ -666,6 +668,83 @@ def _check_index_generation(
         return
 
     checks.append(DoctorCheck(name="Index generation", status="pass", message=message))
+
+
+def _check_builder_drift(context: ReadinessContext, checks: list[DoctorCheck]) -> None:
+    """Prove the running code is the code that built the current store.
+
+    BL-32: an MCP server installed from a local checkout via uvx keeps
+    executing its cached tool environment — hours after the checkout moved —
+    and served a pre-audit perfect resolution rate over a graph the
+    repository's own build scored 0.158. The manifest's builder stamp turns
+    that silent split-brain into a failing check.
+    """
+    generation = context.generation
+    if generation is None:
+        # The Index generation check has already failed or warned; there is
+        # no manifest here to compare against.
+        return
+
+    rebuild = (
+        DoctorSuggestion(
+            label="Rebuild the index with the running code",
+            command=f"knowcode build {context.store_root}",
+        ),
+    )
+    stamped = generation.manifest.builder.get("code_fingerprint")
+    if not isinstance(stamped, str) or not stamped:
+        checks.append(
+            DoctorCheck(
+                name="Builder drift",
+                status="warn",
+                message=(
+                    f"Generation {generation.generation_id} predates the "
+                    "builder fingerprint, so code that moved on since the "
+                    "build cannot be detected against it."
+                ),
+                hint="Rebuild to stamp the builder fingerprint (BL-32).",
+                suggestions=rebuild,
+            )
+        )
+        return
+
+    running = package_code_fingerprint()
+    if running == stamped:
+        checks.append(
+            DoctorCheck(
+                name="Builder drift",
+                status="pass",
+                message="Running code matches the code that built the store.",
+            )
+        )
+        return
+
+    checks.append(
+        DoctorCheck(
+            name="Builder drift",
+            status="fail",
+            message=(
+                f"This process runs code fingerprinted {running}, but the "
+                f"store was built by {stamped}: answers may describe a "
+                "graph this code did not build."
+            ),
+            hint=(
+                "A uvx path-source install reuses its cached tool "
+                "environment indefinitely, and --force alone reinstalls "
+                "from that cache; the clean is load-bearing (BL-32)."
+            ),
+            suggestions=(
+                DoctorSuggestion(
+                    label="Reinstall the server from the checkout",
+                    command=(
+                        "uv cache clean knowcode && uv tool install --force "
+                        "--python 3.11 '<checkout>[mcp]'"
+                    ),
+                ),
+                rebuild[0],
+            ),
+        )
+    )
 
 
 def _check_semantic_index(context: ReadinessContext, checks: list[DoctorCheck]) -> None:

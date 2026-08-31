@@ -15,6 +15,7 @@ that retirement has closed.
 from __future__ import annotations
 
 import threading
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -22,6 +23,7 @@ from fastapi.testclient import TestClient
 
 from knowcode.api import api as api_module
 from knowcode.api.main import create_app
+from knowcode.api.rate_limit import limiter
 from knowcode.config import AppConfig
 from knowcode.doctor import run_doctor
 from knowcode.indexing.background_indexer import BackgroundIndexer
@@ -399,7 +401,25 @@ def test_a_retrieval_holds_one_generation_across_a_rebuild(
 # ----------------------------------------------------------------------
 
 
-def test_the_api_serves_requests_while_reload_runs(tmp_path: Path) -> None:
+@pytest.fixture
+def unthrottled_reads() -> Iterator[None]:
+    """Disable the rate limiter for one test.
+
+    The hotswap read loop is unthrottled by design — it races ``/reload`` as
+    fast as the client allows — so the 60/minute standard limit turns any
+    slowdown of the publish path into a 429 that says nothing about the
+    generation handoff this file exercises.
+    """
+    limiter.enabled = False
+    try:
+        yield
+    finally:
+        limiter.enabled = True
+
+
+def test_the_api_serves_requests_while_reload_runs(
+    tmp_path: Path, unthrottled_reads: None
+) -> None:
     """Reads and ``/reload`` racing over the real ASGI stack.
 
     ``POST /api/v1/context/query`` is deliberately not exercised here: it is
