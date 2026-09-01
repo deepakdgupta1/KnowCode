@@ -1,8 +1,11 @@
 """Graph builder that orchestrates parsing and constructs the semantic graph."""
 
 from __future__ import annotations
+
+import re
+from collections.abc import Callable
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from knowcode.data_models import (
     Entity,
@@ -44,6 +47,262 @@ _LANGUAGE_BY_SUFFIX = {
     ".rs": "rust",
     ".vue": "vue",
 }
+
+# The return annotation of a function entity's recorded signature, e.g.
+# ``def make_store(root) -> SqliteKnowledgeStore``. Signature strings are
+# produced by the parsers from source, so this reads what the file stated.
+_RETURN_ANNOTATION_RE = re.compile(r"\)\s*->\s*(.+)$")
+_SIMPLE_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+# Return annotations that name a builtin type outright: a factory promising
+# ``-> str`` produced an object whose methods are known to live in builtins,
+# whatever the factory's own module.
+_BUILTIN_RETURN_NAMES = frozenset(
+    {
+        "bool",
+        "bytearray",
+        "bytes",
+        "dict",
+        "float",
+        "frozenset",
+        "int",
+        "list",
+        "set",
+        "str",
+        "tuple",
+    }
+)
+
+
+class _ReceiverIndex:
+    """Repository-scale indexes for classifying receiver-typed call edges.
+
+    Built once per graph from the merged entities and relationships: the
+    per-file module/class/function indexes every classification consults, and
+    the class-to-base map the method walk follows. Nothing here guesses —
+    every lookup either names exactly one entity or reports failure, and the
+    caller keeps the hole on failure.
+    """
+
+    def __init__(
+        self,
+        entities: dict[str, Entity],
+        relationships: list[Relationship],
+    ) -> None:
+        self.entities = entities
+        self.files: list[str] = sorted(
+            {Path(e.location.file_path).as_posix() for e in entities.values()}
+        )
+        self.entity_by_qname: dict[tuple[str, str], Entity] = {}
+        self.classes_by_file_last: dict[tuple[str, str], list[Entity]] = {}
+        self.linkable_by_file_last: dict[tuple[str, str], list[Entity]] = {}
+        for entity in entities.values():
+            file = Path(entity.location.file_path).as_posix()
+            self.entity_by_qname[(file, entity.qualified_name)] = entity
+            last = entity.qualified_name.rsplit(".", 1)[-1]
+            if entity.kind is EntityKind.CLASS:
+                self.classes_by_file_last.setdefault((file, last), []).append(entity)
+            if entity.kind in _LINKABLE_KINDS:
+                self.linkable_by_file_last.setdefault((file, last), []).append(entity)
+
+        self.bases: dict[str, list[str]] = {}
+        for rel in relationships:
+            if rel.kind is not RelationshipKind.INHERITS:
+                continue
+            if not rel.source_id or rel.target_id.startswith(
+                ("external::", "unresolved::", "ref::")
+            ):
+                continue
+            self.bases.setdefault(rel.source_id, []).append(rel.target_id)
+
+        self._module_files_cache: dict[str, set[str]] = {}
+
+    def module_files(self, module: str) -> set[str]:
+        """Files that implement one dotted module path, by the same suffix
+        rule the import-bound classification uses."""
+        cached = self._module_files_cache.get(module)
+        if cached is None:
+            rel = module.replace(".", "/")
+            suffixes = (f"{rel}.py", f"{rel}/__init__.py")
+            cached = {
+                path
+                for path in self.files
+                if any(
+                    path == suffix or path.endswith(f"/{suffix}") for suffix in suffixes
+                )
+            }
+            self._module_files_cache[module] = cached
+        return cached
+
+    def _top_level_by_last(
+        self,
+        index: dict[tuple[str, str], list[Entity]],
+        files: set[str],
+        name: str,
+    ) -> list[Entity]:
+        """Entities named ``name`` in ``files`` that sit at module top level.
+
+        A qualified name rooted at the file stem plus one component is what
+        ``from M import n`` can actually bind; deeper names belong to nested
+        declarations and are not importable from the module path alone.
+        """
+        matches: list[Entity] = []
+        for file in files:
+            for entity in index.get((file, name), []):
+                if entity.qualified_name.count(".") == 1:
+                    matches.append(entity)
+        return matches
+
+    def subtree_of(self, files: set[str]) -> set[str]:
+        """Repository files under the package directories of ``files``.
+
+        A package's ``__init__.py`` re-exports symbols defined elsewhere in
+        the package; the subtree is where those definitions live.
+        """
+        package_dirs = sorted(
+            {f.rsplit("/", 1)[0] for f in files if f.endswith("/__init__.py")}
+        )
+        if not package_dirs:
+            return set()
+        return {
+            f
+            for directory in package_dirs
+            for f in self.files
+            if f.startswith(f"{directory}/")
+        }
+
+    def unique_class(self, module: str, class_name: str) -> Optional[Entity]:
+        """The one class ``module`` exports under ``class_name``.
+
+        Searched in the module's own files first; when the module is an
+        in-repo package, its whole subtree once — the re-export home of
+        ``from pkg import Thing`` is ``pkg/__init__.py`` but the class lives
+        wherever the package defines it. Zero or several matches report
+        ``None``: ambiguity keeps the hole.
+        """
+        files = self.module_files(module)
+        if not files:
+            return None
+        matches = self._top_level_by_last(self.classes_by_file_last, files, class_name)
+        if len(matches) == 1:
+            return matches[0]
+        if matches:
+            return None
+        matches = self._top_level_by_last(
+            self.classes_by_file_last, self.subtree_of(files), class_name
+        )
+        return matches[0] if len(matches) == 1 else None
+
+    def unique_top_level(
+        self,
+        module: str,
+        name: str,
+    ) -> Optional[Entity]:
+        """The one top-level linkable entity ``module`` exports under ``name``."""
+        matches = self._top_level_by_last(
+            self.linkable_by_file_last, self.module_files(module), name
+        )
+        return matches[0] if len(matches) == 1 else None
+
+    def method_target(
+        self,
+        class_entity: Entity,
+        method: str,
+    ) -> Optional[str]:
+        """The entity id of ``method`` on ``class_entity`` or its bases.
+
+        The class's own declaration wins; otherwise resolved in-repo base
+        classes are walked breadth-first and the first level carrying the
+        method must carry it exactly once — two bases providing the same
+        method is real ambiguity, not a choice to make.
+        """
+        file = Path(class_entity.location.file_path).as_posix()
+        direct = self.entity_by_qname.get(
+            (file, f"{class_entity.qualified_name}.{method}")
+        )
+        if direct is not None and direct.kind in _LINKABLE_KINDS:
+            return direct.id
+
+        visited = {class_entity.id}
+        level = list(self.bases.get(class_entity.id, []))
+        while level:
+            providers: list[str] = []
+            next_level: list[str] = []
+            for base_id in level:
+                if base_id in visited:
+                    continue
+                visited.add(base_id)
+                base = self.entities.get(base_id)
+                if base is None or base.kind is not EntityKind.CLASS:
+                    continue
+                base_file = Path(base.location.file_path).as_posix()
+                provider = self.entity_by_qname.get(
+                    (base_file, f"{base.qualified_name}.{method}")
+                )
+                if provider is not None and provider.kind in _LINKABLE_KINDS:
+                    providers.append(provider.id)
+                    continue
+                next_level.extend(self.bases.get(base_id, []))
+            if len(providers) == 1:
+                return providers[0]
+            if providers:
+                return None
+            level = next_level
+        return None
+
+
+def _return_annotation_name(signature: str) -> Optional[str]:
+    """The bare class name a function signature promises to return.
+
+    ``Optional[X]`` and ``X | None`` peel to ``X``; anything that does not
+    name a simple identifier (generics, unions of two types, strings)
+    reports ``None`` rather than a guess.
+    """
+    match = _RETURN_ANNOTATION_RE.search(signature)
+    if match is None:
+        return None
+    annotation = match.group(1).strip()
+    if annotation.startswith("Optional[") and annotation.endswith("]"):
+        annotation = annotation[len("Optional[") : -1].strip()
+    for part in annotation.split("|"):
+        part = part.strip()
+        if part and part != "None":
+            annotation = part
+            break
+    else:
+        return None
+    name = annotation.rsplit(".", 1)[-1]
+    return name if _SIMPLE_NAME_RE.match(name) else None
+
+
+def _qname_carries(qualified_name: str, member: str) -> bool:
+    """Whether a qualified name is ``<stem>.<member>`` exactly.
+
+    Module-scope access through an import binding (``sub.load``,
+    ``service.Klass.method``) reaches a top-level path in the module: the
+    file stem followed by exactly the member's components. Deeper matches
+    belong to nested declarations the binding cannot name.
+    """
+    qname_parts = qualified_name.split(".")
+    member_parts = member.split(".")
+    return len(qname_parts) == len(member_parts) + 1 and qname_parts[1:] == member_parts
+
+
+def _unique_symbol_in_files(
+    index: _ReceiverIndex,
+    files: set[str],
+    member: str,
+) -> Optional[str]:
+    """The unique linkable entity in ``files`` carrying ``member``."""
+    matches = [
+        entity
+        for file in files
+        for entity in index.linkable_by_file_last.get(
+            (file, member.rsplit(".", 1)[-1]), []
+        )
+        if _qname_carries(entity.qualified_name, member)
+    ]
+    return matches[0].id if len(matches) == 1 else None
 
 
 class GraphBuilder:
@@ -132,9 +391,11 @@ class GraphBuilder:
             self._merge_result(parse_result)
 
         # Resolve references after all files are parsed: name-based linking
-        # first, then binding-driven classification, then scoped name links.
+        # first, then binding-driven classification, then receiver-typed
+        # classification, then scoped name links.
         self._resolve_references()
         self._resolve_import_bound_references()
+        self._resolve_receiver_typed_references()
         self._resolve_scoped_unresolved_references()
 
         return self
@@ -268,7 +529,7 @@ class GraphBuilder:
     def _rewrite_bound_reference(
         self,
         rel: Relationship,
-        candidates_for=None,
+        candidates_for: Callable[[str], set[str]] | None = None,
         by_last_name: dict[str, list[tuple[str, str]]] | None = None,
     ) -> Relationship | None:
         """Rewrite one import-bound edge, or return None to keep it verbatim.
@@ -335,6 +596,163 @@ class GraphBuilder:
                 kind=rel.kind,
                 metadata=rel.metadata,
             )
+        return None
+
+    def _resolve_receiver_typed_references(self) -> None:
+        """Classify receiver-typed call edges with repository knowledge.
+
+        The Python parser states what a file knows about a receiver — its
+        class (lexically or through an import origin), the member-imported
+        module behind it, or the cross-module factory that produced it. Only
+        the builder can decide what that means here: an in-repo class links
+        the entity carrying the called method (walking resolved in-repo base
+        classes when the class itself does not declare it); an external
+        origin becomes an ``external::`` answer; a factory links through the
+        callee entity's own recorded signature. Anything absent or ambiguous
+        keeps the hole verbatim, metadata and all.
+        """
+        index = _ReceiverIndex(self.entities, self.relationships)
+
+        resolved: list[Relationship] = []
+        for rel in self.relationships:
+            if rel.kind is not RelationshipKind.CALLS or not rel.target_id.startswith(
+                "unresolved::"
+            ):
+                resolved.append(rel)
+                continue
+            metadata = rel.metadata
+            if "receiver_member_module" in metadata:
+                target = self._classify_member_module_receiver(index, metadata)
+            elif "receiver_type_name" in metadata:
+                target = self._classify_typed_receiver(index, rel, metadata)
+            elif "receiver_from_call_name" in metadata:
+                target = self._classify_factory_receiver(index, metadata)
+            else:
+                target = None
+            if target is None:
+                resolved.append(rel)
+            else:
+                resolved.append(
+                    Relationship(
+                        source_id=rel.source_id,
+                        target_id=target,
+                        kind=rel.kind,
+                        metadata=rel.metadata,
+                    )
+                )
+        self.relationships = resolved
+
+    def _classify_member_module_receiver(
+        self,
+        index: _ReceiverIndex,
+        metadata: dict[str, Any],
+    ) -> Optional[str]:
+        """Classify ``from M import n; n.member()``.
+
+        ``M.n`` naming an in-repo module links the unique entity carrying
+        ``member`` at that module's top level. Otherwise ``n`` may be a class
+        ``M`` exports — a classmethod-style call — which links like any typed
+        receiver. An origin outside the repository is an ``external::``
+        answer naming the imported binding.
+        """
+        module_path = metadata["receiver_member_module"]
+        member = metadata["receiver_method"]
+        files = index.module_files(module_path)
+        if files:
+            target = _unique_symbol_in_files(index, files, member)
+            if target is not None:
+                return target
+            return _unique_symbol_in_files(index, index.subtree_of(files), member)
+
+        parent, _, imported = module_path.rpartition(".")
+        if not parent:
+            return None
+        if index.module_files(parent):
+            # ``M`` is in the repository; ``n`` may name a class it exports.
+            class_entity = index.unique_class(parent, imported)
+            if class_entity is not None and "." not in member:
+                return index.method_target(class_entity, member)
+            return None
+        return build_external_reference_id(parent, f"{imported}.{member}")
+
+    def _classify_typed_receiver(
+        self,
+        index: _ReceiverIndex,
+        rel: Relationship,
+        metadata: dict[str, Any],
+    ) -> Optional[str]:
+        """Classify a receiver whose type the file stated.
+
+        An in-file class (``receiver_type_qname``) and an import origin
+        (``receiver_type_module``) are the two spellings; both end in the
+        same method link. A type from a module outside the repository —
+        including ``builtins`` — is an ``external::`` answer.
+        """
+        name = metadata["receiver_type_name"]
+        method = metadata["receiver_method"]
+        qname = metadata.get("receiver_type_qname")
+        module = metadata.get("receiver_type_module")
+
+        if qname is not None:
+            file = rel.source_id.rsplit("::", 1)[0]
+            class_entity = index.entity_by_qname.get((file, qname))
+            if class_entity is None or class_entity.kind is not EntityKind.CLASS:
+                return None
+            return index.method_target(class_entity, method)
+
+        if module is None:  # pragma: no cover -- parser always sets one of both
+            return None
+        if index.module_files(module):
+            class_entity = index.unique_class(module, name)
+            if class_entity is None:
+                # The module is in the repository but exports no unique such
+                # class: where the method would live is unknown, not external.
+                return None
+            return index.method_target(class_entity, method)
+        return build_external_reference_id(module, f"{name}.{method}")
+
+    def _classify_factory_receiver(
+        self,
+        index: _ReceiverIndex,
+        metadata: dict[str, Any],
+    ) -> Optional[str]:
+        """Classify a receiver a cross-module factory produced.
+
+        The factory entity is found in its module; its recorded signature
+        names the returned class, which must live in the factory's own file
+        — the only origin the signature itself can vouch for. A factory name
+        that is in fact a class (``mod.Class()`` as a constructor through a
+        ``from``-import) binds the same way.
+        """
+        module = metadata["receiver_from_call_module"]
+        name = metadata["receiver_from_call_name"]
+        method = metadata["receiver_method"]
+
+        if not index.module_files(module):
+            # The callee's module is outside the repository: the object it
+            # produced is external wherever the class actually lives.
+            return build_external_reference_id(module, f"{name}.{method}")
+
+        factory = index.unique_top_level(module, name)
+        if factory is None:
+            return None
+        if factory.kind is EntityKind.CLASS:
+            return index.method_target(factory, method)
+
+        if not factory.signature:
+            return None
+        class_name = _return_annotation_name(factory.signature)
+        if class_name is None:
+            return None
+        factory_file = Path(factory.location.file_path).as_posix()
+        candidates = index.classes_by_file_last.get((factory_file, class_name), [])
+        top_level = [
+            entity for entity in candidates if entity.qualified_name.count(".") == 1
+        ]
+        if len(top_level) == 1:
+            return index.method_target(top_level[0], method)
+        if class_name in _BUILTIN_RETURN_NAMES and not candidates:
+            return build_external_reference_id("builtins", f"{class_name}.{method}")
         return None
 
     def _resolve_scoped_unresolved_references(self) -> None:

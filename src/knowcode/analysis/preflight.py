@@ -699,6 +699,24 @@ def _score_unresolved_references(
         for r in resolvable
         if classify_endpoint_id(r.target_id) == EndpointKind.EXTERNAL
     )
+    # A hole that still carries receiver-type metadata is a different
+    # residual than one with no type knowledge at all: the file stated the
+    # receiver's type and the graph could not place the member — inherited
+    # from an external base, or declared in a module the graph did not
+    # index. Holes without metadata need type inference, not graph work.
+    typed_holes = sum(
+        1
+        for r in resolvable
+        if _target_is_unresolved(r.target_id)
+        and any(
+            key in r.metadata
+            for key in (
+                "receiver_type_name",
+                "receiver_member_module",
+                "receiver_from_call_name",
+            )
+        )
+    )
 
     return DimensionScore(
         dimension="unresolved_references",
@@ -711,6 +729,7 @@ def _score_unresolved_references(
             "resolution_rate": round(resolved_ratio, 3),
             "unresolved_attribute_calls": attribute_calls,
             "unresolved_bare_names": unresolved - attribute_calls,
+            "unresolved_typed_receivers": typed_holes,
             "external_targets": external,
         },
     )

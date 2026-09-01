@@ -8,6 +8,9 @@ The visitor is scope-aware:
   nested class/function/lambda boundary, so each entity owns its own calls;
 * a bare-name call resolves to the nearest enclosing definition in the lexical
   scope chain and otherwise becomes an explicit scoped unresolved reference;
+* a receiver-qualified call that stays unresolved carries what the file states
+  about its receiver (constructor, annotation, factory, or class scope) as
+  ``receiver_*`` edge metadata — see :mod:`knowcode.parsers.python_receiver_types`;
 * a decorated definition spans its decorators, and decorator expressions are
   retained deterministically in source order; and
 * module-level assignments (annotated, chained, and tuple-unpacked) become
@@ -23,7 +26,7 @@ import ast
 import builtins
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any
 
 from knowcode.data_models import (
     Entity,
@@ -32,6 +35,13 @@ from knowcode.data_models import (
     ParseResult,
     Relationship,
     RelationshipKind,
+)
+from knowcode.parsers.python_receiver_types import (
+    ClassAttributeTable,
+    FileKnowledge,
+    ImportBindings,
+    ReceiverKnowledge,
+    build_class_attributes,
 )
 from knowcode.utils.entity_identity import (
     build_external_reference_id,
@@ -48,24 +58,6 @@ _FUNCTION_DEFS = (ast.FunctionDef, ast.AsyncFunctionDef)
 # in the ``external`` namespace, not in the unresolved one. The non-dunder
 # ``builtins`` inventory is stable across the supported interpreters.
 _PYTHON_BUILTINS = frozenset(name for name in dir(builtins) if not name.startswith("_"))
-
-
-class ImportBindings(NamedTuple):
-    """Absolute-import bindings visible to scopes in one parsed file.
-
-    ``modules`` maps the bound name of ``import X [as name]`` to the imported
-    module path; ``import a.b`` binds only ``a``. ``members`` maps the bound
-    name of ``from M import n [as name]`` to the origin module and the
-    original member name. Relative imports (level > 0) resolve against the
-    current package, which a single file cannot know; they stay unbound and
-    ride the ordinary unresolved path.
-    """
-
-    modules: dict[str, str]
-    members: dict[str, tuple[str, str]]
-
-
-_EMPTY_BINDINGS = ImportBindings({}, {})
 
 
 class PythonParser:
@@ -159,6 +151,7 @@ class PythonParser:
                                     alias.name,
                                 )
         import_bindings = ImportBindings(module_bindings, member_bindings)
+        file_knowledge = FileKnowledge.build(tree)
 
         self._process_scope(
             body=tree.body,
@@ -173,6 +166,11 @@ class PythonParser:
             is_module=True,
             scope_chain=[],
             import_bindings=import_bindings,
+            file_knowledge=file_knowledge,
+            class_attributes={},
+            cls_attributes={},
+            class_qname=None,
+            receiver_knowledge=None,
             entities=entities,
             relationships=relationships,
         )
@@ -205,6 +203,11 @@ class PythonParser:
         is_module: bool,
         scope_chain: list[dict[str, str]],
         import_bindings: ImportBindings,
+        file_knowledge: FileKnowledge,
+        class_attributes: ClassAttributeTable,
+        cls_attributes: ClassAttributeTable,
+        class_qname: str | None,
+        receiver_knowledge: ReceiverKnowledge | None,
         entities: list[Entity],
         relationships: list[Relationship],
     ) -> None:
@@ -213,7 +216,10 @@ class PythonParser:
         ``parent_qname`` is empty at module level so top-level definitions get
         bare qualified names. The local symbol table is populated before any
         recursion so forward and sibling references resolve regardless of
-        textual order.
+        textual order. ``class_attributes``/``cls_attributes``/``class_qname``
+        describe the enclosing class for scopes inside it, and
+        ``receiver_knowledge`` carries the receiver-type table of exactly the
+        function whose body this is.
         """
         local_symbols: dict[str, str] = {}
         for stmt in body:
@@ -237,6 +243,7 @@ class PythonParser:
                     parent_qname,
                     extended_chain,
                     import_bindings,
+                    file_knowledge,
                     entities,
                     relationships,
                 )
@@ -251,6 +258,10 @@ class PythonParser:
                     parent_qname,
                     extended_chain,
                     import_bindings,
+                    file_knowledge,
+                    class_attributes,
+                    cls_attributes,
+                    class_qname,
                     entities,
                     relationships,
                 )
@@ -280,6 +291,17 @@ class PythonParser:
                 scope_chain=extended_chain,
                 file_path=file_path,
                 import_bindings=import_bindings,
+                knowledge=receiver_knowledge
+                or ReceiverKnowledge(
+                    extended_chain,
+                    import_bindings,
+                    file_knowledge,
+                    {},
+                    {},
+                    class_attributes,
+                    cls_attributes,
+                    class_qname,
+                ),
                 relationships=relationships,
             )
 
@@ -296,6 +318,7 @@ class PythonParser:
         parent_qname: str,
         scope_chain: list[dict[str, str]],
         import_bindings: ImportBindings,
+        file_knowledge: FileKnowledge,
         entities: list[Entity],
         relationships: list[Relationship],
     ) -> None:
@@ -349,6 +372,9 @@ class PythonParser:
                     )
                 )
 
+        class_attributes, cls_attributes = build_class_attributes(
+            node, scope_chain, import_bindings, file_knowledge
+        )
         self._process_scope(
             body=node.body,
             file_path=file_path,
@@ -359,6 +385,11 @@ class PythonParser:
             is_module=False,
             scope_chain=scope_chain,
             import_bindings=import_bindings,
+            file_knowledge=file_knowledge,
+            class_attributes=class_attributes,
+            cls_attributes=cls_attributes,
+            class_qname=qualified_name,
+            receiver_knowledge=None,
             entities=entities,
             relationships=relationships,
         )
@@ -373,6 +404,10 @@ class PythonParser:
         parent_qname: str,
         scope_chain: list[dict[str, str]],
         import_bindings: ImportBindings,
+        file_knowledge: FileKnowledge,
+        class_attributes: ClassAttributeTable,
+        cls_attributes: ClassAttributeTable,
+        class_qname: str | None,
         entities: list[Entity],
         relationships: list[Relationship],
     ) -> None:
@@ -407,6 +442,15 @@ class PythonParser:
             )
         )
 
+        receiver_knowledge = ReceiverKnowledge.for_scope(
+            node,
+            scope_chain,
+            import_bindings,
+            file_knowledge,
+            class_attributes,
+            cls_attributes,
+            class_qname,
+        )
         self._process_scope(
             body=node.body,
             file_path=file_path,
@@ -417,6 +461,11 @@ class PythonParser:
             is_module=False,
             scope_chain=scope_chain,
             import_bindings=import_bindings,
+            file_knowledge=file_knowledge,
+            class_attributes=class_attributes,
+            cls_attributes=cls_attributes,
+            class_qname=class_qname,
+            receiver_knowledge=receiver_knowledge,
             entities=entities,
             relationships=relationships,
         )
@@ -473,6 +522,7 @@ class PythonParser:
         scope_chain: list[dict[str, str]],
         file_path: Path,
         import_bindings: ImportBindings,
+        knowledge: ReceiverKnowledge,
         relationships: list[Relationship],
     ) -> None:
         """Extract CALLS relationships from a scope's own body only."""
@@ -492,6 +542,13 @@ class PythonParser:
                 target_id, metadata = self._resolve_call(
                     callee, caller_qname, scope_chain, file_path, import_bindings
                 )
+                if target_id.startswith("unresolved::"):
+                    # A dotted callee that stayed unresolved keeps what this
+                    # file knows about its receiver, for the builder to
+                    # classify with repository knowledge.
+                    receiver_binding = knowledge.receiver_metadata(callee)
+                    if receiver_binding:
+                        metadata = {**metadata, **receiver_binding}
                 if receiver_unknown:
                     metadata = {**metadata, "receiver_unknown": True}
                 relationships.append(

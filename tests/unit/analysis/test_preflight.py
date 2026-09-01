@@ -476,7 +476,32 @@ class TestUnresolvedReferences:
         assert result.evidence["unresolved"] == 3
         assert result.evidence["unresolved_attribute_calls"] == 1
         assert result.evidence["unresolved_bare_names"] == 2
+        assert result.evidence["unresolved_typed_receivers"] == 0
         assert result.evidence["external_targets"] == 1
+
+    def test_unresolved_evidence_counts_typed_receiver_holes(self) -> None:
+        """A hole whose receiver type the file stated is a different residual
+        than one with no type knowledge: the first needs graph coverage (the
+        method is inherited or unindexed), the second needs type inference."""
+        dotted = build_unresolved_reference_id(
+            "python", "/repo/app.py", "mod.f", "obj.run"
+        )
+        typed = build_unresolved_reference_id(
+            "python", "/repo/app.py", "mod.f", "service.flush"
+        )
+        rels = [
+            Relationship("a", "b", RelationshipKind.CALLS),
+            Relationship("f", dotted, RelationshipKind.CALLS),
+            Relationship(
+                "g",
+                typed,
+                RelationshipKind.CALLS,
+                {"receiver_type_name": "Service", "receiver_method": "flush"},
+            ),
+        ]
+        result = _score_unresolved_references(rels)
+        assert result.evidence["unresolved"] == 2
+        assert result.evidence["unresolved_typed_receivers"] == 1
 
     def test_no_resolvable(self) -> None:
         rels = [

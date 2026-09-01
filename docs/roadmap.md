@@ -408,15 +408,19 @@ The next trust release ships only when all of the following are true:
 4. Freshness and language-coverage checks report no unresolved correctness
    warnings for the target repository.
 5. No `Critical` item is open in the [engineering backlog](engineering/backlog.md).
-   None is open: BL-31 and BL-32, opened and closed on 2026-08-31, were the
-   last two. (Read the backlog rather than trusting this line: it named `BL-1`
-   long after Phase B fixed it on 2026-08-29, and it claimed nothing was open
-   right up until an audit found more.)
+   None is open: BL-31, BL-32 (both 2026-08-31), and BL-33 (2026-09-01) were
+   the last three. (Read the backlog rather than trusting this line: it named
+   `BL-1` long after Phase B fixed it on 2026-08-29, and it claimed nothing
+   was open right up until an audit found more.)
 6. Preflight on this repository's own graph keeps the unresolved-reference
-   resolution rate at 0.555 or better — the [BL-31](engineering/backlog.md)
-   baseline, ratcheted. Of the 8,369 holes at that baseline, 7,206 were
-   receiver-unknown calls that need type inference to bind; a change to the
-   rate in either direction updates the baseline here in the same commit that
+   resolution rate at 0.764 or better — the [BL-33](engineering/backlog.md)
+   baseline, ratcheted, which bound the receiver-unknown wall BL-31 left.
+   Of the 4,573 holes at that baseline, 3,368 are receiver-qualified calls
+   whose file states no type (unannotated parameters, cross-function
+   dataflow — a type checker's residue, not a linking defect), 1,205 are
+   ambiguous or unknown bare names, and 41 are typed-but-unbound holes the
+   evidence reports as `unresolved_typed_receivers`; a change to the rate in
+   either direction updates the baseline here in the same commit that
    moved it.
 
 P3 through P7 improve efficiency, adoption, and footprint, but they are not

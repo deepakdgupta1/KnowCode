@@ -698,3 +698,263 @@ def test_receiver_expression_call_is_flagged_not_name_called(tmp_path: Path) -> 
     by_symbol = {rel.target_id.rsplit("::", 1)[-1]: rel for rel in calls}
     assert by_symbol["read"].metadata["receiver_unknown"] is True
     assert "receiver_unknown" not in by_symbol["open"].metadata
+
+
+# ---------------------------------------------------------------------------
+# Receiver-type knowledge recorded on unresolved call edges
+# ---------------------------------------------------------------------------
+
+
+def _calls_of(result, qualified_name: str):
+    """The CALLS edges owned by one function entity, keyed by callee symbol."""
+    owner = next(e.id for e in result.entities if e.qualified_name == qualified_name)
+    return {
+        rel.target_id.rsplit("::", 1)[-1]: rel
+        for rel in result.relationships
+        if rel.kind is RelationshipKind.CALLS and rel.source_id == owner
+    }
+
+
+def test_constructor_initialized_receiver_records_type(tmp_path: Path) -> None:
+    """``x = Klass(); x.m()`` states the receiver's type for the builder."""
+    src = tmp_path / "ctor.py"
+    src.write_text(
+        "class Store:\n"
+        "    def get(self, k):\n"
+        "        return k\n"
+        "\n"
+        "\n"
+        "def f():\n"
+        "    store = Store()\n"
+        "    return store.get('k')\n",
+        encoding="utf-8",
+    )
+    calls = _calls_of(PythonParser().parse_file(src), "ctor.f")
+    assert calls["store.get"].metadata["receiver_type_name"] == "Store"
+    assert calls["store.get"].metadata["receiver_type_qname"] == "ctor.Store"
+    assert calls["store.get"].metadata["receiver_method"] == "get"
+    assert "receiver_type_module" not in calls["store.get"].metadata
+
+
+def test_annotated_parameter_records_imported_type_origin(tmp_path: Path) -> None:
+    """A parameter annotation names the receiver's type and its origin."""
+    src = tmp_path / "annot.py"
+    src.write_text(
+        "from stores import Store\n\n\ndef f(store: Store):\n    return store.get('k')\n",
+        encoding="utf-8",
+    )
+    calls = _calls_of(PythonParser().parse_file(src), "annot.f")
+    assert calls["store.get"].metadata["receiver_type_name"] == "Store"
+    assert calls["store.get"].metadata["receiver_type_module"] == "stores"
+    assert calls["store.get"].metadata["receiver_method"] == "get"
+
+
+def test_builtin_generic_annotation_records_builtin_type(tmp_path: Path) -> None:
+    """``mapping: dict[str, int]`` makes the receiver a builtin dict."""
+    src = tmp_path / "generic.py"
+    src.write_text(
+        "def f(mapping: dict[str, int]):\n    return mapping.get(1)\n",
+        encoding="utf-8",
+    )
+    calls = _calls_of(PythonParser().parse_file(src), "generic.f")
+    assert calls["mapping.get"].metadata["receiver_type_name"] == "dict"
+    assert calls["mapping.get"].metadata["receiver_type_module"] == "builtins"
+
+
+def test_optional_annotation_peels_to_inner_type(tmp_path: Path) -> None:
+    src = tmp_path / "optional.py"
+    src.write_text(
+        "from typing import Optional\n"
+        "from stores import Store\n\n"
+        "def f(store: Optional[Store]):\n"
+        "    return store.get('k')\n",
+        encoding="utf-8",
+    )
+    calls = _calls_of(PythonParser().parse_file(src), "optional.f")
+    assert calls["store.get"].metadata["receiver_type_name"] == "Store"
+    assert calls["store.get"].metadata["receiver_type_module"] == "stores"
+
+
+def test_in_file_factory_return_annotation_types_receiver(tmp_path: Path) -> None:
+    """``thing = make_thing()`` adopts the factory's return annotation."""
+    src = tmp_path / "factory.py"
+    src.write_text(
+        "from stores import Store\n\n"
+        "def make_thing() -> Store:\n"
+        "    return Store()\n\n"
+        "def f():\n"
+        "    thing = make_thing()\n"
+        "    return thing.get('k')\n",
+        encoding="utf-8",
+    )
+    calls = _calls_of(PythonParser().parse_file(src), "factory.f")
+    assert calls["thing.get"].metadata["receiver_type_name"] == "Store"
+    assert calls["thing.get"].metadata["receiver_type_module"] == "stores"
+
+
+def test_cross_module_factory_records_callee_for_signature_hop(tmp_path: Path) -> None:
+    """An imported factory cannot be typed here; the callee identity rides
+    on the edge for the builder to resolve through the entity's signature."""
+    src = tmp_path / "xfactory.py"
+    src.write_text(
+        "from helpers import make_thing\n\n"
+        "def f():\n"
+        "    thing = make_thing()\n"
+        "    return thing.get('k')\n",
+        encoding="utf-8",
+    )
+    calls = _calls_of(PythonParser().parse_file(src), "xfactory.f")
+    assert calls["thing.get"].metadata["receiver_from_call_name"] == "make_thing"
+    assert calls["thing.get"].metadata["receiver_from_call_module"] == "helpers"
+    assert calls["thing.get"].metadata["receiver_method"] == "get"
+
+
+def test_self_attribute_construction_records_type(tmp_path: Path) -> None:
+    """``self.store = Store()`` in one method types ``self.store`` in all of
+    them. An in-file class states its type directly; an imported callee may
+    be a class or a factory, so its identity rides for the builder to
+    resolve."""
+    src = tmp_path / "attrs.py"
+    src.write_text(
+        "from stores import Store\n\n"
+        "class Repo:\n"
+        "    def all(self):\n"
+        "        return 1\n"
+        "\n"
+        "class Service:\n"
+        "    def __init__(self):\n"
+        "        self.repo = Repo()\n"
+        "        self.store = Store()\n"
+        "\n"
+        "    def work(self):\n"
+        "        self.repo.all()\n"
+        "        return self.store.get('k')\n",
+        encoding="utf-8",
+    )
+    calls = _calls_of(PythonParser().parse_file(src), "attrs.Service.work")
+    assert calls["self.repo.all"].metadata["receiver_type_name"] == "Repo"
+    assert calls["self.repo.all"].metadata["receiver_type_qname"] == "attrs.Repo"
+    assert calls["self.repo.all"].metadata["receiver_method"] == "all"
+    assert calls["self.store.get"].metadata["receiver_from_call_name"] == "Store"
+    assert calls["self.store.get"].metadata["receiver_from_call_module"] == "stores"
+    assert calls["self.store.get"].metadata["receiver_method"] == "get"
+
+
+def test_self_method_without_sibling_records_enclosing_class(tmp_path: Path) -> None:
+    """``self.m()`` with no sibling carries the enclosing class so the
+    builder can walk base classes."""
+    src = tmp_path / "selfmiss.py"
+    src.write_text(
+        "class Service:\n    def work(self):\n        return self.missing()\n",
+        encoding="utf-8",
+    )
+    calls = _calls_of(PythonParser().parse_file(src), "selfmiss.Service.work")
+    assert calls["self.missing"].metadata["receiver_type_name"] == "Service"
+    assert calls["self.missing"].metadata["receiver_type_qname"] == "selfmiss.Service"
+    assert calls["self.missing"].metadata["receiver_method"] == "missing"
+
+
+def test_cls_receiver_records_enclosing_class(tmp_path: Path) -> None:
+    """``cls.m()`` names the class object itself."""
+    src = tmp_path / "clsmethod.py"
+    src.write_text(
+        "class Registry:\n"
+        "    @classmethod\n"
+        "    def create(cls):\n"
+        "        return cls.spawn()\n",
+        encoding="utf-8",
+    )
+    calls = _calls_of(PythonParser().parse_file(src), "clsmethod.Registry.create")
+    assert calls["cls.spawn"].metadata["receiver_type_name"] == "Registry"
+    assert calls["cls.spawn"].metadata["receiver_type_qname"] == "clsmethod.Registry"
+    assert calls["cls.spawn"].metadata["receiver_method"] == "spawn"
+
+
+def test_scope_visible_class_receiver_records_qname(tmp_path: Path) -> None:
+    """``Klass.m()`` where the class is lexically visible is a class-object
+    call, not an unknown receiver."""
+    src = tmp_path / "clsobj.py"
+    src.write_text(
+        "class Store:\n"
+        "    @classmethod\n"
+        "    def open(cls):\n"
+        "        return cls()\n"
+        "\n"
+        "def f():\n"
+        "    return Store.open()\n",
+        encoding="utf-8",
+    )
+    calls = _calls_of(PythonParser().parse_file(src), "clsobj.f")
+    assert calls["Store.open"].metadata["receiver_type_name"] == "Store"
+    assert calls["Store.open"].metadata["receiver_type_qname"] == "clsobj.Store"
+    assert calls["Store.open"].metadata["receiver_method"] == "open"
+
+
+def test_conflicting_receiver_types_stay_untyped(tmp_path: Path) -> None:
+    """A name the scope binds to two different types is ambiguous and
+    carries nothing: binding it would be a guess."""
+    src = tmp_path / "conflict.py"
+    src.write_text(
+        "class A:\n"
+        "    def m(self):\n"
+        "        return 1\n"
+        "\n"
+        "class B:\n"
+        "    def m(self):\n"
+        "        return 2\n"
+        "\n"
+        "def f(flag):\n"
+        "    x = A() if flag else B()\n"
+        "    return x.m()\n",
+        encoding="utf-8",
+    )
+    calls = _calls_of(PythonParser().parse_file(src), "conflict.f")
+    assert calls["x.m"].metadata == {}
+
+
+def test_loop_rebinding_drops_a_stated_type(tmp_path: Path) -> None:
+    """A name a loop rebinds after a typed assignment is not single-typed
+    anywhere in the scope."""
+    src = tmp_path / "loop.py"
+    src.write_text(
+        "class A:\n"
+        "    def m(self):\n"
+        "        return 1\n"
+        "\n"
+        "def f(items):\n"
+        "    x = A()\n"
+        "    for x in items:\n"
+        "        pass\n"
+        "    return x.m()\n",
+        encoding="utf-8",
+    )
+    calls = _calls_of(PythonParser().parse_file(src), "loop.f")
+    assert calls["x.m"].metadata == {}
+
+
+def test_member_imported_receiver_records_member_module(tmp_path: Path) -> None:
+    """``from pkg import sub; sub.f()`` knows the receiver's import origin;
+    whether it is a module or a class is repository knowledge."""
+    src = tmp_path / "membermod.py"
+    src.write_text(
+        "from stores import sub\n\ndef f():\n    return sub.load()\n",
+        encoding="utf-8",
+    )
+    calls = _calls_of(PythonParser().parse_file(src), "membermod.f")
+    assert calls["sub.load"].metadata["receiver_member_module"] == "stores.sub"
+    assert calls["sub.load"].metadata["receiver_method"] == "load"
+
+
+def test_unannotated_receiver_stays_plain_unresolved(tmp_path: Path) -> None:
+    """A receiver the file says nothing about keeps a bare hole: no
+    metadata, no binding."""
+    src = tmp_path / "silent.py"
+    src.write_text(
+        "def f(thing):\n    return thing.load()\n",
+        encoding="utf-8",
+    )
+    calls = _calls_of(PythonParser().parse_file(src), "silent.f")
+    assert calls["thing.load"].metadata == {}
+    assert (
+        classify_endpoint_id(calls["thing.load"].target_id) is EndpointKind.UNRESOLVED
+    )
