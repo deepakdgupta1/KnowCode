@@ -9,9 +9,14 @@ verbosity escalation ladder, and the configured `sufficiency_threshold`
 (default 0.8). Do not restate or override those values here or in any other
 agent config.
 
-Use the current chat context first. When repository context is still needed,
-call `retrieve_context_for_query` with `verbosity=minimal` and the smallest
-budget that fits the task, per the contract's table.
+Use the current chat context first. When repository context is needed, follow docs/mcp-contract.md.
+Start with `knowcode_retrieve` `action=query`, `verbosity=minimal`, and the smallest
+budget that fits the task. Escalate to standard or verbose only when the minimal
+context is insufficient. Use the configured `sufficiency_threshold` from
+`aimodels.yaml` to decide whether to answer from local context.
+
+If artifacts are missing or stale, run `knowcode_lifecycle` `action=build` and poll
+`knowcode_inspect` `action=job_status` until it succeeds before retrying.
 
 Do NOT use generic file-system or search tools (such as `view_file`,
 `grep_search`, or `list_dir`) for initial context gathering or codebase
@@ -20,8 +25,8 @@ specific file to edit, or when MCP retrieval is insufficient
 (sufficiency_score below the configured threshold) and you need to inspect
 specific file details.
 
-Use focused KnowCode tools only after the first retrieval call:
+Use focused KnowCode actions only after the first retrieval call:
 
-- `search_codebase`: find entities by known name or pattern.
-- `get_entity_context`: fetch context for a specific known entity.
-- `trace_calls`: inspect callers or callees for a specific entity.
+- `knowcode_retrieve` `action=search`: find entities by known name or pattern.
+- `knowcode_retrieve` `action=context`: fetch context for a specific entity after its ID is known.
+- `knowcode_retrieve` `action=trace`: inspect callers or callees.
