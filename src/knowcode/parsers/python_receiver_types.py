@@ -9,6 +9,10 @@ its own file:
 * an annotation — a parameter (``def f(store: Store)``), a local annotated
   assignment (``store: Store = ...``), or an in-file factory's return
   annotation reached through one hop;
+* a literal display or constant — ``d = {}`` and ``prefix = "x"`` state the
+  builtin type the way an annotation would;
+* a module-scope binding — top-level assignments state the type of a name
+  for every function in the file, the enclosing scope they all close over;
 * an instance attribute — ``self.attr = Store()`` or ``self.attr: Store``
   anywhere in the enclosing class, or a class-body assignment of the same
   shape;
@@ -52,6 +56,21 @@ _BUILTIN_TYPE_NAMES = frozenset(
         "type",
     }
 )
+
+# Literal displays and constants that state their own type: the binding is
+# the literal itself. Only containers and str/bytes — the builtin types
+# methods are actually called on through a receiver.
+_LITERAL_TYPE_NAMES: dict[type, str] = {
+    ast.Dict: "dict",
+    ast.List: "list",
+    ast.Set: "set",
+    ast.Tuple: "tuple",
+    ast.JoinedStr: "str",
+    ast.ListComp: "list",
+    ast.SetComp: "set",
+    ast.DictComp: "dict",
+}
+_CONSTANT_TYPE_NAMES: dict[type, str] = {str: "str", bytes: "bytes"}
 
 
 class ImportBindings(NamedTuple):
@@ -109,15 +128,24 @@ class FileKnowledge(NamedTuple):
 
     ``function_returns`` maps a function name to its return annotation only
     when every declaration of that name in the file agrees; disagreeing or
-    missing annotations leave the name out.
+    missing annotations leave the name out. ``module_types`` and
+    ``module_from_calls`` are the module scope's own receiver bindings —
+    the enclosing scope every function in the file sees.
     """
 
     class_names: frozenset[str]
     function_names: frozenset[str]
     function_returns: dict[str, ast.expr]
+    module_types: ReceiverTable = {}
+    module_from_calls: FromCallTable = {}
 
     @classmethod
-    def build(cls, tree: ast.Module) -> "FileKnowledge":
+    def build(
+        cls,
+        tree: ast.Module,
+        module_name: str,
+        import_bindings: ImportBindings,
+    ) -> "FileKnowledge":
         class_names: set[str] = set()
         function_names: set[str] = set()
         returns: dict[str, ast.expr | _Ambiguous] = {}
@@ -134,7 +162,7 @@ class FileKnowledge(NamedTuple):
                 elif not isinstance(previous, _Ambiguous):
                     if ast.unparse(previous) != ast.unparse(node.returns):
                         returns[node.name] = AMBIGUOUS
-        return cls(
+        facts = cls(
             frozenset(class_names),
             frozenset(function_names),
             {
@@ -143,6 +171,60 @@ class FileKnowledge(NamedTuple):
                 if not isinstance(annotation, _Ambiguous)
             },
         )
+        module_types, module_from_calls = _build_module_tables(
+            tree, module_name, import_bindings, facts
+        )
+        return facts._replace(
+            module_types=module_types, module_from_calls=module_from_calls
+        )
+
+
+def _build_module_tables(
+    tree: ast.Module,
+    module_name: str,
+    import_bindings: ImportBindings,
+    facts: "FileKnowledge",
+) -> tuple[ReceiverTable, FromCallTable]:
+    """Receiver bindings stated at module top level.
+
+    The module body is a scope like any other, and every function in the
+    file closes over it: ``logger = logging.getLogger(__name__)`` at the top
+    is a statement about ``logger`` in every function below. Direct
+    top-level statements only — a binding inside an ``if`` at import time is
+    conditional, which a single pass cannot treat as unconditional.
+    """
+    module_symbols: dict[str, str] = {}
+    for stmt in tree.body:
+        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            module_symbols[stmt.name] = (
+                f"{module_name}.{stmt.name}" if module_name else stmt.name
+            )
+        elif isinstance(stmt, (ast.Assign, ast.AnnAssign)):
+            for name in _simple_targets_from_assignment(stmt):
+                module_symbols.setdefault(name, name)
+
+    module_types: ReceiverTable = {}
+    module_from_calls: FromCallTable = {}
+    knowledge = ReceiverKnowledge(
+        [module_symbols],
+        import_bindings,
+        facts,
+        module_types,
+        module_from_calls,
+        {},
+        {},
+        None,
+    )
+    rebinding_targets: set[str] = set()
+    for stmt in tree.body:
+        if isinstance(stmt, (ast.Assign, ast.AnnAssign)):
+            knowledge._bind_assignment(stmt, module_types, module_from_calls)
+        elif isinstance(stmt, ast.For):
+            rebinding_targets.update(_simple_targets(stmt.target))
+    for name in rebinding_targets:
+        module_types[name] = AMBIGUOUS
+        module_from_calls.pop(name, None)
+    return module_types, module_from_calls
 
 
 def _own_nodes(body: list[ast.stmt]) -> Iterator[ast.AST]:
@@ -181,6 +263,7 @@ class ReceiverKnowledge:
         class_attributes: ClassAttributeTable,
         cls_attributes: ClassAttributeTable,
         class_qname: str | None,
+        parameter_names: frozenset[str] = frozenset(),
     ) -> None:
         self.scope_chain = scope_chain
         self.import_bindings = import_bindings
@@ -190,6 +273,7 @@ class ReceiverKnowledge:
         self.class_attributes = class_attributes
         self.cls_attributes = cls_attributes
         self.class_qname = class_qname
+        self.parameter_names = parameter_names
 
     @classmethod
     def for_scope(
@@ -223,6 +307,17 @@ class ReceiverKnowledge:
         )
 
         args = function.args
+        parameter_names = frozenset(
+            param.arg
+            for param in [
+                *args.posonlyargs,
+                *args.args,
+                *args.kwonlyargs,
+                *([args.vararg] if args.vararg else []),
+                *([args.kwarg] if args.kwarg else []),
+            ]
+        )
+        knowledge.parameter_names = parameter_names
         for param in [*args.posonlyargs, *args.args, *args.kwonlyargs]:
             if param.annotation is not None:
                 knowledge._bind_assignment_name(
@@ -236,9 +331,15 @@ class ReceiverKnowledge:
         for node in _own_nodes(function.body):
             if isinstance(node, ast.For):
                 rebinding_targets.update(_simple_targets(node.target))
+            elif isinstance(node, (ast.With, ast.AsyncWith)):
+                for item in node.items:
+                    if item.optional_vars is not None:
+                        rebinding_targets.update(_simple_targets(item.optional_vars))
             elif isinstance(node, (ast.Assign, ast.AnnAssign)):
                 assignments.append(node)
                 knowledge._bind_assignment(node, receiver_types, receiver_from_calls)
+            elif isinstance(node, ast.NamedExpr):
+                rebinding_targets.update(_simple_targets(node.target))
 
         # A name rebound by a loop after earning a stated type is no longer
         # single-typed in this scope.
@@ -348,6 +449,19 @@ class ReceiverKnowledge:
             return TypeRef(name=name, module="builtins")
         return None
 
+    def literal_ref(self, value: ast.expr) -> TypeRef | None:
+        """The builtin type a literal display or constant states outright.
+
+        ``d = {}`` binds ``d`` to the builtin dict exactly as firmly as an
+        annotation would; the display is the statement.
+        """
+        name = _LITERAL_TYPE_NAMES.get(type(value))
+        if name is None and isinstance(value, ast.Constant):
+            name = _CONSTANT_TYPE_NAMES.get(type(value.value))
+        if name is None:
+            return None
+        return TypeRef(name=name, module="builtins")
+
     def factory_origin(self, call: ast.Call) -> tuple[str, str] | None:
         """The cross-module factory behind ``x = f()`` the file cannot type.
 
@@ -401,6 +515,11 @@ class ReceiverKnowledge:
                     self._bind_assignment_name(receiver_types, target, ref)
             return
         value = node.value
+        literal = self.literal_ref(value)
+        if literal is not None:
+            for target in targets:
+                self._bind_assignment_name(receiver_types, target, literal)
+            return
         if not isinstance(value, ast.Call):
             return
         ref = self.construction_ref(value)
@@ -478,6 +597,35 @@ class ReceiverKnowledge:
                 "receiver_from_call_module": origin[0],
                 "receiver_method": member,
             }
+        # The function's own table decides either way: an ambiguous local
+        # binding, and any parameter — annotated or not — shadows the module
+        # scope and every import below, exactly as local names do at runtime.
+        bound_locally = (
+            receiver in self.receiver_types
+            or receiver in self.receiver_from_calls
+            or receiver in self.parameter_names
+        )
+        if not bound_locally:
+            module_ref = self.file.module_types.get(receiver)
+            if isinstance(module_ref, TypeRef):
+                if "." in member:
+                    return None
+                return self._type_metadata(module_ref, member)
+            module_origin = self.file.module_from_calls.get(receiver)
+            if isinstance(module_origin, tuple):
+                if "." in member:
+                    return None
+                return {
+                    "receiver_from_call_name": module_origin[1],
+                    "receiver_from_call_module": module_origin[0],
+                    "receiver_method": member,
+                }
+            if receiver in self.file.module_types or receiver in (
+                self.file.module_from_calls
+            ):
+                bound_locally = True  # A module binding shadows imports.
+        if bound_locally:
+            return None
         if self._lexically_visible(receiver):
             # A class visible in the scope chain makes the receiver a
             # class-object call (``ClassName.method()``); a visible binding
@@ -577,8 +725,8 @@ def build_class_attributes(
                     _bind(table, target, knowledge.annotation_ref(node.annotation))
                 continue
             value = node.value
-            if isinstance(value, ast.Call):
-                _bind(table, target, _construction_binding(knowledge, value))
+            if isinstance(value, (ast.Call, ast.Dict, ast.List, ast.Set, ast.Tuple)):
+                _bind(table, target, _value_binding(knowledge, value))
 
     for stmt in class_node.body:
         if isinstance(stmt, (ast.Assign, ast.AnnAssign)):
@@ -595,15 +743,20 @@ def build_class_attributes(
     return self_table, cls_table
 
 
-def _construction_binding(
-    knowledge: ReceiverKnowledge, call: ast.Call
+def _value_binding(
+    knowledge: ReceiverKnowledge, value: ast.expr
 ) -> TypeRef | tuple[str, str] | None:
-    """The stated binding of one construction call: a local type, or the
-    cross-module callee identity the graph must resolve."""
-    ref = knowledge.construction_ref(call)
+    """The stated binding of one assigned value: a literal's builtin type, a
+    local type, or the cross-module callee identity the graph must resolve."""
+    literal = knowledge.literal_ref(value)
+    if literal is not None:
+        return literal
+    if not isinstance(value, ast.Call):
+        return None
+    ref = knowledge.construction_ref(value)
     if ref is not None:
         return ref
-    return knowledge.factory_origin(call)
+    return knowledge.factory_origin(value)
 
 
 def _attribute_metadata(binding: object, member: str) -> dict[str, Any] | None:
@@ -629,8 +782,8 @@ def _bind_self_target(
         return
     if not isinstance(target.value, ast.Name) or target.value.id != "self":
         return
-    if isinstance(value, ast.Call):
-        _bind(table, target.attr, _construction_binding(knowledge, value))
+    if isinstance(value, (ast.Call, ast.Dict, ast.List, ast.Set, ast.Tuple)):
+        _bind(table, target.attr, _value_binding(knowledge, value))
 
 
 def _bind(table: dict[str, Any], name: str, value: Any) -> None:

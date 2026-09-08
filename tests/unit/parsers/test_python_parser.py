@@ -958,3 +958,93 @@ def test_unannotated_receiver_stays_plain_unresolved(tmp_path: Path) -> None:
     assert (
         classify_endpoint_id(calls["thing.load"].target_id) is EndpointKind.UNRESOLVED
     )
+
+
+def test_module_level_factory_assignment_records_from_call(tmp_path: Path) -> None:
+    """``logger = logging.getLogger(__name__)`` at module top level states
+    the producer for every function in the file."""
+    src = tmp_path / "modfact.py"
+    src.write_text(
+        "import logging\n\n"
+        "logger = logging.getLogger(__name__)\n\n"
+        "def f():\n"
+        "    logger.info('hi')\n",
+        encoding="utf-8",
+    )
+    calls = _calls_of(PythonParser().parse_file(src), "modfact.f")
+    assert calls["logger.info"].metadata["receiver_from_call_name"] == "getLogger"
+    assert calls["logger.info"].metadata["receiver_from_call_module"] == "logging"
+    assert calls["logger.info"].metadata["receiver_method"] == "info"
+
+
+def test_module_level_imported_constructor_records_from_call(tmp_path: Path) -> None:
+    src = tmp_path / "modctor.py"
+    src.write_text(
+        "from stores import Store\n\n"
+        "store = Store()\n\n"
+        "def f():\n"
+        "    return store.get('k')\n",
+        encoding="utf-8",
+    )
+    calls = _calls_of(PythonParser().parse_file(src), "modctor.f")
+    assert calls["store.get"].metadata["receiver_from_call_name"] == "Store"
+    assert calls["store.get"].metadata["receiver_from_call_module"] == "stores"
+
+
+def test_literal_display_records_builtin_type(tmp_path: Path) -> None:
+    """``d = {}`` and ``prefix = 'x'`` state their builtin type the way an
+    annotation would."""
+    src = tmp_path / "literal.py"
+    src.write_text(
+        "def f():\n"
+        "    seen = {}\n"
+        "    parts = []\n"
+        "    prefix = 'x'\n"
+        "    seen.update({})\n"
+        "    parts.append(1)\n"
+        "    return prefix.startswith('x')\n",
+        encoding="utf-8",
+    )
+    calls = _calls_of(PythonParser().parse_file(src), "literal.f")
+    assert calls["seen.update"].metadata["receiver_type_name"] == "dict"
+    assert calls["seen.update"].metadata["receiver_type_module"] == "builtins"
+    assert calls["parts.append"].metadata["receiver_type_name"] == "list"
+    assert calls["prefix.startswith"].metadata["receiver_type_name"] == "str"
+
+
+def test_local_assignment_shadows_module_binding(tmp_path: Path) -> None:
+    """A function-local binding of a module-bound name is the one that
+    applies inside that function."""
+    src = tmp_path / "shadowmod.py"
+    src.write_text(
+        "class Local:\n"
+        "    def m(self):\n"
+        "        return 1\n"
+        "\n"
+        "thing = Local()\n"
+        "\n"
+        "def g(thing):\n"
+        "    return thing.m()\n",
+        encoding="utf-8",
+    )
+    result = PythonParser().parse_file(src)
+    # Module-level call attribute: thing.m() inside g uses the unannotated
+    # parameter, not the module binding.
+    calls = _calls_of(result, "shadowmod.g")
+    assert calls["thing.m"].metadata == {}
+
+
+def test_module_level_conflicting_factories_stay_untyped(tmp_path: Path) -> None:
+    """Two different top-level producers for one name leave it ambiguous."""
+    src = tmp_path / "modconflict.py"
+    src.write_text(
+        "import logging\n"
+        "import sys\n\n"
+        "helper = logging.getLogger('a')\n"
+        "helper = sys.intern('b')\n\n"
+        "def f():\n"
+        "    helper.info('hi')\n",
+        encoding="utf-8",
+    )
+    calls = _calls_of(PythonParser().parse_file(src), "modconflict.f")
+    assert calls["helper.info"].metadata == {}

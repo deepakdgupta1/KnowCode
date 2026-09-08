@@ -151,7 +151,7 @@ class PythonParser:
                                     alias.name,
                                 )
         import_bindings = ImportBindings(module_bindings, member_bindings)
-        file_knowledge = FileKnowledge.build(tree)
+        file_knowledge = FileKnowledge.build(tree, module_name, import_bindings)
 
         self._process_scope(
             body=tree.body,

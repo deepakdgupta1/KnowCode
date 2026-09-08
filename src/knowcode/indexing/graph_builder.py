@@ -198,9 +198,19 @@ class _ReceiverIndex:
         module: str,
         name: str,
     ) -> Optional[Entity]:
-        """The one top-level linkable entity ``module`` exports under ``name``."""
+        """The one top-level linkable entity ``module`` exports under ``name``.
+
+        Searched in the module's own files, then — for a package — its
+        subtree, by the same re-export reasoning as :meth:`unique_class`.
+        """
+        files = self.module_files(module)
+        matches = self._top_level_by_last(self.linkable_by_file_last, files, name)
+        if len(matches) == 1:
+            return matches[0]
+        if matches:
+            return None
         matches = self._top_level_by_last(
-            self.linkable_by_file_last, self.module_files(module), name
+            self.linkable_by_file_last, self.subtree_of(files), name
         )
         return matches[0] if len(matches) == 1 else None
 
@@ -251,12 +261,15 @@ class _ReceiverIndex:
         return None
 
 
-def _return_annotation_name(signature: str) -> Optional[str]:
-    """The bare class name a function signature promises to return.
+def _return_annotation_origin(signature: str) -> Optional[tuple[Optional[str], str]]:
+    """The class a function signature promises to return, with its module.
 
-    ``Optional[X]`` and ``X | None`` peel to ``X``; anything that does not
-    name a simple identifier (generics, unions of two types, strings)
-    reports ``None`` rather than a guess.
+    ``-> logging.Logger`` reports ``("logging", "Logger")`` — the annotation
+    itself names the origin — and ``-> Store`` reports ``(None, "Store")``,
+    a bare name whose origin only its own file knows. ``Optional[X]`` and
+    ``X | None`` peel to ``X``; anything that does not name a simple dotted
+    identifier (generics, unions of two types, strings) reports ``None``
+    rather than a guess.
     """
     match = _RETURN_ANNOTATION_RE.search(signature)
     if match is None:
@@ -271,8 +284,12 @@ def _return_annotation_name(signature: str) -> Optional[str]:
             break
     else:
         return None
-    name = annotation.rsplit(".", 1)[-1]
-    return name if _SIMPLE_NAME_RE.match(name) else None
+    if "." in annotation:
+        module, _, name = annotation.rpartition(".")
+        if not all(_SIMPLE_NAME_RE.match(c) for c in module.split(".")):
+            return None
+        return (module, name) if _SIMPLE_NAME_RE.match(name) else None
+    return (None, annotation) if _SIMPLE_NAME_RE.match(annotation) else None
 
 
 def _qname_carries(qualified_name: str, member: str) -> bool:
@@ -719,9 +736,10 @@ class GraphBuilder:
         """Classify a receiver a cross-module factory produced.
 
         The factory entity is found in its module; its recorded signature
-        names the returned class, which must live in the factory's own file
-        — the only origin the signature itself can vouch for. A factory name
-        that is in fact a class (``mod.Class()`` as a constructor through a
+        names the returned class. A module-qualified annotation (``->
+        logging.Logger``) carries its own origin; a bare name's only
+        trustworthy origin is the factory's own file. A factory name that is
+        in fact a class (``mod.Class()`` as a constructor through a
         ``from``-import) binds the same way.
         """
         module = metadata["receiver_from_call_module"]
@@ -741,9 +759,22 @@ class GraphBuilder:
 
         if not factory.signature:
             return None
-        class_name = _return_annotation_name(factory.signature)
-        if class_name is None:
+        origin = _return_annotation_origin(factory.signature)
+        if origin is None:
             return None
+        class_module, class_name = origin
+
+        if class_module is not None:
+            # The annotation names the origin module itself.
+            if not index.module_files(class_module):
+                return build_external_reference_id(
+                    class_module, f"{class_name}.{method}"
+                )
+            class_entity = index.unique_class(class_module, class_name)
+            if class_entity is None:
+                return None
+            return index.method_target(class_entity, method)
+
         factory_file = Path(factory.location.file_path).as_posix()
         candidates = index.classes_by_file_last.get((factory_file, class_name), [])
         top_level = [

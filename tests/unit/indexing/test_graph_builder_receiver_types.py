@@ -432,3 +432,143 @@ def test_factory_returning_builtin_answers_builtins(tmp_path: Path) -> None:
         f"{tmp_path / 'helpers.py'}::helpers.label",
         "external::builtins::str.startswith",
     ]
+
+
+# ---------------------------------------------------------------------------
+# Module-scope bindings, literals, and qualified factory returns
+# ---------------------------------------------------------------------------
+
+
+def test_module_level_external_factory_answers_external(tmp_path: Path) -> None:
+    """``logger = logging.getLogger(__name__)`` at the top of a file makes
+    every ``logger.x()`` in it an external answer named for the producer."""
+    builder = _build(
+        tmp_path,
+        {
+            "caller.py": (
+                "import logging\n\n"
+                "logger = logging.getLogger(__name__)\n\n"
+                "def f():\n"
+                "    logger.info('hi')\n"
+            ),
+        },
+    )
+    targets = _calls(builder, "caller.py::caller.f")
+    assert [t for t, _ in targets] == ["external::logging::getLogger.info"]
+
+
+def test_module_level_imported_class_links_method(tmp_path: Path) -> None:
+    builder = _build(
+        tmp_path,
+        {
+            "stores/__init__.py": "",
+            "stores/service.py": (
+                "class Store:\n    def get(self, key):\n        return key\n"
+            ),
+            "caller.py": (
+                "from stores import Store\n\n"
+                "store = Store()\n\n"
+                "def f():\n"
+                "    return store.get('k')\n"
+            ),
+        },
+    )
+    targets = _calls(builder, "caller.py::caller.f")
+    assert [t for t, _ in targets] == [
+        f"{tmp_path / 'stores' / 'service.py'}::service.Store.get"
+    ]
+
+
+def test_literal_displays_answer_builtins(tmp_path: Path) -> None:
+    builder = _build(
+        tmp_path,
+        {
+            "caller.py": (
+                "def f():\n"
+                "    seen = {}\n"
+                "    parts = []\n"
+                "    seen.update({})\n"
+                "    parts.append(1)\n"
+                "    return seen, parts\n"
+            ),
+        },
+    )
+    targets = [t for t, _ in _calls(builder, "caller.py::caller.f")]
+    assert targets == [
+        "external::builtins::dict.update",
+        "external::builtins::list.append",
+    ]
+
+
+def test_qualified_factory_return_answers_external_class(tmp_path: Path) -> None:
+    """A factory promising ``-> logging.Logger`` names the origin itself: the
+    receiver's methods live on the external Logger class."""
+    builder = _build(
+        tmp_path,
+        {
+            "helpers.py": (
+                "import logging\n\n"
+                "def get_logger(name) -> logging.Logger:\n"
+                "    return logging.getLogger(name)\n"
+            ),
+            "caller.py": (
+                "from helpers import get_logger\n\n"
+                "logger = get_logger('x')\n\n"
+                "def f():\n"
+                "    logger.warning('w')\n"
+            ),
+        },
+    )
+    targets = _calls(builder, "caller.py::caller.f")
+    assert [t for t, _ in targets] == ["external::logging::Logger.warning"]
+
+
+def test_qualified_factory_return_links_in_repo_class(tmp_path: Path) -> None:
+    builder = _build(
+        tmp_path,
+        {
+            "stores/__init__.py": "",
+            "stores/service.py": (
+                "class Store:\n    def get(self, key):\n        return key\n"
+            ),
+            "helpers.py": (
+                "import stores.service\n\n"
+                "def make() -> stores.service.Store:\n"
+                "    return stores.service.Store()\n"
+            ),
+            "caller.py": (
+                "from helpers import make\n\n"
+                "def f():\n"
+                "    store = make()\n"
+                "    return store.get('k')\n"
+            ),
+        },
+    )
+    targets = [t for t, _ in _calls(builder, "caller.py::caller.f")]
+    assert targets == [
+        f"{tmp_path / 'helpers.py'}::helpers.make",
+        f"{tmp_path / 'stores' / 'service.py'}::service.Store.get",
+    ]
+
+
+def test_unannotated_parameter_shadows_module_binding(tmp_path: Path) -> None:
+    """A parameter reusing a module-bound name is a different object; with
+    no annotation there is nothing honest to bind, so the hole stays."""
+    builder = _build(
+        tmp_path,
+        {
+            "stores/service.py": (
+                "class Store:\n    def get(self, key):\n        return key\n"
+            ),
+            "caller.py": (
+                "from stores import Store\n\n"
+                "store = Store()\n\n"
+                "def g(store):\n"
+                "    return store.get('k')\n"
+            ),
+        },
+    )
+    targets = _calls(builder, "caller.py::caller.g")
+    assert len(targets) == 1
+    assert classify_endpoint_id(targets[0][0]) is EndpointKind.UNRESOLVED
+    assert targets[0][1] == {}
