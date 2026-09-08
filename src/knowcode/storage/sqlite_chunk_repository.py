@@ -28,6 +28,13 @@ mutating path writes or deletes its FTS row explicitly in the same transaction,
 and index repair is :meth:`rebuild_fts`, a re-tokenization pass over ``content``
 that replaces the ``'rebuild'`` command a contentless table cannot run.
 
+``chunks.content`` is deflated at the staged rewrite (storage plan §17, the
+DR-4 replacement for Phase F): writes land plain TEXT, and :meth:`compact`
+rewrites each row as the zlib BLOB before the generation is digested. The
+storage class is the discriminator, so a mixed artifact — a watch batch's
+TEXT rows beside the previous generation's deflated ones — reads back
+uniformly through :func:`inflate_chunk_content`.
+
 See: docs/research/knowcode-architecture-synthesis.md §3.1
      docs/engineering/adr/ (ADR 1, 2, 3, 7)
 """
@@ -40,6 +47,7 @@ import math
 import sqlite3
 import sys
 import threading
+import zlib
 from array import array
 from contextlib import contextmanager
 from pathlib import Path
@@ -49,7 +57,6 @@ from knowcode.data_models import CodeChunk
 from knowcode.errors import RepositoryClosedError
 from knowcode.storage.chunk_repository import ChunkFileReplacement, ChunkRepository
 from knowcode.storage.rewrite_witness import digest_rows, rows_preserved
-from knowcode.storage.sqlite_like import LIKE_ESCAPE_CLAUSE, like_contains
 from knowcode.utils.entity_identity import (
     absolutize_id,
     normalize_file_identity,
@@ -64,6 +71,31 @@ logger = get_logger(__name__)
 
 # One name per in-memory database, for the lifetime of the process (BL-7).
 _IN_MEMORY_SEQUENCE = itertools.count()
+
+# zlib level for the staged content deflate (storage plan §17). Level 6 is
+# the default the plan measured: 2.38 MB over the corpus, no new dependency.
+_CONTENT_DEFLATE_LEVEL = 6
+
+
+def deflate_chunk_content(content: str) -> str | bytes:
+    """Compress one chunk's text for storage, or keep it when that is larger.
+
+    A stored row is TEXT when it holds text and a BLOB when it holds the
+    zlib stream, and nothing writes a third kind, so SQLite's own storage
+    class is the discriminator :func:`inflate_chunk_content` reads back —
+    no marker column, no version flag on the row.
+    """
+    raw = content.encode("utf-8")
+    deflated = zlib.compress(raw, _CONTENT_DEFLATE_LEVEL)
+    return deflated if len(deflated) < len(raw) else content
+
+
+def inflate_chunk_content(value: str | bytes) -> str:
+    """Recover stored chunk text from either storage class."""
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return zlib.decompress(bytes(value)).decode("utf-8")
+    return value
+
 
 # Columns selected for every CodeChunk hydration, in the order ``_row_to_chunk``
 # unpacks them. Keep the INSERT column list in the same relative order.
@@ -605,7 +637,11 @@ class SqliteChunkRepository(ChunkRepository):
         stored_metadata = {
             key: value for key, value in chunk.metadata.items() if key != "content_hash"
         }
-        metadata_json = json.dumps(stored_metadata) if stored_metadata else "{}"
+        metadata_json = (
+            json.dumps(stored_metadata, separators=(",", ":"))
+            if stored_metadata
+            else "{}"
+        )
         stored_path = (
             file_path
             if file_path is not None
@@ -642,6 +678,7 @@ class SqliteChunkRepository(ChunkRepository):
             embedding_dim,
             content_hash,
         ) = row
+        content = inflate_chunk_content(content)
         try:
             metadata = json.loads(metadata_json) if metadata_json else {}
         except (json.JSONDecodeError, TypeError):
@@ -764,20 +801,33 @@ class SqliteChunkRepository(ChunkRepository):
         """Search chunks whose content contains ``pattern`` as a literal substring.
 
         Two semantics, both deliberate. The match is literal, so ``_`` and
-        ``%`` are ordinary characters rather than wildcards (BL-15). The match
-        is case-insensitive over ASCII, which is ``LIKE``'s own behaviour.
+        ``%`` are ordinary characters rather than wildcards (BL-15). The
+        match is case-insensitive, the ``.lower()`` containment the
+        in-memory store spells the same way.
+
+        A scan in Python, not a ``LIKE`` in SQLite: a deflated row stores
+        compressed bytes (§17), which ``LIKE`` cannot read as the text it
+        indexed. The scan inflates each row and compares here, still exact,
+        stopping at ``limit`` — 18.0 ms against 6.1 ms over 6,782 chunks
+        when the storage plan measured the trade.
         """
         if not pattern:
             return []
 
+        needle = pattern.lower()
+        matches: list[CodeChunk] = []
         with self._read_lease() as conn:
-            cursor = conn.execute(
-                f"SELECT {_SELECT_COLUMNS} FROM chunks "
-                f"WHERE content LIKE ? {LIKE_ESCAPE_CLAUSE} LIMIT ?",
-                (like_contains(pattern), limit),
-            )
-            rows = cursor.fetchall()
-        return [self._row_to_chunk(row) for row in rows]
+            cursor = conn.execute(f"SELECT {_SELECT_COLUMNS} FROM chunks")
+            while len(matches) < limit:
+                batch = cursor.fetchmany(256)
+                if not batch:
+                    break
+                for row in batch:
+                    if len(matches) >= limit:
+                        break
+                    if needle in inflate_chunk_content(row[2]).lower():
+                        matches.append(self._row_to_chunk(row))
+        return matches
 
     def remove_by_file(self, file_path: str) -> list[str]:
         """Remove all chunks associated with a canonical file identity."""
@@ -921,8 +971,8 @@ class SqliteChunkRepository(ChunkRepository):
         every row from ``chunks.content`` through ``tokenize_code`` — the same
         derivation the chunker used, so the rebuilt index matches the one the
         write path produced. One tokenization pass over the corpus, no source
-        tree access, no network. Holds until Phase F removes ``content``;
-        after that, repair is a re-index.
+        tree access, no network. Content is inflated first, so the pass
+        repairs a deflated artifact as readily as a plain one.
         """
         with self._write_lock:
             if self._closed:
@@ -937,7 +987,7 @@ class SqliteChunkRepository(ChunkRepository):
                 self._writer_conn.executemany(
                     "INSERT INTO chunks_fts(rowid, tokens_text) VALUES (?, ?)",
                     (
-                        (rowid, " ".join(tokenize_code(content)))
+                        (rowid, " ".join(tokenize_code(inflate_chunk_content(content))))
                         for rowid, content in rows
                     ),
                 )
@@ -1007,9 +1057,35 @@ class SqliteChunkRepository(ChunkRepository):
         """Rewrite the staged file. Every staged rewrite belongs here.
 
         Separate from :meth:`compact` so that whatever this grows into stays
-        inside the losslessness bracket rather than beside it.
+        inside the losslessness bracket rather than beside it. It now holds
+        the content deflate (§17): every TEXT ``content`` row becomes the
+        zlib stream at level 6, and a row whose text does not pay for the
+        header keeps its text. The deflate runs before the ``VACUUM`` so the
+        repack that follows sees the shrunken rows.
         """
+        self._deflate_staged_content()
         self._writer_conn.execute("VACUUM")
+
+    def _deflate_staged_content(self) -> None:
+        """Deflate every stored chunk text in one transaction.
+
+        Only TEXT rows are selected, so rewriting an already-deflated
+        artifact — a watch batch seeded from the previous generation —
+        touches nothing and the pass is idempotent.
+        """
+        rows = self._writer_conn.execute(
+            "SELECT rowid, content FROM chunks WHERE typeof(content) = 'text'"
+        ).fetchall()
+        updates: list[tuple[bytes, int]] = []
+        for rowid, content in rows:
+            deflated = deflate_chunk_content(content)
+            if isinstance(deflated, bytes):
+                updates.append((deflated, rowid))
+        if updates:
+            with self._writer_conn:
+                self._writer_conn.executemany(
+                    "UPDATE chunks SET content = ? WHERE rowid = ?", updates
+                )
 
     def _rewrite_witness(self) -> dict[str, str]:
         """Digest the row sets a staged rewrite must leave alone.
@@ -1018,6 +1094,13 @@ class SqliteChunkRepository(ChunkRepository):
         not how many. The count is what a manifest already records, and it is
         derived from this same file, which is the blind spot D1's durable
         embedding guard shares (BL-8).
+
+        ``chunk_contents`` digests every chunk's inflated text beside its id,
+        because the rewrite deflates that column: a deflate that corrupted a
+        row would leave every id and embedding in place, and the row sets
+        alone could not see it. Reading both sides of the comparison through
+        the inflater is what makes the bracket witness the deflate's
+        losslessness rather than assert it.
         """
         chunk_ids = [
             self._load_id(row[0])
@@ -1029,9 +1112,16 @@ class SqliteChunkRepository(ChunkRepository):
                 "SELECT chunk_id FROM chunks WHERE embedding IS NOT NULL"
             )
         ]
+        contents = [
+            f"{self._load_id(chunk_id)}\0{inflate_chunk_content(content)}"
+            for chunk_id, content in self._writer_conn.execute(
+                "SELECT chunk_id, content FROM chunks"
+            )
+        ]
         return {
             "chunk_ids": digest_rows(chunk_ids),
             "embedded_chunk_ids": digest_rows(embedded),
+            "chunk_contents": digest_rows(contents),
         }
 
     def close(self) -> None:

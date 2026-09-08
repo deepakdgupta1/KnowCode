@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
 """Measure what replacing the exact-match plane would cost, in recall and bytes.
 
-`ExactQueryEngine` is a `LIKE '%pattern%'` scan over `chunks.content`. Phase F
-removes that column, so anything that ships F has to say what answers a quoted
-query afterwards. This script measures the two candidate answers against the
-plane they would replace.
+`ExactQueryEngine` answers a quoted query by scanning `chunks.content` in
+Python — a containment over inflated text since the staged rewrite began
+deflating that column (§17). Phase F wanted to remove the column entirely,
+so anything that ships F has to say what answers a quoted query afterwards.
+This script measures the candidate answers against the plane they would
+replace.
 
 **Recall.** Two query families are drawn from the indexed corpus: fragments cut
 out of the middle of an identifier, which is what a substring plane exists for,
-and literal runs of a whole line. The `LIKE` answer is ground truth. The term
-index is scored unbounded and again at the limit `ExactQueryEngine` actually
-passes, because an OR-of-tokens query matches almost everything and the
-ordering is what decides whether the true hit is seen.
+and literal runs of a whole line. The exact-plane answer is ground truth. The
+term index is scored unbounded and again at the limit `ExactQueryEngine`
+actually passes, because an OR-of-tokens query matches almost everything and
+the ordering is what decides whether the true hit is seen.
 
 **Bytes.** An FTS5 `trigram` index answers a substring query exactly, and is
 sized here against the column it would replace, contentless and not.
@@ -33,6 +35,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
+from knowcode.storage.sqlite_chunk_repository import (  # noqa: E402
+    inflate_chunk_content,
+)
 from knowcode.utils.tokenizer import tokenize_code  # noqa: E402
 from measure_storage import resolve_generation  # noqa: E402
 
@@ -54,20 +59,15 @@ class Recall:
     term_hits: int
 
 
-def _escape(pattern: str) -> str:
-    """Escape a pattern so LIKE reads it literally."""
-    return pattern.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+def _exact_hits(rows: list[tuple[int, str]], pattern: str) -> set[int]:
+    """Rows whose content contains ``pattern`` as literal text.
 
-
-def _like_hits(con: sqlite3.Connection, pattern: str) -> set[int]:
-    """Rows whose content contains ``pattern`` as literal text."""
-    return {
-        rowid
-        for (rowid,) in con.execute(
-            "SELECT rowid FROM chunks WHERE content LIKE ? ESCAPE '\\'",
-            (f"%{_escape(pattern)}%",),
-        )
-    }
+    The containment the shipped engine runs since §17 moved the exact scan
+    into Python over inflated text — which is what ground truth has to be
+    here, because a deflated row stores bytes ``LIKE`` cannot read.
+    """
+    needle = pattern.lower()
+    return {rowid for rowid, content in rows if needle in content.lower()}
 
 
 def _term_hits(con: sqlite3.Connection, query: str, limit: int | None) -> set[int]:
@@ -118,12 +118,17 @@ def _draw_queries(corpus: list[str], rng: random.Random) -> dict[str, list[str]]
     }
 
 
-def score(con: sqlite3.Connection, family: str, queries: list[str]) -> Recall:
-    """Score one query family against the LIKE plane as ground truth."""
+def score(
+    con: sqlite3.Connection,
+    rows: list[tuple[int, str]],
+    family: str,
+    queries: list[str],
+) -> Recall:
+    """Score one query family against the exact plane as ground truth."""
     unbounded, bounded = [], []
     answerable = empty = true_hits = term_hits = 0
     for query in queries:
-        truth = _like_hits(con, query)
+        truth = _exact_hits(rows, query)
         if not truth:
             continue
         answerable += 1
@@ -188,7 +193,10 @@ def main() -> None:
 
     generation = resolve_generation(args.index, args.generation)
     con = sqlite3.connect(f"file:{generation / 'chunks.db'}?mode=ro", uri=True)
-    rows = con.execute("SELECT rowid, content FROM chunks").fetchall()
+    rows = [
+        (rowid, inflate_chunk_content(content))
+        for rowid, content in con.execute("SELECT rowid, content FROM chunks")
+    ]
     if not rows:
         raise SystemExit(f"{generation} holds no chunks")
 
@@ -198,7 +206,7 @@ def main() -> None:
     for family, queries in _draw_queries(
         [content for _, content in rows], random.Random(args.seed)
     ).items():
-        r = score(con, family, queries)
+        r = score(con, rows, family, queries)
         print(
             f"{r.family:<26}{r.answerable:>4}{r.unbounded:>11.1%}"
             f"{r.bounded:>10.1%}{r.empty:>8}{r.true_hits:>8}{r.term_hits:>10}"

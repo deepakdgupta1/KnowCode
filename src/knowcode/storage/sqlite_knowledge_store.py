@@ -389,7 +389,11 @@ class SqliteKnowledgeStore:
             for key, value in entity.metadata.items()
             if key != "content_hash"
         }
-        metadata_json = json.dumps(stored_metadata) if stored_metadata else "{}"
+        metadata_json = (
+            json.dumps(stored_metadata, separators=(",", ":"))
+            if stored_metadata
+            else "{}"
+        )
         conn.execute(
             """
             INSERT OR REPLACE INTO entities (
@@ -442,7 +446,9 @@ class SqliteKnowledgeStore:
                 self._store_id(rel.source_id),
                 self._store_id(rel.target_id),
                 rel.kind.value,
-                json.dumps(rel.metadata) if rel.metadata else None,
+                json.dumps(rel.metadata, separators=(",", ":"))
+                if rel.metadata
+                else None,
             ),
         )
 

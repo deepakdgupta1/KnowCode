@@ -790,3 +790,53 @@ def test_structural_edges_are_dependencies(tmp_path: Path) -> None:
         "user",
         "importer",
     }
+
+
+# ---------------------------------------------------------------------------
+# metadata_json encoding (storage plan §17, compact separators)
+# ---------------------------------------------------------------------------
+
+
+def test_entity_metadata_json_is_dumped_without_separator_spaces(
+    tmp_path: Path,
+) -> None:
+    """Entity metadata lands compact: no ", " or ": " between members."""
+    store = SqliteKnowledgeStore(tmp_path / "knowledge.db")
+    try:
+        entity = _make_entity("file.py::foo", EntityKind.FUNCTION, "foo")
+        entity.metadata = {"confidence": 0.9, "origin": "parser"}
+        store.add_entity(entity)
+
+        raw = store._writer_conn.execute(
+            "SELECT metadata_json FROM entities WHERE entity_id = 'file.py::foo'"
+        ).fetchone()[0]
+
+        assert raw == '{"confidence":0.9,"origin":"parser"}'
+    finally:
+        store.close()
+
+
+def test_relationship_metadata_json_is_dumped_without_separator_spaces(
+    tmp_path: Path,
+) -> None:
+    """Edge metadata lands compact the same way."""
+    store = SqliteKnowledgeStore(tmp_path / "knowledge.db")
+    try:
+        store.add_entity(_make_entity("file.py::foo", EntityKind.FUNCTION, "foo"))
+        store.add_entity(_make_entity("file.py::bar", EntityKind.FUNCTION, "bar"))
+        store.add_relationship(
+            Relationship(
+                "file.py::foo",
+                "file.py::bar",
+                RelationshipKind.CALLS,
+                metadata={"weight": 2, "via": "call"},
+            )
+        )
+
+        raw = store._writer_conn.execute(
+            "SELECT metadata_json FROM relationships"
+        ).fetchone()[0]
+
+        assert raw == '{"weight":2,"via":"call"}'
+    finally:
+        store.close()

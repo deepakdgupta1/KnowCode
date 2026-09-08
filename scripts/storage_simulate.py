@@ -38,13 +38,17 @@ import shutil
 import sqlite3
 import sys
 import tempfile
-import zlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
+from knowcode.storage.sqlite_chunk_repository import (  # noqa: E402
+    deflate_chunk_content,
+    inflate_chunk_content,
+)
 from measure_storage import resolve_generation  # noqa: E402
 
 # Keys duplicated into metadata_json that are already first-class columns.
@@ -237,6 +241,10 @@ def _source_descriptors(con: sqlite3.Connection, repo_root: Path) -> None:
     for rowid, rel, content in con.execute(
         "SELECT rowid, file_path, content FROM chunks"
     ).fetchall():
+        # §17 ships deflated content; the model has to read the text it
+        # analyses, and its residue has to go back the way the artifact
+        # would store it, or the model prices an inflation as a cost of F.
+        content = inflate_chunk_content(content)
         if rel not in files:
             path = Path(rel) if Path(rel).is_absolute() else repo_root / rel
             try:
@@ -245,15 +253,15 @@ def _source_descriptors(con: sqlite3.Connection, repo_root: Path) -> None:
                 files[rel] = None
         text = files[rel]
         if text is None or not content:
-            updates.append((content, None, None, rowid))
+            updates.append((deflate_chunk_content(content), None, None, rowid))
             continue
         cut = _first_resident_offset(content, text)
         if cut == len(content):
-            updates.append((content, None, None, rowid))
+            updates.append((deflate_chunk_content(content), None, None, rowid))
             continue
         start = len(text[: text.find(content[cut:])].encode("utf-8"))
         end = start + len(content[cut:].encode("utf-8"))
-        updates.append((content[:cut], start, end, rowid))
+        updates.append((deflate_chunk_content(content[:cut]), start, end, rowid))
         resolved += 1
         whole += not cut
         residue += len(content[:cut].encode("utf-8"))
@@ -386,15 +394,16 @@ def chunk_candidates(sim: Simulator) -> list[Result]:
     def compressed_content(con: sqlite3.Connection) -> None:
         """Keep the text and every plane over it, store it deflated.
 
-        The alternative to a descriptor. It changes no query semantics and no
-        freshness contract, at the cost of a decompress on each chunk read and
-        a scan in Python where LIKE runs in SQLite today.
+        Shipped as §17's replacement for F, inside the staged rewrite. Against
+        a pre-§17 artifact this candidate measured 2.38 MB; against a
+        deflated one it re-derives the same bytes and reports ~0, which is
+        the honest answer to "what is left to save".
         """
         con.executescript(DROP_TRIGGERS)
         con.executemany(
             "UPDATE chunks SET content = ? WHERE rowid = ?",
             [
-                (zlib.compress(content.encode("utf-8"), 6), rowid)
+                (deflate_chunk_content(inflate_chunk_content(content)), rowid)
                 for rowid, content in con.execute(
                     "SELECT rowid, content FROM chunks"
                 ).fetchall()
@@ -416,13 +425,27 @@ def chunk_candidates(sim: Simulator) -> list[Result]:
         con.execute("ALTER TABLE chunks DROP COLUMN embedding_dim")
 
     def prune_trivial(con: sqlite3.Connection) -> None:
-        """Stop embedding chunks too small to carry retrievable meaning."""
+        """Stop embedding chunks too small to carry retrievable meaning.
+
+        The threshold is over inflated text length, not ``LENGTH(content)``:
+        a deflated row (§17) reports its compressed bytes there, and a
+        300-byte body that compresses under 250 would be pruned against the
+        policy's own premise.
+        """
         con.executescript(DROP_TRIGGERS)
-        con.execute(
-            "UPDATE chunks SET embedding = NULL, embedding_dim = NULL "
-            "WHERE LENGTH(content) < ? "
-            "OR json_extract(metadata_json, '$.type') = 'imports'",
-            (PRUNE_MIN_CONTENT_BYTES,),
+        trivial = [
+            (rowid,)
+            for rowid, content, chunk_type in con.execute(
+                "SELECT rowid, content, json_extract(metadata_json, '$.type') "
+                "FROM chunks"
+            ).fetchall()
+            if chunk_type == "imports"
+            or len(inflate_chunk_content(content).encode("utf-8"))
+            < PRUNE_MIN_CONTENT_BYTES
+        ]
+        con.executemany(
+            "UPDATE chunks SET embedding = NULL, embedding_dim = NULL WHERE rowid = ?",
+            trivial,
         )
 
     def combined_pruned(con: sqlite3.Connection) -> None:

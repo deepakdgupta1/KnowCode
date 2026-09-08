@@ -32,9 +32,14 @@ import sqlite3
 import struct
 import subprocess
 import sys
+from collections import Counter
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Optional
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+
+from knowcode.storage.sqlite_chunk_repository import inflate_chunk_content  # noqa: E402
 
 # Content thresholds projected in the embedding-planner savings table.
 THRESHOLD_BANDS = (60, 100, 150, 250, 400)
@@ -316,49 +321,52 @@ def measure_chunk_profile(generation: Path) -> dict[str, Any]:
         )
         vector_bytes = dim * 4 if dim else 0
 
+        # Content may be stored deflated (§17), so every length this profile
+        # reports is the inflated text length, computed here rather than with
+        # ``LENGTH(content)`` — which reads compressed bytes on a BLOB row and
+        # would silently re-bucket every chunk against the wrong size.
+        texts = [
+            (row[0] or "(untyped)", inflate_chunk_content(row[1]))
+            for row in con.execute(
+                "SELECT json_extract(metadata_json, '$.type'), content FROM chunks"
+            )
+        ]
+        lengths = [len(text.encode("utf-8")) for _, text in texts]
+
         buckets = []
         for name, low, high in CHUNK_SIZE_BUCKETS:
-            clause = f"LENGTH(content) >= {low}"
-            if high is not None:
-                clause += f" AND LENGTH(content) < {high}"
-            n, content = con.execute(
-                f"SELECT COUNT(*), COALESCE(SUM(LENGTH(content)), 0) "
-                f"FROM chunks WHERE {clause}"
-            ).fetchone()
+            members = [n for n in lengths if n >= low and (high is None or n < high)]
             buckets.append(
                 {
                     "bucket": name,
-                    "chunks": int(n),
-                    "content_bytes": int(content),
-                    "vector_bytes": int(n) * vector_bytes,
+                    "chunks": len(members),
+                    "content_bytes": sum(members),
+                    "vector_bytes": len(members) * vector_bytes,
                 }
             )
 
+        grouped: dict[str, list[int]] = {}
+        for (chunk_type, _), n in zip(texts, lengths):
+            grouped.setdefault(chunk_type, []).append(n)
         by_type = [
             {
-                "type": row[0] or "(untyped)",
-                "chunks": int(row[1]),
-                "content_bytes": int(row[2]),
-                "vector_bytes": int(row[1]) * vector_bytes,
+                "type": chunk_type,
+                "chunks": len(members),
+                "content_bytes": sum(members),
+                "vector_bytes": len(members) * vector_bytes,
             }
-            for row in con.execute(
-                "SELECT json_extract(metadata_json, '$.type'), COUNT(*), "
-                "COALESCE(SUM(LENGTH(content)), 0) FROM chunks "
-                "GROUP BY 1 ORDER BY 2 DESC"
+            for chunk_type, members in sorted(
+                grouped.items(), key=lambda item: len(item[1]), reverse=True
             )
         ]
 
-        redundant = con.execute(
-            "SELECT COALESCE(SUM(c - 1), 0) FROM "
-            "(SELECT COUNT(*) c FROM chunks GROUP BY content HAVING c > 1)"
-        ).fetchone()[0]
+        redundant = sum(
+            c - 1 for c in Counter(text for _, text in texts).values() if c > 1
+        )
 
         thresholds = []
         for threshold in THRESHOLD_BANDS:
-            kept = con.execute(
-                "SELECT COUNT(*) FROM chunks WHERE LENGTH(content) >= ?",
-                (threshold,),
-            ).fetchone()[0]
+            kept = sum(1 for n in lengths if n >= threshold)
             thresholds.append(
                 {
                     "min_content_bytes": threshold,

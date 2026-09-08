@@ -1111,7 +1111,7 @@ about the file as a whole.
 
 | File | Symbol | What |
 |---|---|---|
-| `indexing/indexer.py` | `Indexer.SCHEMA_VERSION` | the gate that forces a rebuild; **7**, moved by C5, BL-11 and BL-9 |
+| `indexing/indexer.py` | `Indexer.SCHEMA_VERSION` | the gate that forces a rebuild; **8**, moved by C5, BL-11, BL-9 and §17's deflate |
 | `indexing/indexer.py` | `Indexer._reuse_durable_embeddings` | looks a chunk up by `content_hash` and attaches its vector without comparing content (BL-11) |
 | `indexing/indexer.py` | `Indexer._embed_pending` | embeds `chunk.content`; the planner hook (E1) |
 | `indexing/indexer.py` | `Indexer._recover_vectors_from_chunks` | the rebuild path (D1); scoped to one file transaction, not the corpus |
@@ -1129,7 +1129,9 @@ about the file as a whole.
 | `storage/sqlite_chunk_repository.py` | `SqliteChunkRepository.SCHEMA_VERSION` | 4; gates nothing on its own, see §11's correction |
 | `storage/sqlite_chunk_repository.py` | `SqliteChunkRepository.get_chunk_id_by_hash` | the reuse lookup; a column read since C5, not `json_extract` |
 | `storage/sqlite_chunk_repository.py` | `SqliteChunkRepository.compact` | the staged rewrite, bracketed by its own losslessness witness (A2, BL-8) |
-| `storage/sqlite_chunk_repository.py` | `SqliteChunkRepository._rewrite` | **where the deflate and the separator compaction go**, so they inherit that witness |
+| `storage/sqlite_chunk_repository.py` | `SqliteChunkRepository._rewrite` | the content deflate lives here, inside the losslessness witness; **shipped 2026-09-08**, with the separator compaction applied at the three dump sites instead |
+| `storage/sqlite_chunk_repository.py` | `deflate_chunk_content` | §17's codec; the storage class is the discriminator |
+| `storage/sqlite_chunk_repository.py` | `inflate_chunk_content` | the one helper every content reader inflates through |
 | `storage/sqlite_knowledge_store.py` | `SqliteKnowledgeStore.SCHEMA_VERSION` | 1 |
 | `storage/sqlite_knowledge_store.py` | `SqliteKnowledgeStore.compact` | the `knowledge.db` half of the same pair |
 | `storage/rewrite_witness.py` | `rows_preserved` | the bracket itself (BL-8) |
@@ -1141,7 +1143,7 @@ about the file as a whole.
 | File | Symbol | What |
 |---|---|---|
 | `retrieval/reranker.py` | `Reranker.rerank` | reads `chunk.content`; one of the readers Phase F would have broken (BL-14) |
-| `retrieval/exact_query_engine.py` | `ExactQueryEngine.search_scored` | the whole exact plane; `LIKE` over `content`, literal since BL-15 |
+| `retrieval/exact_query_engine.py` | `ExactQueryEngine.search_scored` | the whole exact plane; a Python containment over inflated `content`, literal since BL-15 |
 | `service.py` | `KnowCodeService.get_entity_details` | the one `entity.source_code` reader (D3) |
 | `analysis/preflight.py` | `_score_behavior_analyzability` | reads `behavior["confidence"]` (retained, §2 D1) |
 | `analysis/context_synthesizer.py` | `ContextSynthesizer.synthesize` | renders `behavior` (retained) |
@@ -2377,3 +2379,74 @@ runs on the same generation: 29 ms on a 39.1 MB `chunks.db` and 89 ms on a
 `metadata_json` separator compaction both rewrite a staged artifact. Put them
 inside `_rewrite()` on the store that owns the file and they inherit the
 losslessness witness. Put them beside it and they do not.
+
+### The lossless remainder shipped — 2026-09-08, and what it measured
+
+Both items the 2026-08-30 ledger left open are in the stream. `chunks.content`
+is deflated, `metadata_json` is dumped compact, and nothing DR-4 permits
+remains inside a generation. The exit condition above this entry is met as far
+as it can be met without deciding Phase G.
+
+**The deflate lives inside `_rewrite()`, and the witness grew to hold it.**
+`SqliteChunkRepository._rewrite` deflates every TEXT `content` row — zlib
+level 6, the level this plan measured — before the `VACUUM`, so all three
+publication paths (full build, incremental, watch batch) inherit the bracket.
+The bracket itself was extended, because the row-set digests BL-8 left could
+not see the one thing this rewrite now touches: a corrupted deflate leaves
+every id and every embedding in place. `_rewrite_witness` digests every
+chunk's *inflated* text beside its id — `chunk_contents` — so the before and
+after sides of the comparison read through the inflater, and the losslessness
+of the deflate is witnessed rather than asserted. A probe that swaps one
+chunk's text for different text now fails the publication naming
+`chunk_contents`, and that probe is a test.
+
+**The storage class is the discriminator, so no row carries a flag.** A row
+that deflates is the BLOB zlib produced; a row that does not — 588 of 7,474,
+where the text is too short to pay for the zlib header — stays TEXT. Nothing
+writes a third kind, so `typeof(content)` answers what a reader is holding,
+and a mixed artifact reads uniformly: a watch batch lands TEXT rows beside
+the previous generation's deflated ones, and the next compact deflates the
+newcomers. Readers inflate through one helper; the exact plane, FTS repair
+and every hydration path share it.
+
+**The separators shipped at the three dump sites, not as a rewrite.** The
+ledger named `_chunk_to_row`, `_insert_entity_row` and
+`_insert_relationship_row` as the sites dumping with Python's default
+separators, and fixing the sites is strictly better than re-dumping at
+compact time: identical bytes, no second JSON codec on the rewrite path, and
+the version bump below forces exactly one full rebuild on upgrade — which is
+the single event that rewrites every row anyway, so no legacy spacing survives
+the transition.
+
+**Measured, not projected.** Same-corpus, by the simulator against generation
+`20260908T022616261224Z-52497f78` (built at `d9021c0`, the last pre-change
+commit): the deflate is worth 2.78 MB of `chunks.db`, the separators 0.07 MB
+there and 0.14 MB of `knowledge.db`. Landed, by `stat()` on the generation
+the new code published from this tree, `20260908T180220701489Z-587b971c`:
+`chunks.db` 43,773,952 → 40,951,808 (−2,822,144) and `knowledge.db`
+9,953,280 → 9,834,496 (−118,784), **−2,940,928 bytes ≈ 2.80 MB** on one
+generation. The corpus moved between the two builds by the working changes
+that shipped the phase; the simulator numbers carry the same-corpus claim,
+and the two agree to within corpus drift.
+
+**`Indexer.SCHEMA_VERSION` moved 7 to 8, for the BL-11 reason.** A build that
+predates the codec would hand callers compressed bytes as `content` and serve
+every plane unreadable, so the manifest refuses those artifacts outright. The
+bump buys the deflate one full rebuild on upgrade and nothing after it. The
+exact plane's scan moved into Python at the same time — `LIKE` cannot read a
+BLOB as the text it indexed — at the 18.0 ms against 6.1 ms over the corpus
+this plan already measured, still literal, still case-insensitive, still
+BL-15's contract, now held by containment over inflated text.
+
+**The measurement scripts read the artifact through the inflater.** The
+simulator's descriptor and prune models, `measure_storage`'s chunk profile —
+whose size buckets and Phase E thresholds mean *text* length, not compressed
+length — and `exact_plane_recall`'s ground-truth arm all inflate on read, so
+none of them can price a change against compressed bytes and call it text.
+BL-12's lesson, applied before it bit this time.
+
+**What is left.** Nothing in-generation: every remaining lever costs retrieval
+quality (fp32) or is gated on P1's harness (E). Phase G — retention, two
+generations holding near-identical bytes — is the only lossless item left in
+this plan, and the roadmap item that decides it, or retires the plan without
+it, is next.

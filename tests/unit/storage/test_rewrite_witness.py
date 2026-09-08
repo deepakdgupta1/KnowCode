@@ -147,7 +147,31 @@ def test_compact_fails_closed_when_the_rewrite_strips_an_embedding(
 
     with pytest.raises(StagedRewriteError) as raised:
         repo.compact()
-    assert raised.value.changed == ["embedded_chunk_ids"]
+    assert "embedded_chunk_ids" in raised.value.changed
+    repo.close()
+
+
+def test_compact_fails_closed_when_the_rewrite_corrupts_content(
+    tmp_path: Path,
+) -> None:
+    """The deflate's losslessness is witnessed, not assumed (§17).
+
+    A rewrite that swaps a chunk's text for different text leaves every id
+    and every embedding in place, so the row-set digests alone would pass.
+    The content digest is what the deflate lives inside the bracket to
+    answer for: inflate both sides and they disagree.
+    """
+    repo = _LossyChunks(tmp_path / "chunks.db", dimension=DIMENSION)
+    repo.sql = (
+        "UPDATE chunks SET content = 'silent corruption' "
+        "WHERE chunk_id = '/src/mod.py::alpha::0'"
+    )
+    repo.add(_chunk("alpha", [1.0, 0.0, 0.0, 0.0]))
+    repo.add(_chunk("beta", [0.0, 1.0, 0.0, 0.0]))
+
+    with pytest.raises(StagedRewriteError) as raised:
+        repo.compact()
+    assert "chunk_contents" in raised.value.changed
     repo.close()
 
 

@@ -7,6 +7,7 @@ They define the contract for the SQLite-backed chunk repository with FTS5 BM25.
 import sqlite3
 import tracemalloc
 import threading
+import zlib
 from array import array
 from pathlib import Path
 from typing import Generator
@@ -1316,8 +1317,14 @@ class TestCompaction:
         finally:
             repo.close()
 
-    def test_compact_preserves_every_row_byte_for_byte(self, db_path: Path) -> None:
-        """Row counts and embedding BLOBs survive the rewrite untouched."""
+    def test_compact_preserves_what_every_row_holds(self, db_path: Path) -> None:
+        """Row counts, embedding BLOBs, and content survive the rewrite.
+
+        The deflate changes how ``content`` is stored — TEXT becomes the
+        zlib BLOB — so raw bytes are no longer the contract. What must hold
+        is what the row means: every other column byte-identical, and
+        content inflating back to exactly the text that went in.
+        """
         repo = SqliteChunkRepository(db_path, dimension=32)
         try:
             repo.add_batch(_embedded_chunks(400))
@@ -1327,8 +1334,18 @@ class TestCompaction:
 
             repo.compact()
 
-            assert _raw_rows(db_path) == before
-            assert repo.count() == len(before)
+            after = _raw_rows(db_path)
+            assert len(after) == len(before) == repo.count()
+            for raw_before, raw_after in zip(before, after):
+                # Both sides are ordered by chunk_id, which anchors the pair.
+                # Columns: rowid, chunk_id, entity_id, content, metadata_json,
+                # file_path, embedding, embedding_dim, content_hash. Every
+                # column but content must still compare as raw bytes.
+                assert raw_after[1:3] == raw_before[1:3]
+                assert raw_after[4:6] == raw_before[4:6]
+                assert raw_after[6:] == raw_before[6:]
+                assert isinstance(raw_after[3], bytes)
+                assert zlib.decompress(raw_after[3]).decode("utf-8") == raw_before[3]
         finally:
             repo.close()
 
@@ -1393,6 +1410,225 @@ class TestCompaction:
 
         with pytest.raises(RepositoryClosedError):
             repo.compact()
+
+
+# ---------------------------------------------------------------------------
+# Content deflation (storage plan §17, the DR-4 replacement for Phase F)
+# ---------------------------------------------------------------------------
+
+
+def _stored_content(db_path: Path) -> dict[str, object]:
+    """Read each row's stored ``content`` value straight out of the file.
+
+    A second connection sees the storage class that landed on disk — TEXT
+    passes through as ``str``, a deflated row comes back as ``bytes`` — so
+    the discriminator under test is SQLite's own, not a marker column.
+    """
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    try:
+        return dict(conn.execute("SELECT chunk_id, content FROM chunks").fetchall())
+    finally:
+        conn.close()
+
+
+def _compressible(chunk_id: str, body: str = "x" * 400) -> CodeChunk:
+    """A chunk whose body deflates to well under half its size."""
+    return CodeChunk(
+        id=chunk_id,
+        entity_id=f"/src/{chunk_id}.py::{chunk_id}",
+        content=f"def {chunk_id}():\n    return {body}\n",
+        tokens=[chunk_id],
+        metadata={"kind": "function"},
+    )
+
+
+class TestContentDeflation:
+    """``compact()`` deflates ``chunks.content``; every reader inflates it.
+
+    zlib level 6 over the staged artifact, inside ``_rewrite()`` so the
+    BL-8 bracket witnesses it. The storage class is the discriminator —
+    plain text stays TEXT, a deflated row is the BLOB zlib produced —
+    because the writer only ever stores one or the other.
+    """
+
+    def test_compact_stores_content_as_a_zlib_blob(self, db_path: Path) -> None:
+        repo = SqliteChunkRepository(db_path, dimension=32)
+        try:
+            repo.add(_compressible("deflated"))
+            original = repo.get("deflated").content
+
+            repo.compact()
+
+            stored = _stored_content(db_path)
+            assert stored == {"deflated": zlib.compress(original.encode("utf-8"), 6)}
+        finally:
+            repo.close()
+
+    def test_short_content_stays_text_rather_than_growing(self, db_path: Path) -> None:
+        """zlib's header costs 9 bytes; a row that cannot pay it stays TEXT."""
+        repo = SqliteChunkRepository(db_path, dimension=32)
+        try:
+            repo.add(
+                CodeChunk(
+                    id="tiny", entity_id="/src/t.py::t", content="x", tokens=["x"]
+                )
+            )
+            repo.add(_compressible("deflated"))
+
+            repo.compact()
+
+            stored = _stored_content(db_path)
+            assert stored["tiny"] == "x"
+            assert isinstance(stored["deflated"], bytes)
+        finally:
+            repo.close()
+
+    def test_every_reader_hands_back_the_original_text(self, db_path: Path) -> None:
+        repo = SqliteChunkRepository(db_path, dimension=32)
+        try:
+            repo.add_batch([_compressible("alpha"), _compressible("beta")])
+            expected = {c.id: c.content for c in repo.get_all()}
+
+            repo.compact()
+
+            assert repo.get("alpha").content == expected["alpha"]
+            assert {
+                c.id: c.content for c in repo.get_by_entity("/src/beta.py::beta")
+            } == {"beta": expected["beta"]}
+            assert {c.id: c.content for c in repo.get_all()} == expected
+            assert {c.id for c in repo.search_by_tokens(["alpha"], limit=10)} == {
+                "alpha"
+            }
+            assert {c.id for c in repo.search_exact("return", limit=10)} == {
+                "alpha",
+                "beta",
+            }
+        finally:
+            repo.close()
+
+    def test_a_second_compact_leaves_deflated_rows_alone(self, db_path: Path) -> None:
+        """Idempotence: the deflate pass runs over TEXT rows only."""
+        repo = SqliteChunkRepository(db_path, dimension=32)
+        try:
+            repo.add_batch([_compressible("alpha"), _compressible("beta")])
+            repo.compact()
+            first = _stored_content(db_path)
+            first_pages = _page_stats(db_path)
+
+            repo.compact()
+
+            assert _stored_content(db_path) == first
+            assert _page_stats(db_path) == first_pages
+        finally:
+            repo.close()
+
+    def test_rows_written_after_a_compact_are_readable(self, db_path: Path) -> None:
+        """A watch batch lands TEXT rows beside BLOB rows and both read back."""
+        repo = SqliteChunkRepository(db_path, dimension=32)
+        try:
+            repo.add(_compressible("early"))
+            repo.compact()
+
+            repo.add(_compressible("late"))
+
+            assert repo.get("early").content == _compressible("early").content
+            assert repo.get("late").content == _compressible("late").content
+
+            repo.compact()
+            stored = _stored_content(db_path)
+            assert isinstance(stored["early"], bytes)
+            assert isinstance(stored["late"], bytes)
+            assert repo.get("late").content == _compressible("late").content
+        finally:
+            repo.close()
+
+    def test_search_exact_stays_literal_over_deflated_rows(self, db_path: Path) -> None:
+        """BL-15's contract outlives the LIKE scan it was stated over."""
+        repo = SqliteChunkRepository(db_path, dimension=32)
+        try:
+            repo.add(
+                CodeChunk(
+                    id="literal",
+                    entity_id="/src/l.py::l",
+                    content="load vector_store now",
+                    tokens=["literal"],
+                )
+            )
+            repo.add(
+                CodeChunk(
+                    id="wildcard",
+                    entity_id="/src/w.py::w",
+                    content="load vectorXstore now",
+                    tokens=["wildcard"],
+                )
+            )
+            repo.add(
+                CodeChunk(
+                    id="percent",
+                    entity_id="/src/p.py::p",
+                    content="coverage 100% today",
+                    tokens=["percent"],
+                )
+            )
+            repo.compact()
+
+            def served(pattern: str) -> set[str]:
+                return {c.id for c in repo.search_exact(pattern, limit=10)}
+
+            assert served("vector_store") == {"literal"}
+            assert served("100% t") == {"percent"}
+            assert served("VECTOR_STORE") == {"literal"}
+        finally:
+            repo.close()
+
+    def test_rebuild_fts_retokenizes_deflated_content(self, db_path: Path) -> None:
+        """Repair re-derives tokens from stored content, whatever its class."""
+        repo = SqliteChunkRepository(db_path, dimension=32)
+        try:
+            repo.add(_compressible("repairme"))
+            repo.compact()
+            with repo._write_lock:
+                with repo._writer_conn:
+                    repo._writer_conn.execute("DELETE FROM chunks_fts")
+            assert repo.search_by_tokens(["repairme"], limit=10) == []
+
+            repo.rebuild_fts()
+
+            assert {c.id for c in repo.search_by_tokens(["repairme"], limit=10)} == {
+                "repairme"
+            }
+        finally:
+            repo.close()
+
+
+class TestMetadataJsonEncoding:
+    """``metadata_json`` is dumped with compact separators (§17, 0.15 MB)."""
+
+    def test_chunk_metadata_is_dumped_without_separator_spaces(
+        self, db_path: Path
+    ) -> None:
+        repo = SqliteChunkRepository(db_path, dimension=32)
+        try:
+            repo.add(
+                CodeChunk(
+                    id="c1",
+                    entity_id="/src/c.py::c",
+                    content="def c(): pass",
+                    tokens=["c"],
+                    metadata={"kind": "function", "index": 3},
+                )
+            )
+            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+            try:
+                raw = conn.execute(
+                    "SELECT metadata_json FROM chunks WHERE chunk_id = 'c1'"
+                ).fetchone()[0]
+            finally:
+                conn.close()
+
+            assert raw == '{"kind":"function","index":3}'
+        finally:
+            repo.close()
 
 
 class TestContentHashColumn:

@@ -299,7 +299,11 @@ against its indexed digest, worth a measured 3.67 MB, behind a global
 back into the persisted copy with no migration. Wiring its resolver into
 `get_entity_details` and not into `get_context` cost the canonical MCP tool its
 source body on a fresh index; that was BL-16, Critical, found and fixed the
-same day.
+same day. The lossless remainder shipped 2026-09-08: `chunks.content` deflates
+inside the staged rewrite under a `chunk_contents` witness digest,
+`metadata_json` dumps compact at its three sites, and the exact plane scans
+inflated text in Python; worth a measured 2.80 MB, with `Indexer.SCHEMA_VERSION`
+at 8 so no pre-deflate build reads the artifact.
 
 **Phase F and the int8 ANN cache are rejected, not deferred.** F would have
 left `ExactQueryEngine` with no implementation — the term index that would
@@ -309,14 +313,16 @@ against exhaustive fp32's `1.0000` for 18 MB. Both are closed as rejected in
 the [backlog](engineering/backlog.md), and DR-4 records the rule that closed
 them.
 
-**Where this leaves the stream.** One generation now measures 46.70 MB.
-Everything DR-4 permits inside a generation is worth **2.53 MB**: deflating
-`chunks.content` (2.38 MB, the replacement for F) and compacting
-`metadata_json` separators (0.15 MB). The larger remaining lever is retention —
-two generations hold 97 MB of mostly identical bytes — which is Phase G, and it
-is a different axis from making a generation smaller. The plan's §17 closing
-ledger carries the full accounting, measured rather than projected; read it
-before §11, whose targets are sized against the pre-B corpus.
+**Where this leaves the stream.** Everything DR-4 permits inside a generation
+has shipped. The 2.53 MB the closing ledger held open became 2.80 MB measured
+on 2026-09-08's larger corpus (deflate 2.69 MB of it), and one generation now
+measures 50.78 MB for a corpus the older figure never described — read the
+§17 entries, not the deltas between them, for what each phase moved. The
+larger remaining lever is retention — two generations hold mostly identical
+bytes — which is Phase G, and it is a different axis from making a generation
+smaller. The plan's §17 closing ledger carries the full accounting, measured
+rather than projected; read it before §11, whose targets are sized against the
+pre-B corpus.
 
 The [engineering backlog](engineering/backlog.md) is empty as of 2026-08-31.
 Every defect it held has been fixed or rejected with a measured reason, so
@@ -370,11 +376,25 @@ nothing outside this list is known to be wrong. Put the next finding there.
    small enough to accept. Its premise — that an unembedded chunk stays
    reachable through the other three planes — holds only because F is rejected
    and the exact plane stays.
-6. **The lossless remainder, 2.53 MB.** Deflate `chunks.content` (2.38 MB;
-   `zstandard` with a trained dictionary reaches 3.05 MB and adds a dependency)
-   and dump `metadata_json` with compact separators (0.15 MB across three call
-   sites). Neither changes a plane, a semantic, or a freshness contract.
-   Independent of P1.
+6. ~~**The lossless remainder, 2.53 MB.**~~ Shipped 2026-09-08. Deflate
+   `chunks.content` (zlib level 6, no new dependency) and dump
+   `metadata_json` with compact separators at the three call sites. The
+   deflate lives inside `SqliteChunkRepository._rewrite`, so all three
+   publication paths inherit the BL-8 losslessness bracket, and the bracket
+   grew a `chunk_contents` digest so the deflate's losslessness is witnessed
+   rather than asserted. SQLite's storage class is the discriminator — a
+   deflated row is the BLOB zlib produced, a row too short to pay for the
+   header stays TEXT — so mixed artifacts (a watch batch beside the previous
+   generation) read uniformly and the pass is idempotent. The exact plane's
+   scan moved into Python over inflated text, still literal, still
+   case-insensitive (BL-15), at the 18.0 ms against 6.1 ms the plan measured.
+   `Indexer.SCHEMA_VERSION` moved 7 to 8, so an old build cannot serve a
+   deflated artifact's bytes as content; the bump costs one full rebuild on
+   upgrade and nothing after. Measured, not projected: the simulator sized
+   both items at 2.99 MB against the same generation, and the landed
+   generation shed **2.80 MB** (chunks.db 43,773,952 → 40,951,808;
+   knowledge.db 9,953,280 → 9,834,496), with 6,886 of 7,474 rows deflated.
+   Nothing DR-4 permits now remains inside a generation.
 7. **Decide Phase G, or retire the plan without it.** Content addressed across
    retained generations, so retention costs the delta rather than the whole.
    Lossless by construction and worth more than everything above combined, but
