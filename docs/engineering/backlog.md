@@ -71,19 +71,59 @@ healthy when its vectors are deterministic SHA-256 output carrying no semantic
 signal. Semantic ranking is meaningless in that state while the exact, path, and
 FTS planes still work, so the failure is quiet rather than obvious.
 
-Rating this `High` rather than `Critical` is a judgement about blast radius, not
-about whether answers are wrong: they are. Re-rate it if a fresh-clone build
-without keys is considered a supported path rather than a mistake.
+**`build` does not warn** (verified 2026-09-09 on a fresh two-file corpus, no
+keys in the environment). Nothing in the build output names the embedder — not
+"dummy", not "embedding", not "provider". `embedding.py` contains no logger at
+all; the word "warning" appears in it exactly once, inside BL-27's docstring
+describing the older bug. What the operator sees instead is:
 
-**Not verified:** whether `knowcode build` warns when it selects the dummy
-provider. If it does, the operator has one signal and only `doctor` is silent;
-if it does not, the entire path from build to retrieval is quiet. That
-determines whether the fix belongs in `doctor` alone or at provider selection.
+```
+  Indexed chunks: 4
+  Semantic index: <path>/knowcode_index
+```
 
-A candidate fix is to make the comparison independent of current credentials —
+Both true in the sense that a file exists, and both read as a working semantic
+plane. The build does warn about a missing git commit for the manifest, so the
+silence is specific to the embedder rather than a generally quiet command.
+
+So the whole path is quiet at build time, and the fix belongs at provider
+selection or build reporting rather than in `doctor` alone.
+
+Two things keep this `High` rather than `Critical`. `doctor` does print
+`[FAIL] API keys: Missing environment variables: ...` in the same run, so the
+operator is not entirely without signal — though nothing connects that line to
+the semantic index, and `[PASS] Semantic index` directly contradicts the
+conclusion it should lead to. And the PASS line already prints the answer:
+
+```
+[PASS] Semantic index: Loaded ... (schema v8, dummy/deterministic-sha256, dimension 1024)
+```
+
+The label is not hidden. It is rendered next to the word `PASS`. That makes the
+narrow fix very cheap: the data the check needs is already in hand, only the
+verdict is wrong.
+
+Full chain, reproduced end to end on generation
+`20260909T075420632911Z-5e689a90`, built by this repository's own code:
+
+| Step | Result |
+|---|---|
+| `knowcode build` with no keys | Succeeds. No mention of the embedder. |
+| manifest | `provider: dummy`, `model_name: deterministic-sha256` — BL-27's honest label works |
+| `doctor` with no keys | `[PASS] Semantic index ... dummy/deterministic-sha256`, `[PASS] Freshness` |
+| `doctor`, same store, keys loaded | `[FAIL] provider mismatch: index='dummy' current='voyageai'` |
+
+BL-27 fixed the mirror image of this: a dummy-built index being *accepted once a
+key appeared*. Its honest labels are what make the check work when a key is
+present. This is the residual half — the index being accepted while no key is
+present — which the honest label alone cannot catch, because the value it is
+compared against degrades the same way.
+
+A candidate fix is to make the comparison independent of current credentials:
 compare the recorded label against the *configured* model in `aimodels.yaml`
 rather than the resolved provider, so a dummy-built index fails against a
-configured real provider whether or not its key happens to be present.
+configured real provider whether or not its key happens to be present. A build
+that selects the dummy should also say so on the way past.
 
 ## Closed
 
