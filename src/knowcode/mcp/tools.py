@@ -18,7 +18,7 @@ So this is not a reduction against the old surface — it is 1.7x the schema
 for 2.8x the capabilities, and about half what one-tool-per-capability would
 cost. ``tests/unit/mcp/test_consolidated_surface.py`` holds the ceiling so
 adding a capability is a deliberate decision. This is the consolidated
-surface roadmap P3 calls for.
+surface ``docs/mcp-contract.md`` documents.
 
 The split is by *concern*, not alphabetically, because client permissions are
 per-tool (``mcp__knowcode__<tool>``):

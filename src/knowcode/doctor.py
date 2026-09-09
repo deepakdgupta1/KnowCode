@@ -1030,7 +1030,7 @@ async def _check_mcp_handshake(
                         name="MCP handshake",
                         status="fail",
                         message="MCP tool response was not a valid context dictionary.",
-                        hint="Check retrieve_context_for_query minimal response formatting.",
+                        hint=f"Check {PRIMARY_TOOL_NAME} action='query' minimal response formatting.",
                     )
 
         errlog.seek(0)

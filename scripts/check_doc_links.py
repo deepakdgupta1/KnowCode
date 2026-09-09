@@ -99,14 +99,13 @@ def failures_in(
     for number, line in enumerate(read_prose(path), start=1):
         for raw in INLINE_LINK.findall(line):
             target = raw.strip("<>")
-            if SKIP_SCHEME.match(target) or target.startswith("#"):
+            if SKIP_SCHEME.match(target):
                 continue
             file_part, _, fragment = target.partition("#")
-            if not file_part:
-                continue
             resolved_count += 1
-            resolved = (path.parent / file_part).resolve()
             where = f"{path.relative_to(repo)}:{number}"
+            # A bare "#frag" points into the document that wrote it.
+            resolved = (path.parent / file_part).resolve() if file_part else path
             if not resolved.exists():
                 problems.append(f"{where}: unresolved path -> {target}")
                 continue

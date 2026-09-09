@@ -1,10 +1,9 @@
 """Response profiles: summary-first, raw source only when asked for (P3-2).
 
-The roadmap defines the contract in one sentence: profiles are "summary-first
-for exploratory work and expose raw source only for explicit source requests
-or task types that need it, such as debugging and review." This module turns
-that sentence into one definition every retrieval consumer answers to, so the
-rule cannot drift between the query path and the context path.
+``docs/mcp-contract.md`` defines the contract under "The source-hungry task
+types". This module turns that section into one definition every retrieval
+consumer answers to, so the rule cannot drift between the query path and the
+context path.
 """
 
 from __future__ import annotations
@@ -39,7 +38,7 @@ def test_standard_and_above_always_include_source() -> None:
             assert include_source(verbosity, task), (verbosity, task)
 
 
-def test_the_source_hungry_set_is_exactly_what_the_roadmap_names() -> None:
+def test_the_source_hungry_set_is_exactly_what_the_contract_names() -> None:
     """Adding a task to this set takes source away from every default
     response of that type, so the membership is pinned, not open-ended."""
     assert SOURCE_HUNGRY_TASK_TYPES == frozenset({"debug", "review"})

@@ -27,7 +27,7 @@ the [ADR index](adr/index.md).
 - [ ] `uv run knowcode doctor` passes on a freshly built repository: **Index
       generation**, **Knowledge store**, and **Semantic index** are `pass`.
 - [ ] `uv run knowcode doctor --mcp` verifies the MCP server exposes
-      `retrieve_context_for_query` and honors `verbosity="minimal"`,
+      `knowcode_retrieve` and honors `action="query"`, `verbosity="minimal"`,
       `max_tokens=1500`, `limit_entities=1`.
 - [ ] After a **watched** edit, doctor's **Freshness** check warns
       `store_stale_source_changed` (expected — see Known limitations) and a full
@@ -54,7 +54,9 @@ the [ADR index](adr/index.md).
 
 ## 4. MCP contract conformance
 
-- [ ] **First tool:** `retrieve_context_for_query` is the default natural-language entry point.
+- [ ] **First tool:** `knowcode_retrieve` with `action="query"` is the default
+      natural-language entry point. The five flat tools appear only under
+      `mcp-server --legacy-tools`.
 - [ ] **Defaults:** the default payload does not exceed `max_tokens=1500` or `limit_entities=1`.
 - [ ] **Minimal projection:** `verbosity="minimal"` strips evidence arrays and internal metadata.
 - [ ] **Local answer gate:** `sufficiency_threshold` (default 0.8) is respected and

@@ -197,16 +197,29 @@ The MCP approach can be token-expensive due to the following overhead sources:
 
 ## 5 Strategies to Cut Overhead by 90%
 
-> **Implementation Status:** Strategies 2, 3, and 4 are fully implemented in v1.1 (see Status section below). Strategies 1 and 5 are **proposed** optimizations that are not yet implemented.
+> **Implementation Status:** all five strategies have shipped (see Status section below).
 
-### 1. Consolidate to a Single Tool — *Proposed* (~60% tool-schema savings)
+### 1. Consolidate the Tool Surface — *Implemented* (~2.3x cost per capability)
 
-Currently, 5 separate tool definitions (`search_codebase`, `get_entity_context`, `trace_calls`, `retrieve_context_for_query`, `assess_codebase_quality`) are exposed by the MCP server and injected into _every_ LLM request.
-**Recommendation:** Merge these into a single `knowcode` tool with an `action` parameter. This cuts the tool-schema overhead from ~650 tokens down to ~200 tokens per request.
+The 5 original flat tools (`search_codebase`, `get_entity_context`, `trace_calls`,
+`retrieve_context_for_query`, `assess_codebase_quality`) were each injected into
+_every_ LLM request.
+
+**Change (shipped):** the default surface is three concern-split tools with
+`action` enums — `knowcode_retrieve`, `knowcode_lifecycle`, `knowcode_inspect`.
+The split is by concern rather than one `knowcode` tool because client
+permissions are per-tool, so retrieval can be allowlisted while builds stay
+confirmed. The five flat tools remain behind `--legacy-tools`, off by default.
+
+Consolidation shipped together with a capability expansion, so the recurring
+schema cost went from ~650 tokens for 5 capabilities to ~1,110 for 14 rather
+than down to ~200. Cost per capability improved ~2.3x; absolute per-turn cost
+did not fall until Strategy 5 shipped. A ceiling test guards the schema at
+~1,140 tokens under a 1,200 limit.
 
 ### 2. Strip the Response to Essentials — *Implemented* (~50% response savings)
 
-The response from `retrieve_context_for_query` returns 12 fields. The agent realistically only needs 2–3 of these fields to proceed:
+The response from the query path returned 12 fields. The agent realistically only needs 2–3 of these fields to proceed:
 
 - `context_text` (the actual content)
 - `sufficiency_score` (the decision metric)
@@ -236,10 +249,30 @@ removing hundreds of unnecessary whitespace tokens:
 return json.dumps(result, separators=(',', ':'))
 ```
 
-### 5. Return Summaries Instead of Source Code — *Proposed* (Biggest Potential Win)
+### 5. Return Summaries Instead of Source Code — *Implemented* (6.4x on the probe entity)
 
-Currently, full `source_code` is dumped into `context_text`.
-**Recommendation:** Instead of returning the full body of every function and class, return a **pre-summarized** digest (e.g., signature + docstring + key relationships). Only include raw source code when explicitly requested via `task_type=debug` or `task_type=review`. This single change could cut `context_text` from ~3000 tokens to ~500 tokens for most exploratory queries.
+Full `source_code` used to be dumped into `context_text` on every call.
+
+**Change (shipped):** response profiles are one definition,
+`retrieval/response_profiles.py`, that every source-bearing retrieval consumer
+answers to. Summary-first is the default on `query` *and* `context`; escalation
+rides the existing `verbosity` ladder rather than a new schema enum, because the
+schema is paid on every turn. `semantic_search` is the explicit source request
+and stays raw. Measured on this repository, default `context` fell from 4,313 to
+674 bytes on the probe entity.
+
+#### The source-hungry task types {#source-hungry-task-types}
+
+`debug` and `review` include raw source **even at `minimal` verbosity**. This is
+a floor, not a default: `minimal` *is* the default, so a floor an explicit
+default could cancel is no floor at all.
+
+This set is exactly `{debug, review}`. It is the canonical statement of the
+rule — `retrieval/response_profiles.py` implements it and
+`tests/unit/retrieval/test_response_profiles.py` pins the membership against
+this section, so widening the set is a deliberate contract change rather than a
+quiet edit. Adding a task type here takes source away from every default
+response of that type.
 
 ---
 
@@ -266,4 +299,12 @@ The following optimizations have been fully implemented in the KnowCode codebase
 2. **Lowered default token limits (Strategy 3 — Implemented)**: The default `max_tokens` has been reduced from `6000` to `4000` across `RetrievalOrchestrator` and `KnowCodeMCPServer`.
 3. **Compact JSON Formatting (Strategy 4 — Implemented)**: Responses in `server.py` are serialized using `json.dumps(result, separators=(',', ':'))`, eliminating unnecessary whitespace and saving ~300 tokens per call.
 
-Strategies 1 (tool consolidation) and 5 (summary-first source) remain as proposed future optimizations. They should be evaluated against the golden-query baseline before implementation.
+4. **Tool consolidation (Strategy 1 — Implemented)**: the default surface is
+   `knowcode_retrieve`, `knowcode_lifecycle`, and `knowcode_inspect`; the five
+   flat tools are available behind `--legacy-tools` for one release, off by
+   default. A ceiling test guards the recurring schema cost.
+5. **Summary-first responses (Strategy 5 — Implemented, 2026-09-09)**: default
+   retrieval payloads are summaries unless the agent escalates `verbosity` or
+   the task type is one of the
+   [source-hungry task types](#source-hungry-task-types). Payload sizes are
+   capped by regression test and recorded per action in local telemetry.

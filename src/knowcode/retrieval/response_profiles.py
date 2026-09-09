@@ -1,10 +1,11 @@
 """Response profiles for retrieval: summary-first, source on demand (P3-2).
 
 One definition for how much of an entity a retrieval response carries, so the
-rule cannot drift between the query path and the context path. The roadmap
-states the contract: profiles are "summary-first for exploratory work and
-expose raw source only for explicit source requests or task types that need
-it, such as debugging and review."
+rule cannot drift between the query path and the context path.
+
+``docs/mcp-contract.md`` is the canonical policy source and states the rule
+under "The source-hungry task types". This module implements it; it does not
+define it.
 
 The profile table, per ``knowcode_retrieve`` action:
 
@@ -34,9 +35,9 @@ caps everything the profile includes.
 
 from __future__ import annotations
 
-#: Task types whose work reads the code itself. The roadmap names debugging
-#: and review; membership is pinned by test because adding a type takes
-#: source away from every default response of that kind.
+#: Task types whose work reads the code itself. ``docs/mcp-contract.md``
+#: names debug and review; membership is pinned by test because adding a type
+#: takes source away from every default response of that kind.
 SOURCE_HUNGRY_TASK_TYPES = frozenset({"debug", "review"})
 
 

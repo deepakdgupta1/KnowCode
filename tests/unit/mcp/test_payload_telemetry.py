@@ -1,6 +1,6 @@
 """Payload size is telemetry, not content (P3-3).
 
-The roadmap asks for "payload-size distributions in local telemetry": the
+The MCP contract asks for payload-size distributions in local telemetry: the
 recurring cost of the MCP surface is the response an agent reads, and a trend
 line needs the size, not the bytes. ``payload_bytes`` is a length — the same
 privacy posture as ``query_chars`` — and the summary aggregates it per tool
