@@ -1,10 +1,11 @@
 # KnowCode Roadmap
 
-> **Status:** Active planning document
+> **Status:** Active planning document. Open work only.
 >
-> The completed v1.1 operationalization work is preserved in the repository
-> at `docs/archive/MCP_operationalization.md`. This document defines the
-> next priorities rather than reopening completed foundation work.
+> Why the project is where it is — dated decisions, shipped-work narrative, and
+> the measured reasons behind them — is
+> [Roadmap History](engineering/roadmap-history.md). When an item here ships,
+> strike it with a one-line dated note and move the narrative there.
 
 ## Current Position
 
@@ -21,15 +22,8 @@ to an empty task allowlist until independent machine adjudication and the
 blocking Python external gates pass. See [Testing & Evaluation](engineering/testing.md)
 for the evidence contract.
 
-Two things found while measuring index storage change what "next" should mean.
-Markdown documents whose H1 slugifies to their own filename are dropped from the
-index entirely by an entity id collision, which is 32% of this repository's
-prose including seven of eight ADRs and most of the user guide. Separately, the
-chunk carrying the largest block of most files is tagged with an entity id no
-parser emits, so it is disconnected from the graph. And a published generation
-was storing every embedding twice, which P7 has now fixed. Defects
-that no workstream owns are recorded in the
-[engineering backlog](engineering/backlog.md).
+Defects that no workstream owns are recorded in the
+[engineering backlog](engineering/backlog.md). Put the next finding there.
 
 ## Release Principles
 
@@ -46,15 +40,22 @@ that no workstream owns are recorded in the
 5. Keep telemetry local by default, make its retention and privacy tradeoffs
    explicit, and use measured data before changing thresholds or budgets.
 
-## Completed Foundations
+## Standing Regression Gates
 
-| Foundation | Current evidence | Ongoing regression gate |
-| --- | --- | --- |
-| MCP operating contract | [MCP Contract](mcp-contract.md) documents minimal-first retrieval and the escalation ladder. | Contract tests must exercise production-like minimal responses. |
-| Freshness and coverage safety | The scanner, watcher, and `doctor` validate source coverage and stale artifacts. | Modify/create/delete/rename tests and `doctor` freshness checks remain required. |
-| Local readiness verification | `knowcode doctor --mcp` checks config, artifacts, disk use, agent rules, and an MCP handshake. | Doctor must stay fast, deterministic, and actionable. |
-| Local telemetry | JSONL events record retrieval, agent-routing, and MCP tool activity. | Event-schema compatibility and failure isolation tests remain required. |
-| Derived vector plane | [ADR 9](engineering/adr/adr-0009-derived-vector-plane.md): the ANN index is rebuilt from durable chunk rows, not published. One generation fell 113.18 MB to 78.87 MB. | A published generation must contain nothing named `vectors.*`, and a rebuilt plane must return identical results to a persisted one. |
+These hold for every release. The evidence that established them is in
+[Roadmap History](engineering/roadmap-history.md).
+
+- **MCP operating contract.** Contract tests must exercise production-like
+  minimal responses.
+- **Freshness and coverage safety.** Modify/create/delete/rename tests and
+  `doctor` freshness checks remain required.
+- **Local readiness verification.** `doctor` must stay fast, deterministic, and
+  actionable.
+- **Local telemetry.** Event-schema compatibility and failure isolation tests
+  remain required.
+- **Derived vector plane.** A published generation must contain nothing named
+  `vectors.*`, and a rebuilt plane must return identical results to a persisted
+  one.
 
 ## Priority Workstreams
 
@@ -66,6 +67,11 @@ truth for local-answer routing.
 **Why first:** the current evaluation data says a score of `0.8` is
 over-confident. No payload, onboarding, or automation improvement can make an
 uncalibrated local-answer gate safe.
+
+**Status:** deliberately unblessed. The harness lives in the independent
+`knowcode-evals` repository; KnowCode holds only a checksum-pinned policy
+consumer and runtime enforcement tests. No qualifying locked holdout plus full
+external baseline has yet passed.
 
 **Work:**
 
@@ -89,72 +95,38 @@ uncalibrated local-answer gate safe.
    floors, source hashes, dataset revisions, provider/model identities, prompt
    hashes, and canary results. Never describe it as human-reviewed.
 
+**Before the next run.** The 60 existing records are void: they describe a
+bundle the product no longer builds. Re-collect rather than reusing them
+([why](engineering/roadmap-history.md)).
+
+**Threshold input that changed.** The `routing_quality_floor` of 0.90 was
+selected against a formula that could only return 1.00 or block. With a fixed
+denominator, complete bundles land at 0.95–0.96 and source-less ones at
+0.45–0.86. Re-select over that range rather than carrying 0.90 across; the sweep
+in work item 3 is where that happens.
+
 **Exit criteria:** the routing policy is source-verified, independently
 machine-adjudicated, externally benchmarked, versioned, and enforced by CI.
 Missing credentials, source or dataset drift, judge instability, BM25
 inferiority, and blessed-baseline regression all fail closed.
 
-**The 60 existing records are void (2026-08-30).** Work item 1 says "run the
-real `Agent.smart_answer` escalation path". Until today there was none to run:
-both broadening rungs were gated on the always-empty local-answer allowlist, so
-every question was measured on a one-entity, no-source, 1,500-token bundle
-([BL-19](engineering/backlog.md), fixed), and dependency expansion under-filled
-even that ([BL-18](engineering/backlog.md), fixed). Every record collected
-before those two landed describes a bundle the product no longer builds, so
-none of it is calibration data. Re-collect.
-
-The two measurement defects that stood between a fresh run and a usable number
-are closed as well: sufficiency no longer saturates at 1.00 for any complete
-bundle ([BL-20](engineering/backlog.md)) and the local-answer rate is no longer
-computed against the wrong gate ([BL-22](engineering/backlog.md)). Re-collecting
-is now worth doing.
-
-One input changed underneath work item 3. The `routing_quality_floor` of 0.90
-was selected against a formula that could only return 1.00 or block; with a
-fixed denominator, complete bundles land at 0.95–0.96 and source-less ones at
-0.45–0.86. Re-select the threshold over that range rather than carrying 0.90
-across — the sweep in work item 3 is where that happens.
-
-**Progress (2026-07-31):** the proof and validation harness has moved to the
-independent `knowcode-evals` repository. KnowCode now contains only a
-checksum-pinned, source-bound schema 1.1 policy consumer and runtime
-enforcement tests. The evaluator owns the datasets, judges, benchmark adapters,
-statistics, workflow, and artifact issuance. P1 remains deliberately unblessed
-because the 60 records are calibration data and no qualifying locked holdout
-plus full external baseline has yet passed.
-
 ### P2 - Enforce Runtime Contract Conformance
 
 **Goal:** prove the canonical MCP policy is what production code actually does.
 
-**Why now:** the documentation and runtime had drifted: the direct LLM agent
-requested the default minimal projection while still reading metadata that
-minimal responses omit. Contract tests must keep covering the real projection,
-not only mocks that return diagnostic-style payloads.
+**Work:** all three original items shipped 2026-08-11 (agent metadata requests,
+end-to-end escalation coverage, and a `doctor`/release-checklist conformance
+audit). See [Roadmap History](engineering/roadmap-history.md).
 
-**Work:**
-
-1. Make `Agent.answer` and `Agent.smart_answer` explicitly request the metadata
-   they need, or derive task metadata without relying on omitted fields.
-2. Add end-to-end tests for minimal retrieval, budget/verbosity escalation, and
-   local-versus-LLM routing using the actual orchestrator response shape.
-3. Make `knowcode doctor --mcp` and the release checklist reference the same
-   tool, defaults, threshold ownership, and response guarantees as the
-   canonical contract.
+**Open residue.** The 2026-08-11 audit validated `retrieve_context_for_query` as
+the canonical tool. P3's consolidation then replaced that surface, and the
+contract's appendix went on describing the old one until 2026-09-09. The
+documents now agree and the contract suites pass against the three-tool surface.
+Re-run the [release checklist](engineering/release.md) conformance audit
+end-to-end, including a green `doctor --mcp` handshake, before closing P2.
 
 **Exit criteria:** agent, MCP, CLI, docs, and tests use one contract with no
 implicit reliance on fields hidden by minimal mode.
-
-**Progress (2026-08-11):**
-
-- `Agent.answer` and `Agent.smart_answer` now request the minimal projection
-  with the task metadata they consume.
-- `smart_answer` follows the contract escalation ladder: narrow minimal,
-  broader minimal, then standard detail before LLM fallback, while reusing the
-  final retrieval instead of querying a fourth time.
-- Integration coverage now exercises local and LLM routing against the actual
-  `RetrievalOrchestrator` projection.
-- **Done:** `knowcode doctor --mcp` and the `docs/engineering/release.md` conformance audit are completed, validating the canonical tool `retrieve_context_for_query` and minimal projection response formatting.
 
 ### P3 - Finish the MCP Token Diet
 
@@ -166,66 +138,20 @@ baseline and routing-quality gate.
 
 **Work:**
 
-1. Prototype one `knowcode` MCP tool with an `action` enum for `search`,
-   `context`, `trace`, `query`, and `quality`. Keep the existing five tools
-   available behind an explicit compatibility option for one release.
-2. ~~Define response profiles that are summary-first for exploratory work and
-   expose raw source only for explicit source requests or task types that need
-   it, such as debugging and review.~~ Shipped 2026-09-09. The profiles are
-   one definition — `retrieval/response_profiles.py` — that every
-   source-bearing retrieval consumer answers to. Summary-first is the default
-   on `query` *and* `context` (the latter used to synthesize raw source on
-   every call); escalation rides the `verbosity` ladder the surface already
-   had rather than a new schema enum, because the schema is paid on every
-   turn and stays at ~1,140 tokens under the 1,200 ceiling. `debug` and
-   `review` task types include source even at `minimal` — a floor an explicit
-   default could cancel is no floor, since `minimal` *is* the default — and
-   the roadmap's two are pinned by test so widening the set is deliberate.
-   `semantic_search` is the explicit source request and stays raw. The
-   `query` projection no longer claims an omission it did not make: a
-   source-hungry minimal response says `source_included` instead of a
-   reduction summary. The deprecated flat `get_entity_context` tool keeps
-   its old shape for its compatibility release.
-3. ~~Add byte/token caps per action to regression tests and record payload-size
-   distributions in local telemetry.~~ Shipped 2026-09-09.
-   `tests/integration/test_mcp_payload_caps.py` builds a real index and pins
-   every default action payload under ~2x its measured bytes (the 2x absorbs
-   absolute-path noise, which swings ~30% between tmp roots); a profile flip
-   is caught comparatively — same call, summary vs explicit source, same
-   root — which path noise cannot fool. Telemetry records `payload_bytes`
-   on every tool call (a length, the same privacy posture as
-   `query_chars`, additive to the event schema so old records stay valid)
-   and the usage summary reports per-tool-and-action count, p50, p95, and
-   max as observed values. Measured on this repository: default `context`
-   fell from 4,313 to 674 bytes on the probe entity, a 6.4x reduction.
+1. **End the legacy five-tool surface.** Consolidation shipped as three
+   concern-split tools rather than the single `knowcode` tool this item first
+   proposed, because client permissions are per-tool. The five flat tools remain
+   behind `mcp-server --legacy-tools`, off by default, "for one release" — a
+   release this roadmap has never named. Name it, publish the migration
+   guidance the exit criteria require, then remove the surface.
+2. ~~Summary-first response profiles.~~ Shipped 2026-09-09. The rule now lives
+   in the [MCP contract](mcp-contract.md#source-hungry-task-types).
+3. ~~Byte/token caps per action, and payload-size distributions in telemetry.~~
+   Shipped 2026-09-09.
 
 **Exit criteria:** default tool/result payloads are measurably smaller, golden
 retrieval and routing quality do not regress, and migration guidance is
 published before the legacy tool surface changes.
-
-- **Done (consolidation):** the default surface is three concern-split tools
-  with `action` enums — `knowcode_retrieve`, `knowcode_lifecycle`,
-  `knowcode_inspect` — and the five flat tools remain behind
-  `mcp-server --legacy-tools` for one release. The split is by concern rather
-  than a single tool because client permissions are per-tool, so retrieval can
-  be allowlisted while builds stay confirmed.
-- **Scope change:** consolidation shipped together with a capability
-  expansion (build/index/export/doctor/freshness/stats/history/preflight/
-  telemetry/job polling), so the recurring schema cost went from ~650 tokens
-  for 5 capabilities to ~1,110 for 14 rather than down to ~200. Cost per
-  capability improved ~2.3x; absolute per-turn cost did not fall. A ceiling
-  test now guards it. Item 2 (summary-first response profiles) and item 3
-  (per-action payload caps in telemetry) have since shipped — 2026-09-09,
-  see the Done note below — and delivered the absolute reduction.
-- **Unblocked by the same change:** `mcp-server` no longer refuses to start
-  without a store, so an agent can bootstrap a repository through
-  `knowcode_lifecycle action='build'` without a terminal step.
-- **Done (response profiles and payload telemetry, 2026-09-09):** items 2 and
-  3 above. The absolute reduction consolidation could not deliver now comes
-  from the responses themselves: every default retrieval payload is a summary
-  unless the agent escalates `verbosity` or the task type is one of
-  `debug`/`review`, and the recurring cost is now measured per action in
-  local telemetry with regression caps holding it.
 
 ### P4 - Unified Agent Onboarding
 
@@ -294,7 +220,7 @@ fresh, and cost-effective without manually parsing JSONL.
 **Goal:** make an index proportional to the source it describes, and make every
 document in that source retrievable. The plan of record is
 [Storage Footprint & Optimization Plan](research/storage_optimization_2026_v4.md);
-its §17 is the running execution log.
+its §17 is the running execution log and carries the measured ledger.
 
 **Dependencies:** none for the storage phases. The embedding-selection phase
 depends on P1, because it narrows the semantic candidate set and may only ship
@@ -302,129 +228,36 @@ behind a measured recall gate.
 
 **Governing decision:** the plan's
 [DR-4](research/storage_optimization_2026_v4.md) — no phase may cost retrieval
-quality, whatever the byte saving. It was settled 2026-08-30 after three
-separate phases proposed buying footprint with recall, and it is why two of
-them are now rejected rather than deferred.
+quality, whatever the byte saving.
 
-**Status:** Phases D1, A2, B and all of C shipped 2026-08-29. D1 stopped publishing the
-ANN index and made it a plane rebuilt from the durable embeddings in
-`chunks.db`, worth 32.31 MB, with retrieval verified unchanged on 6,874 vectors
-as identical results, identical top-25 vector ids, and a maximum score delta of
-zero. A2 vacuums both databases on the staged copy before the generation is
-digested, worth a further 3.79 MB measured over one corpus. Nearly all of A2 is
-B-tree repacking rather than free pages, which is why the plan's free-page
-estimate read 87% low. B fixed the retrieval defects: prose coverage went from
-41.6% to 95.7%, all 55 markdown files now index where 17 were absent, no chunk
-points at an entity that does not exist where 495,985 bytes did, and the
-generation fell 2.18 MB despite indexing 2.3 times as much prose. C
-re-encoded the artifacts without changing what they hold, worth 10.0 MB, and
-its last item made a generation's size independent of the directory it was
-built in. D2 shipped 2026-08-30: the term index became a contentless FTS5
-table carrying `contentless_delete=1`, worth a measured 4.46 MB of `chunks.db`,
-with BL-13's deletion fix shipped inside it and the simulator BL-12 flagged
-repaired first to re-size the phase honestly. D3 shipped 2026-08-30 and
-completed Phase D: `entities.source_code` resolves from the working tree
-against its indexed digest, worth a measured 3.67 MB, behind a global
-`config.entity_source: disk | stored` (default `disk`) so a repository can opt
-back into the persisted copy with no migration. Wiring its resolver into
-`get_entity_details` and not into `get_context` cost the canonical MCP tool its
-source body on a fresh index; that was BL-16, Critical, found and fixed the
-same day. The lossless remainder shipped 2026-09-08: `chunks.content` deflates
-inside the staged rewrite under a `chunk_contents` witness digest,
-`metadata_json` dumps compact at its three sites, and the exact plane scans
-inflated text in Python; worth a measured 2.80 MB, with `Indexer.SCHEMA_VERSION`
-at 8 so no pre-deflate build reads the artifact.
-
-**Phase F and the int8 ANN cache are rejected, not deferred.** F would have
-left `ExactQueryEngine` with no implementation — the term index that would
-inherit the mode answers mid-identifier fragments at 14.6% recall at the limit
-the engine passes — for 3.50 MB. The int8 cache measured `recall@10 0.9950`
-against exhaustive fp32's `1.0000` for 18 MB. Both are closed as rejected in
-the [backlog](engineering/backlog.md), and DR-4 records the rule that closed
-them.
+**Phase F and the int8 ANN cache are rejected, not deferred.** Both are closed
+in the [backlog](engineering/backlog.md) with measured reasons. Work item 5's
+premise — that an unembedded chunk stays reachable through the exact, path, and
+FTS planes — holds only because F is rejected and the exact plane stays.
 
 **Where this leaves the stream.** Everything DR-4 permits inside a generation
-has shipped. The 2.53 MB the closing ledger held open became 2.80 MB measured
-on 2026-09-08's larger corpus (deflate 2.69 MB of it), and one generation now
-measures 50.78 MB for a corpus the older figure never described — read the
-§17 entries, not the deltas between them, for what each phase moved. The
-larger remaining lever is retention — two generations hold mostly identical
-bytes — which is Phase G, and it is a different axis from making a generation
-smaller. The plan's §17 closing ledger carries the full accounting, measured
-rather than projected; read it before §11, whose targets are sized against the
-pre-B corpus.
-
-The [engineering backlog](engineering/backlog.md) is empty as of 2026-08-31.
-Every defect it held has been fixed or rejected with a measured reason, so
-nothing outside this list is known to be wrong. Put the next finding there.
+has shipped, and one generation now measures 50.78 MB. The larger remaining
+lever is retention: two generations hold mostly identical bytes, which is
+Phase G, and it is a different axis from making a generation smaller.
 
 **Work, in order:**
 
-1. ~~**Document identity and chunking correctness.**~~ Shipped 2026-08-29 as
-   Phase B. Three defects that shared one identity scheme, fixed together. A
-   section's qualified name now carries its heading path, so a heading cannot
-   collide with its own document and 17 rejected markdown files index (BL-1).
-   Every chunk hangs on an entity that exists, prose on the section its lines
-   fall in and module chunks on the file's own entity (BL-6). `.md` and `.rst`
-   route to `ProseChunker`, which had been in the tree, tested, and wired to
-   nothing. A class chunk stops at its first member, which is 8.00 MB on its
-   own. Two structural contracts now hold the shape rather than the instance:
-   unique entity ids per file for all nine parsers, and no chunk pointing at a
-   missing entity for seven languages. Writing the first found
-   [BL-9](engineering/backlog.md); the Vue gap it left is
-   [BL-10](engineering/backlog.md).
-2. ~~**`VACUUM` before the manifest is digested.**~~ Shipped 2026-08-29 as
-   Phase A2, 3.79 MB. Sizing it revealed that the manifest cannot witness row
-   loss in either database, filed as [BL-8](engineering/backlog.md).
-3. ~~**Lossless encoding.**~~ Shipped 2026-08-29 as Phase C, 10.0 MB across
-   both artifacts. Edges hold three integers against two codebooks (C2, 6.0 MB),
-   an entity digest is 32 raw bytes in a column rather than hex inside JSON
-   (C3, C4), a chunk digest is a first-class column (C5), and ids are stored
-   relative to a recorded repository root (C1, 3.10 MB). C1 is the reason a
-   generation no longer costs more when it is built at a deeper path: two builds
-   of one corpus differed by 10.9 MB, 19%, and now differ by 0.16 MB. It does
-   not make a generation portable. Ids stay absolute above the storage layer and
-   resolve against the root recorded in the database, so moving a repository
-   still requires a rebuild, as ADR 1 has always said. Sizing C1 found that the
-   storage simulator no longer models a post-C2 `knowledge.db`
-   ([BL-12](engineering/backlog.md)), and it removed the carrier BL-9 had been
-   deferred onto.
-4. ~~**Stop persisting the rest of the derived data.**~~ Shipped 2026-08-30,
-   completing Phase D. D2: `tokens_text` folds into a contentless FTS5 table
-   declared with `contentless_delete=1`, so deletion works and the sync
-   triggers are replaced by explicit FTS writes in each chunk transaction
-   (BL-13, closed), worth a measured 4.46 MB. D3: `entities.source_code`
-   resolves from disk against a verified content hash, failing closed rather
-   than serving stale source, worth a measured 3.67 MB — and it ships as a
-   global configuration setting, `config.entity_source: disk | stored`
-   (default `disk`), so a repository can opt back into the persisted copy per
-   build with no migration.
+1. ~~Document identity and chunking correctness.~~ Shipped 2026-08-29, Phase B.
+   Prose coverage 41.6% to 95.7%; the generation fell 2.18 MB while indexing 2.3
+   times as much prose.
+2. ~~`VACUUM` before the manifest is digested.~~ Shipped 2026-08-29, Phase A2,
+   3.79 MB.
+3. ~~Lossless encoding.~~ Shipped 2026-08-29, Phase C, 10.0 MB across both
+   artifacts.
+4. ~~Stop persisting the rest of the derived data.~~ Shipped 2026-08-30,
+   Phase D: D2 the contentless FTS5 term index, 4.46 MB; D3
+   `entities.source_code` resolved from disk, 3.67 MB.
 5. **Embedding-selection policy,** gated on the retrieval evaluation harness.
    Chunks below a content-size threshold stay stored and stay reachable through
    the exact, path, and FTS planes; they leave only the semantic candidate set.
    Under DR-4 it ships on a measured no-loss result, never on a loss judged
-   small enough to accept. Its premise — that an unembedded chunk stays
-   reachable through the other three planes — holds only because F is rejected
-   and the exact plane stays.
-6. ~~**The lossless remainder, 2.53 MB.**~~ Shipped 2026-09-08. Deflate
-   `chunks.content` (zlib level 6, no new dependency) and dump
-   `metadata_json` with compact separators at the three call sites. The
-   deflate lives inside `SqliteChunkRepository._rewrite`, so all three
-   publication paths inherit the BL-8 losslessness bracket, and the bracket
-   grew a `chunk_contents` digest so the deflate's losslessness is witnessed
-   rather than asserted. SQLite's storage class is the discriminator — a
-   deflated row is the BLOB zlib produced, a row too short to pay for the
-   header stays TEXT — so mixed artifacts (a watch batch beside the previous
-   generation) read uniformly and the pass is idempotent. The exact plane's
-   scan moved into Python over inflated text, still literal, still
-   case-insensitive (BL-15), at the 18.0 ms against 6.1 ms the plan measured.
-   `Indexer.SCHEMA_VERSION` moved 7 to 8, so an old build cannot serve a
-   deflated artifact's bytes as content; the bump costs one full rebuild on
-   upgrade and nothing after. Measured, not projected: the simulator sized
-   both items at 2.99 MB against the same generation, and the landed
-   generation shed **2.80 MB** (chunks.db 43,773,952 → 40,951,808;
-   knowledge.db 9,953,280 → 9,834,496), with 6,886 of 7,474 rows deflated.
-   Nothing DR-4 permits now remains inside a generation.
+   small enough to accept.
+6. ~~The lossless remainder.~~ Shipped 2026-09-08, 2.80 MB measured.
 7. **Decide Phase G, or retire the plan without it.** Content addressed across
    retained generations, so retention costs the delta rather than the whole.
    Lossless by construction and worth more than everything above combined, but
@@ -446,9 +279,8 @@ only evidence that there is none.
 release-candidate evaluation must run against the `P2` production response
 shape. `P3` follows once the correctness baseline and contract are stable.
 `P4`, `P5`, and `P6` can proceed independently after their listed dependencies
-are met. `P7`'s first item is a correctness fix and is not gated on anything;
-its remaining storage phases are independent of P1 through P6, and its final
-embedding-selection phase is gated on P1's evaluation harness.
+are met. `P7`'s remaining storage phases are independent of P1 through P6, and
+its embedding-selection phase is gated on P1's evaluation harness.
 
 The next trust release ships only when all of the following are true:
 
@@ -458,10 +290,9 @@ The next trust release ships only when all of the following are true:
 4. Freshness and language-coverage checks report no unresolved correctness
    warnings for the target repository.
 5. No `Critical` item is open in the [engineering backlog](engineering/backlog.md).
-   None is open: BL-31, BL-32 (both 2026-08-31), and BL-33, BL-34
-   (2026-09-01) were the last four. (Read the backlog rather than trusting
-   this line: it named `BL-1` long after Phase B fixed it on 2026-08-29,
-   and it claimed nothing was open right up until an audit found more.)
+   Read the backlog rather than trusting any roster written here: a previous
+   version of this line named `BL-1` long after Phase B fixed it, and claimed
+   nothing was open right up until an audit found more.
 6. Preflight on this repository's own graph keeps the unresolved-reference
    resolution rate at 0.790 or better — the [BL-34](engineering/backlog.md)
    baseline, ratcheted. Of the 4,077 holes at that baseline, 2,867 are

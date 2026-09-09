@@ -69,6 +69,7 @@ nav:
       - Personas & Use-Cases: product/personas-use-cases.md
       - Business Logic: product/business-logic.md
   - Roadmap: roadmap.md
+  - Roadmap History: engineering/roadmap-history.md
   - Engineering Backlog: engineering/backlog.md
   - MCP Contract: mcp-contract.md
   - Engineering:
