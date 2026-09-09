@@ -2,7 +2,7 @@
 
 *Consolidated from design discussion (June 2026). Scope: extending KnowCode's retrieval substrate from **code** to **SDLC prose collateral** — Problem Statements, User Personas, PRDs, Architecture/HLD/LLD, Release Notes, User/Installation Guides, Support Manuals, Marketing Brochures, Product Feature Catalogs, Client Case Studies, Whitepapers — to maximize semantic-search and RAG quality over thousands of templated markdown documents, each thousands of lines long.*
 
-> **Status:** Design proposal — not yet implemented
+> **Status:** P0 shipped (`src/knowcode/indexing/prose_chunker.py`). P1–P5 unbuilt. P-1 done: the eval harness in [`knowcode-evals`](https://github.com/deepakdgupta1/knowcode-evals) was re-bound to `7e9ca96` on 2026-09-09, and it now measures a **large retrieval regression on the code corpus**. Read §6.1 before starting P1.
 > **Owner:** Solo
 > **Companion to:** reference_architecture.md (archived) · [`knowcode-architecture-synthesis.md`](./knowcode-architecture-synthesis.md) · [`Testing & Evaluation`](../engineering/testing.md)
 > **`[ASPIRATIONAL]`** items are target design, not shipped features — consistent with the `[HARDENED]` convention in the reference architecture.
@@ -64,6 +64,25 @@ FAISS flat index · SQLite FTS5 BM25 · RRF (re-tuned) · VoyageAI rerank (upgra
 | **D7** | No synthesis/abstraction layer | Synthesis/Capability | "Summarize" / "what changed" require map-reduce over many chunks; flat top-k can't |
 | **D8** | Reranker + sufficiency-score calibrated on code | Eval/Calibration | Unknown behavior on prose; the 0.8 over-confidence finding may differ in sign and size |
 | **D9** | No prose golden set | Eval/Process | No measurement, no regression gate, no calibration target for D1–D8 |
+| **D10** | Retrieval has no score floor | Precision/Trust | `orchestrator._retrieve_context` takes the top `limit_entities` by rank whatever they score. The system cannot answer "not in this corpus"; an off-corpus query returns its nearest neighbour at full confidence |
+| **D11** | `sufficiency_score` never sees the query | Eval/Calibration | `_calculate_sufficiency` scores template completeness of the assembled bundle. A perfectly assembled bundle about the wrong document scores ~0.96. Re-calibrating the 0.8 threshold (D8) cannot repair a score with no query term in it |
+| **D12** | Frontmatter is assumed populated, never verified | Metadata/Trust | §0 treats rich frontmatter as given. Where ingestion defaults a field instead of deriving it, every metadata-weighted signal degenerates to a constant and the ranker silently loses that dimension |
+| **D13** | `supersedes` is a graph edge (§5), not a ranking rule | Freshness/Correctness | A superseded PRD draft ranks equal to the current one and can answer as if current. Version lineage is modelled but never consulted at retrieval time |
+| **D14** | No per-document normalization over a size-skewed corpus | Recall/Fairness | Chunk count is not evidence quality. A 3,000-line PRD outranks a one-page release note on volume alone, and small high-value collateral becomes unreachable |
+| **D15** | ~~The `knowcode-evals` harness has drifted from HEAD~~ **Re-bound 2026-09-09.** Candidate generation misses half the corpus | Eval/Quality | Four of five gates fail. 67 of 139 expected entities never surface within 50 candidates over 345 indexed files, which corpus growth (155 → 338 files) does not explain. `sufficiency_score` rose `0.545 → 0.666` on identical records while accuracy halved, at an unchanged 0.8 threshold. The corpus is still `agent_curated_pending_human_review` and `routing_policy.sufficiency_threshold` still ships without a blessed policy |
+
+### 2.1 Where D10–D15 came from
+
+D1–D9 were derived from this corpus. D10–D15 come from auditing a shipped sibling system, the `gpt-actions-rag` RFP knowledge base in [`docs/research/gpt-actions-rag/`](./gpt-actions-rag/). It solves the same shape of problem, grounded answers over templated business prose with citations, and it has been running against a real corpus long enough for its failure modes to surface. Reading them off a live system is cheaper than rediscovering them at P2.
+
+The audit ran the system against its own ten-document corpus. Four findings transfer directly:
+
+- **It cannot abstain.** Its relevance floor is a character-trigram Jaccard that is never zero between two English texts, so every query retrieves something. A question about Martian ground stations returned four sources at high scores and an answer about key rotation. KnowCode's orchestrator has the same structure and no floor at all, which is **D10**.
+- **Its confidence measures the machinery, not the evidence.** It reports the score margin between hit one and hit two. Across five probes, nonsense scored 0.72 and a correct answer scored 0.74. `sufficiency_score` has the same defect in a different disguise, so it is **D11**. Note the known code-corpus finding in §1.2, `answer_correctness@0.8 = 0.571`. That is not a mis-set threshold, it is a score that cannot express the thing being thresholded.
+- **Its governance metadata was defaulted at ingest, not derived.** All ten documents carried `doc_type=rfp_library`, `approved=True`, `source_priority=70`. Four of the eight ranking signals were therefore constants, and the pricing and legal risk gate could never fire. The dates were ingest dates, though the filenames carried real ones. This is **D12**, and the version halves of those same filenames give **D13**.
+- **One document ate the corpus.** Two spreadsheets held 96.5% of 6,846 chunks. All five probes drew their entire top-3 from one of them, and the eight curated narrative documents holding the remaining 3.5% appeared in none of them. That is **D14**, and prose collateral has the same skew between a 3,000-line PRD and a one-page release note.
+
+The fifth lesson is the one this repository already learned. That system has no tests and no eval, and every constant in its scoring product was hand-tuned against documents nobody can re-run. KnowCode built the harness that avoids exactly that and now keeps it in [`knowcode-evals`](https://github.com/deepakdgupta1/knowcode-evals). What remains is that the harness and the running code have drifted apart, which is **D15**.
 
 ---
 
@@ -118,12 +137,19 @@ Prioritized by **leverage ÷ effort**, sequenced so each ships independently. Th
 | **P3** | Document / traceability graph (extend NetworkX) | ★★★ | Med–High | D5 |
 | **P4** | Query router (reuse classifier) + adaptive paths | ★★ | Med | binds P0–P5 |
 | **P5** | Synthesis layer — RAPTOR + LazyGraphRAG | ★★ | High | D7 |
+| **P-1** | ~~Re-bind `knowcode-evals` to HEAD~~ **DONE 2026-09-09.** Now: fix the ranking regression it exposed | ★★★ | Low → Med | D15 |
+| **P1.5** | **Trust gate.** Retrieval score floor + query-aware sufficiency, both calibrated on the re-bound set | ★★★ | Low | D10, D11 |
+| **P2+** | Metadata coverage assertion at ingest; supersession as a rank rule; per-document normalization | ★★ | Low–Med | D12, D13, D14 |
 | **X-cut** | **Prose golden set** + metrics + sufficiency re-calibration (§6) | — | Med | D8, D9 |
 | **X-cut** | Agentic/iterative retrieval gated by sufficiency | ★ | Med | hard multi-hop |
 
 **Why P0 first.** Structure-aware chunking is the largest single prose-quality lever and unblocks everything downstream (the section schema is the graph's join key). **Why P1–P2 next.** They capture most achievable discovery quality before any graph work — the 2026 field's own top-five ordering is chunking → hybrid → rerank → query-transform → eval. **Why the graph (P3) is the differentiator despite higher effort.** It is the one capability flat RAG can never replicate and it serves all three query classes (entry-point for fact lookup, traversal for traceability, subgraph scoping for synthesis).
 
-**If you do only five things:** P0 chunking · P1 prose embedder · P1 contextual retrieval · P2 metadata-hybrid + reranker · P3 the graph — then prove all five on the prose golden set before tuning.
+**Why P-1 preceded everything, and what it found.** P1 and P2 are tuning exercises. Every one of them sets a weight, a threshold, or a blend ratio, and none of those numbers means anything without a set to measure against. Re-binding took hours and immediately paid for itself: it exposed a halving of mean MRR that no one had noticed across 186 commits, because the only thing watching was a shape test that could not fail. Fix that regression before P1, or every prose number inherits a broken code ranker. The sibling audit in §2.1 is what an untested scoring product looks like after a year, and §6.1 is what a briefly unwatched one looks like after three months.
+
+**Why P1.5 sits between the embedder and the hybrid.** D10 and D11 are each a small change in one function, and together they decide whether the system is allowed to say "I do not have this." Land them while the retrieval surface is still simple. Retrofitting an abstention contract after the router (P4) and the synthesis layer (P5) means threading it through three more paths.
+
+**If you do only five things:** P-1 re-bind the harness · P0 chunking · P1 prose embedder · P1 contextual retrieval · P1.5 the trust gate. Then prove each on the prose golden set before tuning anything.
 
 ---
 
@@ -190,6 +216,44 @@ Reuse the three-role Author / Oracle / Adversary pipeline verbatim; the **Oracle
 
 **Field target to beat:** advanced RAG ≈ **63% factual accuracy vs ≈ 44% naive** (2026). The ladder in §4 is *how*; this harness is *how you prove* each rung.
 
+### 6.1 The harness lives in `knowcode-evals` and has drifted from HEAD
+
+The harness is not in this repository. It owns the golden datasets, the scorer, calibration, and the evaluation docs, and it lives in [`knowcode-evals`](https://github.com/deepakdgupta1/knowcode-evals). KnowCode consumes its policy artifacts and produces none of its own, as [`routing_policy.py`](../../src/knowcode/routing_policy.py) states. `docs/roadmap.md` and `docs/engineering/testing.md` carry the same pointer. Look there first. The `tests/eval/` path in this repository holds nothing but stale `__pycache__`, which reads like a deleted harness and is not one.
+
+The prose scaffold survived the split intact and sits at `tests/eval/prose/` in that repository, holding `phase1_plan.json`, `golden_v0.schema.json`, and three placeholder records. Its own README marks it **SPEC ONLY, awaiting corpus**. Nothing there runs in CI because no prose corpus exists yet. D9 stands exactly as written.
+
+**The re-bind ran on 2026-09-09 (P-1 complete).** The golden set was authored at `2ae419e` and is now bound to `7e9ca96`. Three things were wrong and are fixed in `knowcode-evals`. The harness resolved its KnowCode checkout by walking up three parents, which pointed at the evals repo itself after the split; it now takes `KNOWCODE_REPO`. Eight records had labels that no longer resolved, five re-pointed to renamed symbols and two retired because every entity they name moved into `knowcode-evals`. KnowCode's entity IDs became module-qualified (`markdown_parser.MarkdownParser`), which silently zeroed every entity metric until the scorer learned to strip the qualifier.
+
+**Retrieval has measurably regressed on the code corpus.** Over the 58 active records against `7e9ca96`, four of five gates fail.
+
+| Metric | Gate | `2ae419e` | `7e9ca96` | |
+|---|---|---|---|---|
+| mean MRR | ≥ 0.40 | 0.693 | **0.344** | FAIL |
+| mean Recall@10 | ≥ 0.50 | 0.684 | **0.462** | FAIL |
+| mean file coverage@5 | ≥ 0.50 | 0.761 | 0.622 | PASS |
+| mean precision@1 | — | 0.517 | 0.190 | |
+| local routing rate | — | 0.117 | 0.241 | |
+
+On the 58 records common to both runs the figures are 0.682 then 0.344 for MRR, and 0.500 then 0.190 for precision@1.
+
+**One confound governs how much of that delta is code.** Indexable source files went 155 at `2ae419e` to 338 at `7e9ca96`, so the corpus more than doubled between measurements. A doubled candidate pool depresses MRR and recall@10 by itself. The headline delta is therefore not a clean regression measurement.
+
+**The part corpus growth cannot explain is the failure mode.** Widening retrieval to 50 candidates lifts recall only from 0.462 to 0.632. Sixty-seven of 139 expected entities never surface at all, out of 345 indexed files. Of the 72 that do, median rank is 5 and 39 sit in the top 5. Ranking is healthy for what it finds, and **candidate generation is what fails**. Blend mistuning is ruled out: `alpha` is the dense weight, and sweeping it yields MRR 0.344 at 0.2, 0.137 at 0.5, and 0.000 at 0.8, so the current sparse-heavy setting is already near-best. The open hypothesis is that the dense arm is not merely unhelpful but broken, since a clean 0.000 is collapse rather than degradation while the vector store holds 7,474 vectors.
+
+**The sufficiency finding is the robust one, and it is D11 measured rather than argued.** `sufficiency_score` rose 0.545 to 0.666 on identical records while accuracy halved, with `sufficiency_threshold` unchanged at 0.8 at both commits. Corpus growth makes the task harder, so a working confidence signal should have fallen. This one rose. A score that moves opposite to correctness cannot be repaired by moving its threshold, which is precisely the distinction between D8 and D11.
+
+**The corpus is still calibration-only, and the threshold it should have blessed is still shipping.** The dataset carries `dataset_status: agent_curated_pending_human_review`, it is not a locked holdout, and no blessed `machine-verification.json` policy has been issued from it. `routing_policy.sufficiency_threshold` is live regardless. That is the §2.1 pattern in its milder form. The gate runs ahead of its evidence rather than without it.
+
+P1 now starts from a working instrument and a known-bad number. Fix the ranking regression before tuning anything prose-side, or every prose measurement inherits it.
+
+### 6.2 Metrics the sibling audit adds
+
+Three metrics that D9's original plan did not carry. Each one exists because the audited system passed every check it had and still failed in the field.
+
+- **Abstention rate on off-corpus queries.** Stratify a deliberate off-corpus slice into the golden set, queries whose answer is provably absent. The metric is the fraction correctly refused. Without this slice a retrieval system scores well by answering everything, which is exactly how the audited system reached production. Target it before tuning recall, because recall and abstention trade against each other and only measuring one of them hides the trade.
+- **Sufficiency reliability, not sufficiency accuracy.** Bin predicted `sufficiency_score` against observed answer-correctness and publish the diagram. A score whose bins are flat is not mis-calibrated, it is uninformative, and no threshold rescues it. This is the check that distinguishes D8 (wrong threshold) from D11 (wrong score).
+- **Source concentration.** Per query, the share of the returned context drawn from a single document, and across the set, the fraction of the corpus that is ever reachable in a top-k. In the audited corpus, 8 of 10 documents never surfaced across five probes, and no metric it collected would have said so.
+
 ---
 
 ## 7. Mapping onto the Reference Architecture
@@ -249,4 +313,4 @@ flowchart TB
 
 ---
 
-*Sequencing in one line: **P0 chunking → P1 prose embedder + contextual retrieval → P2 metadata-hybrid + reranker** (most quality-per-effort), then **P3 the traceability graph** (the differentiator), then **P4 router → P5 synthesis**. Stand up the prose golden set in parallel and validate every rung on it — scale was never the problem; measured quality is the whole game.*
+*Sequencing in one line: **P-1 re-bind the harness → P0 chunking → P1 prose embedder + contextual retrieval → P1.5 the trust gate → P2 metadata-hybrid + reranker** (most quality-per-effort), then **P3 the traceability graph** (the differentiator), then **P4 router → P5 synthesis**. Validate every rung on the prose golden set as you land it. Scale was never the problem. Measured quality is the whole game, and §2.1 is what happens to a scoring system that never gets measured.*
