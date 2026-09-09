@@ -92,7 +92,11 @@ class MockServiceWithStore:
         self.context_calls: list[tuple] = []  # type: ignore
 
     def get_context(
-        self, target: str, max_tokens: int = 2000, task_type: Any = None
+        self,
+        target: str,
+        max_tokens: int = 2000,
+        task_type: Any = None,
+        summarize: bool = False,
     ) -> Any:  # noqa: ANN001  # type: ignore
         self.context_calls.append((target, max_tokens, task_type))
         return {

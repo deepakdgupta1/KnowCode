@@ -116,7 +116,11 @@ RETRIEVE_TOOL: dict[str, Any] = {
             "verbosity": {
                 "type": "string",
                 "enum": VERBOSITY_LEVELS,
-                "description": "Keep 'minimal' unless it was insufficient.",
+                "description": (
+                    "Response profile: 'minimal' summarizes without raw source "
+                    "(debug/review tasks include it); 'standard'+ adds source. "
+                    "Keep 'minimal' unless it was insufficient."
+                ),
                 "default": "minimal",
             },
             "direction": {

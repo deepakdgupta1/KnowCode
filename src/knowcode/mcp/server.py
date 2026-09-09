@@ -31,6 +31,7 @@ from knowcode.service import KnowCodeService
 from knowcode.storage.knowledge_store import KnowledgeStore
 from knowcode.data_models import TaskType
 from knowcode.errors import MissingKnowledgeStoreError, KnowCodePrerequisiteError
+from knowcode.retrieval.response_profiles import summarize_context
 from knowcode.mcp import inspection, lifecycle
 from knowcode.mcp.jobs import JobRegistry
 from knowcode.mcp.legacy import UNHANDLED, dispatch_legacy
@@ -201,6 +202,7 @@ class KnowCodeMCPServer:
         entity_id: str,
         task_type: str = "general",
         max_tokens: int = 2000,
+        summarize: bool = False,
     ) -> dict[str, Any]:
         """Get synthesized context for an entity.
 
@@ -208,6 +210,9 @@ class KnowCodeMCPServer:
             entity_id: Entity ID or search pattern.
             task_type: Task type for prioritization.
             max_tokens: Token budget.
+            summarize: Omit the raw source section (the response profile).
+                Defaults to the pre-profile behaviour so the deprecated flat
+                tool keeps the shape its release promised.
 
         Returns:
             Context bundle with sufficiency score.
@@ -220,7 +225,7 @@ class KnowCodeMCPServer:
 
         try:
             bundle = service.get_context(
-                entity_id, max_tokens=max_tokens, task_type=task
+                entity_id, max_tokens=max_tokens, task_type=task, summarize=summarize
             )
         except ValueError:
             return {
@@ -388,10 +393,21 @@ class KnowCodeMCPServer:
                 limit=int(arguments.get("limit", 10)),
             )
         if action == "context":
+            task_type = str(arguments.get("task_type", "general"))
+            try:
+                task = TaskType(task_type)
+            except ValueError:
+                task = TaskType.GENERAL
             return self.get_entity_context(
                 entity_id=require_str(arguments, "entity_id", action),
-                task_type=str(arguments.get("task_type", "general")),
+                task_type=task.value,
                 max_tokens=int(arguments.get("max_tokens", 1500)),
+                # The same response profile ``query`` answers to (P3-2):
+                # summary-first, source on escalation or for a task type
+                # that reads code for a living.
+                summarize=summarize_context(
+                    str(arguments.get("verbosity", "minimal")), task.value
+                ),
             )
         if action == "trace":
             # Resolve names to ids first. ``store.trace_calls`` matches on
@@ -556,6 +572,9 @@ class KnowCodeMCPServer:
             "tool_name": name,
             "argument_count": argument_count,
             "outcome": self._payload_outcome(payload),
+            # The response's size, never its bytes: the recurring cost the
+            # token diet is measured against (P3-3).
+            "payload_bytes": len(payload),
         }
         # With a consolidated surface, ``tool_name`` no longer identifies the
         # capability used, so per-action counts need the action too. Action

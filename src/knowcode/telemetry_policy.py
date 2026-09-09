@@ -97,6 +97,10 @@ ALLOWED_FIELDS: Final[Mapping[str, Mapping[str, str]]] = {
         "argument_count": _INT,
         "query_id": _STR,
         "query_chars": _INT,
+        # Shape of the answer, not its content: the serialized result's
+        # length, the same privacy posture as ``query_chars`` (P3-3).
+        # Additive and optional, like ``action`` above.
+        "payload_bytes": _INT,
         "outcome": _STR,
         "duration_ms": _INT,
     },

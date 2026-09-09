@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, Optional, Protocol
 import logging
 
 from knowcode.llm.query_classifier import classify_query
+from knowcode.retrieval.response_profiles import summarize_context
 from knowcode.telemetry import current_query_scope, query_scope
 
 if TYPE_CHECKING:
@@ -142,6 +143,10 @@ class RetrievalOrchestrator:
         detected_task_type, confidence = classify_query(query)
         resolved_task_type = task_type or detected_task_type
         task_confidence = 1.0 if task_type is not None else confidence
+        # P3-2's response profile for this attempt, resolved once so the
+        # bundles and the projection below cannot disagree about whether
+        # source was omitted.
+        summarize = summarize_context(verbosity, resolved_task_type.value)
 
         if limit_entities <= 0 or max_tokens <= 0:
             self._record_retrieval(
@@ -268,7 +273,7 @@ class RetrievalOrchestrator:
                     entity_id,
                     max_tokens=min(per_entity_max_tokens, remaining_budget),
                     task_type=resolved_task_type,
-                    summarize=(verbosity == "minimal"),
+                    summarize=summarize,
                     is_stale=is_stale,
                 )
             except Exception as exc:
@@ -341,11 +346,20 @@ class RetrievalOrchestrator:
         }
 
         if verbosity == "minimal":
-            filtered_response["reduction_summary"] = {
-                "omitted_raw_source_count": len(selected_entity_ids),
-                "omitted_evidence_count": len(evidence),
-                "hint": "Call again with verbosity='standard' to get raw source code, or 'verbose' to see evidence chunks.",
-            }
+            if summarize:
+                filtered_response["reduction_summary"] = {
+                    "omitted_raw_source_count": len(selected_entity_ids),
+                    "omitted_evidence_count": len(evidence),
+                    "hint": (
+                        "Call again with verbosity='standard' to get raw source "
+                        "code, or 'verbose' to see evidence chunks. task_type "
+                        "'debug'/'review' include source automatically."
+                    ),
+                }
+            else:
+                # The source-hungry profile already carries the code; saying
+                # so stops an agent from re-asking for what it has.
+                filtered_response["source_included"] = True
             if errors:
                 filtered_response["errors"] = errors
         elif verbosity == "standard":

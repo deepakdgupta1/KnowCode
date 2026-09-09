@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import threading
 import time
@@ -367,6 +368,31 @@ def current_query_id() -> str:
 # ----------------------------------------------------------------------
 
 
+def _payload_distribution(sizes_by_action: dict[str, list[int]]) -> dict[str, Any]:
+    """Reduce per-action payload sizes to count and nearest-rank percentiles.
+
+    Percentiles are observed values, never interpolations, so a p95 names a
+    real payload the surface actually produced.
+    """
+    distribution: dict[str, Any] = {}
+    for key, sizes in sizes_by_action.items():
+        ordered = sorted(sizes)
+
+        def rank(quantile: float, ordered: list[int] = ordered) -> int:
+            index = max(
+                0, min(len(ordered) - 1, math.ceil(quantile * len(ordered)) - 1)
+            )
+            return ordered[index]
+
+        distribution[key] = {
+            "count": len(ordered),
+            "p50": rank(0.50),
+            "p95": rank(0.95),
+            "max": ordered[-1],
+        }
+    return distribution
+
+
 def get_telemetry_summary(store_path: str | Path) -> dict[str, Any]:
     """Aggregate metrics for trend review, across rotations and schemas."""
     empty: dict[str, Any] = {
@@ -376,6 +402,7 @@ def get_telemetry_summary(store_path: str | Path) -> dict[str, Any]:
         "user_marked_misses": 0,
         "schema_version": telemetry_policy.TELEMETRY_SCHEMA_VERSION,
         "events_by_type": {},
+        "payload_bytes_by_action": {},
         "raw_capture_enabled": raw_capture_enabled(),
     }
     root = telemetry_files.resolve_store_root(store_path)
@@ -387,6 +414,7 @@ def get_telemetry_summary(store_path: str | Path) -> dict[str, Any]:
     sufficiency = 0.0
     misses = 0
     by_type: dict[str, int] = {}
+    sizes_by_action: dict[str, list[int]] = {}
     try:
         for record in telemetry_files.iter_records(
             telemetry_files.telemetry_path(root)
@@ -402,6 +430,11 @@ def get_telemetry_summary(store_path: str | Path) -> dict[str, Any]:
                     sufficiency += float(score)
             if record.get("user_marked_miss") or record.get("user_marked_misses"):
                 misses += 1
+            if event_type == telemetry_policy.TOOL_CALL_EVENT:
+                size = record.get("payload_bytes")
+                if isinstance(size, int) and not isinstance(size, bool):
+                    key = f"{record.get('tool_name', '?')}:{record.get('action', '-')}"
+                    sizes_by_action.setdefault(key, []).append(size)
     except OSError as exc:
         logger.warning("Telemetry summary failed: %s", exc)
         return empty
@@ -413,6 +446,7 @@ def get_telemetry_summary(store_path: str | Path) -> dict[str, Any]:
         "user_marked_misses": misses,
         "schema_version": telemetry_policy.TELEMETRY_SCHEMA_VERSION,
         "events_by_type": by_type,
+        "payload_bytes_by_action": _payload_distribution(sizes_by_action),
         "raw_capture_enabled": raw_capture_enabled(),
     }
 

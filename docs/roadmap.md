@@ -169,11 +169,35 @@ baseline and routing-quality gate.
 1. Prototype one `knowcode` MCP tool with an `action` enum for `search`,
    `context`, `trace`, `query`, and `quality`. Keep the existing five tools
    available behind an explicit compatibility option for one release.
-2. Define response profiles that are summary-first for exploratory work and
+2. ~~Define response profiles that are summary-first for exploratory work and
    expose raw source only for explicit source requests or task types that need
-   it, such as debugging and review.
-3. Add byte/token caps per action to regression tests and record payload-size
-   distributions in local telemetry.
+   it, such as debugging and review.~~ Shipped 2026-09-09. The profiles are
+   one definition — `retrieval/response_profiles.py` — that every
+   source-bearing retrieval consumer answers to. Summary-first is the default
+   on `query` *and* `context` (the latter used to synthesize raw source on
+   every call); escalation rides the `verbosity` ladder the surface already
+   had rather than a new schema enum, because the schema is paid on every
+   turn and stays at ~1,140 tokens under the 1,200 ceiling. `debug` and
+   `review` task types include source even at `minimal` — a floor an explicit
+   default could cancel is no floor, since `minimal` *is* the default — and
+   the roadmap's two are pinned by test so widening the set is deliberate.
+   `semantic_search` is the explicit source request and stays raw. The
+   `query` projection no longer claims an omission it did not make: a
+   source-hungry minimal response says `source_included` instead of a
+   reduction summary. The deprecated flat `get_entity_context` tool keeps
+   its old shape for its compatibility release.
+3. ~~Add byte/token caps per action to regression tests and record payload-size
+   distributions in local telemetry.~~ Shipped 2026-09-09.
+   `tests/integration/test_mcp_payload_caps.py` builds a real index and pins
+   every default action payload under ~2x its measured bytes (the 2x absorbs
+   absolute-path noise, which swings ~30% between tmp roots); a profile flip
+   is caught comparatively — same call, summary vs explicit source, same
+   root — which path noise cannot fool. Telemetry records `payload_bytes`
+   on every tool call (a length, the same privacy posture as
+   `query_chars`, additive to the event schema so old records stay valid)
+   and the usage summary reports per-tool-and-action count, p50, p95, and
+   max as observed values. Measured on this repository: default `context`
+   fell from 4,313 to 674 bytes on the probe entity, a 6.4x reduction.
 
 **Exit criteria:** default tool/result payloads are measurably smaller, golden
 retrieval and routing quality do not regress, and migration guidance is
@@ -191,11 +215,17 @@ published before the legacy tool surface changes.
   for 5 capabilities to ~1,110 for 14 rather than down to ~200. Cost per
   capability improved ~2.3x; absolute per-turn cost did not fall. A ceiling
   test now guards it. Item 2 (summary-first response profiles) and item 3
-  (per-action payload caps in telemetry) remain open, and are where an
-  absolute reduction should now come from.
+  (per-action payload caps in telemetry) have since shipped — 2026-09-09,
+  see the Done note below — and delivered the absolute reduction.
 - **Unblocked by the same change:** `mcp-server` no longer refuses to start
   without a store, so an agent can bootstrap a repository through
   `knowcode_lifecycle action='build'` without a terminal step.
+- **Done (response profiles and payload telemetry, 2026-09-09):** items 2 and
+  3 above. The absolute reduction consolidation could not deliver now comes
+  from the responses themselves: every default retrieval payload is a summary
+  unless the agent escalates `verbosity` or the task type is one of
+  `debug`/`review`, and the recurring cost is now measured per action in
+  local telemetry with regression caps holding it.
 
 ### P4 - Unified Agent Onboarding
 
