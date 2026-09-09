@@ -224,3 +224,7 @@ tests/test_sample-prose
 tests/.DS_Store
 .gitignore
 .zcode/
+
+# Vendored clone studied in docs/research; a separate repo with its own git.
+# Excluded so the pre-commit formatter cannot rewrite another project's source.
+docs/research/gpt-actions-rag/
