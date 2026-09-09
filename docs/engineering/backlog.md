@@ -30,7 +30,60 @@ measured reason not to build something is worth more than silence.
 
 ## Open
 
-Nothing. Every item filed here has been fixed or rejected with a measured reason. The Closed table below is the record.
+### BL-35 - `doctor` vouches for a dummy semantic index when credentials are absent
+
+**Severity:** High. **Found:** 2026-09-09, re-running `doctor --mcp` to complete
+P2's conformance audit, first without provider keys in the environment and then
+with them loaded from the Keychain.
+
+`create_embedding_provider` walks `app_config.embedding_models` and skips any
+model whose `api_key_env` is not set, falling through to
+`_dummy_embedding_provider()`:
+
+```python
+for model in app_config.embedding_models:
+    api_key = os.environ.get(model.api_key_env)
+    if not api_key:
+        continue
+    return build_provider_from_model(model)
+
+return _dummy_embedding_provider()
+```
+
+[BL-27](backlog.md) made that fallback honest at the *index*: a generation built
+without keys records `provider='dummy'`, `model_name='deterministic-sha256'`
+rather than the configured model. The compatibility check in `service.py`
+compares that recorded label against the provider that resolves **now**, and
+that resolution runs through the same silent fallback. With no key set, current
+also resolves to `dummy`, the two degraded values match, and the check passes.
+
+Reproduced on generation `20260908T180710492470Z-92863146`, same store, same
+command, only the environment differing:
+
+| `VOYAGE_API_KEY_1` | `doctor` Semantic index |
+|---|---|
+| unset | `[PASS] ... (schema v8, dummy/deterministic-sha256, dimension 1024)` |
+| set | `[FAIL] provider mismatch: index='dummy' current='voyageai'; model_name mismatch: index='deterministic-sha256' current='voyage-code-3'` |
+
+The passing verdict is the wrong one. A developer who clones this repository,
+builds without credentials, and runs `doctor` is told the semantic index is
+healthy when its vectors are deterministic SHA-256 output carrying no semantic
+signal. Semantic ranking is meaningless in that state while the exact, path, and
+FTS planes still work, so the failure is quiet rather than obvious.
+
+Rating this `High` rather than `Critical` is a judgement about blast radius, not
+about whether answers are wrong: they are. Re-rate it if a fresh-clone build
+without keys is considered a supported path rather than a mistake.
+
+**Not verified:** whether `knowcode build` warns when it selects the dummy
+provider. If it does, the operator has one signal and only `doctor` is silent;
+if it does not, the entire path from build to retrieval is quiet. That
+determines whether the fix belongs in `doctor` alone or at provider selection.
+
+A candidate fix is to make the comparison independent of current credentials —
+compare the recorded label against the *configured* model in `aimodels.yaml`
+rather than the resolved provider, so a dummy-built index fails against a
+configured real provider whether or not its key happens to be present.
 
 ## Closed
 

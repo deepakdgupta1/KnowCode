@@ -118,12 +118,28 @@ inferiority, and blessed-baseline regression all fail closed.
 end-to-end escalation coverage, and a `doctor`/release-checklist conformance
 audit). See [Roadmap History](engineering/roadmap-history.md).
 
-**Open residue.** The 2026-08-11 audit validated `retrieve_context_for_query` as
-the canonical tool. P3's consolidation then replaced that surface, and the
-contract's appendix went on describing the old one until 2026-09-09. The
-documents now agree and the contract suites pass against the three-tool surface.
-Re-run the [release checklist](engineering/release.md) conformance audit
-end-to-end, including a green `doctor --mcp` handshake, before closing P2.
+**Audit re-run 2026-09-09.** The 2026-08-11 audit had validated
+`retrieve_context_for_query`, a surface P3's consolidation then replaced, and
+the contract's appendix went on describing the old one. The documents were
+corrected and all four
+[release checklist](engineering/release.md) conformance items re-verified
+against the running surface: the default tool list is `knowcode_retrieve`,
+`knowcode_lifecycle`, `knowcode_inspect` with the flat five reachable only
+through `tool_definitions(include_legacy=True)`; the published schema defaults
+are `max_tokens=1500`, `limit_entities=1`, `verbosity="minimal"`; the minimal
+projection is an allowlist, now pinned to an exact field set by
+`tests/unit/retrieval/test_orchestrator_profiles.py`; and `doctor --mcp` lists
+three tools and calls `knowcode_retrieve` successfully.
+
+The checklist's boxes are ticked per release rather than once, so the audit is
+re-run each time — but P2's own exit criteria are met and the workstream is
+ready to close.
+
+**Not evidence for this:** the handshake ran against a store carrying
+[BL-32](engineering/backlog.md) builder drift. The contract surface, schema
+defaults, and projection are all code-side and were verified in-process against
+the running code, so the drift does not weaken them; it does mean the retrieved
+*content* described a graph this code did not build.
 
 **Exit criteria:** agent, MCP, CLI, docs, and tests use one contract with no
 implicit reliance on fields hidden by minimal mode.

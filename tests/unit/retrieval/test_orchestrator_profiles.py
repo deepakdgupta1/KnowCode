@@ -115,3 +115,53 @@ def test_standard_never_summarizes(tmp_path: Path) -> None:
 
     assert result["_flags"] == [False]
     assert "reduction_summary" not in result
+
+
+#: Fields the MCP contract's minimal projection promises to withhold. An agent
+#: that reads one of these under ``verbosity='minimal'`` is relying on a field
+#: the contract does not send.
+INTERNAL_FIELDS = frozenset(
+    {
+        "query",
+        "task_type",
+        "task_confidence",
+        "retrieval_mode",
+        "max_tokens",
+        "truncated",
+        "evidence",
+        "selected_entities",
+    }
+)
+
+
+def _projection(tmp_path: Path, task_type: TaskType) -> frozenset[str]:
+    result = _retrieve(tmp_path, task_type=task_type, verbosity="minimal")
+    return frozenset(result) - {"_flags"}
+
+
+def test_minimal_projection_is_exactly_the_contracted_fields(tmp_path: Path) -> None:
+    """The release checklist's "minimal projection" line, pinned.
+
+    The projection is built as an allowlist, so nothing leaks by accident
+    today. Rewriting it as a denylist over the full response would invert that
+    guarantee silently, which is what this exact-set assertion catches.
+    """
+    assert _projection(tmp_path, TaskType.EXPLAIN) == {
+        "context_text",
+        "sufficiency_score",
+        "total_tokens",
+        "reduction_summary",
+    }
+    assert _projection(tmp_path, TaskType.DEBUG) == {
+        "context_text",
+        "sufficiency_score",
+        "total_tokens",
+        "source_included",
+    }
+
+
+def test_minimal_never_carries_internal_metadata(tmp_path: Path) -> None:
+    """Stated as the contract states it, so a new internal field is caught
+    even if someone widens the allowlist above without thinking."""
+    for task_type in (TaskType.EXPLAIN, TaskType.DEBUG, TaskType.REVIEW):
+        assert not (_projection(tmp_path, task_type) & INTERNAL_FIELDS), task_type

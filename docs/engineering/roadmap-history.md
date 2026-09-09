@@ -173,3 +173,12 @@ belong in §17, defects in the [backlog](backlog.md).
   set given one owner in the contract. A documentation link checker
   (`scripts/check_doc_links.py`) now runs in CI, because the split would
   otherwise have been free to break relative links silently.
+- **2026-09-09 — P2 conformance audit re-run.** All four release-checklist
+  items verified against the three-tool surface, and `doctor --mcp` green. The
+  earlier report that the handshake could not be exercised was wrong: the
+  provider keys were in the macOS Keychain under the `Hermes` service, not
+  absent. Loading them turned the handshake `PASS` and turned the Semantic
+  index check `FAIL`, which is [BL-35](backlog.md): the check compares the
+  index's recorded provider against the one that resolves now, and with no key
+  set both degrade to `dummy` and match, so `doctor` vouches for an index with
+  no semantic signal.
