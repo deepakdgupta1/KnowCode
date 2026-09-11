@@ -773,3 +773,145 @@ def test_doctor_keeps_the_rebuild_hint_when_a_key_is_usable(tmp_path: Path) -> N
     hint = _semantic_check(result)["hint"]
     assert "KC_TEST_EMBED_KEY" not in hint
     assert "knowcode build" in hint
+
+
+# --- An embedding entry this build cannot construct is reported by the Config
+# --- check, and does not take the command down (BL-36) ---------------------
+
+
+def _write_config_with_unsupported_embedder(path: Path, *, with_voyage: bool) -> None:
+    """Configure `provider: local`, which `build_provider_from_model` refuses."""
+    voyage = (
+        """
+  - name: voyage-code-3
+    provider: voyageai
+    api_key_env: KC_TEST_EMBED_KEY
+"""
+        if with_voyage
+        else ""
+    )
+    path.write_text(
+        f"""
+natural_language_models:
+  - name: gemini-test
+    provider: google
+    api_key_env: KC_TEST_LLM_KEY
+embedding_models:
+  - name: bge-m3
+    provider: local
+    api_key_env: KC_LOCAL_KEY{voyage}
+config:
+  sufficiency_threshold: 0.8
+""",
+        encoding="utf-8",
+    )
+
+
+def _config_check(result: Any) -> dict:
+    payload = json.loads(result.output)
+    return next(check for check in payload["checks"] if check["name"] == "Config")
+
+
+def _run_doctor(tmp_path: Path, config: Path) -> Any:
+    return CliRunner().invoke(
+        cli_module.cli,
+        ["doctor", "--store", str(tmp_path), "--config", str(config), "--json"],
+    )
+
+
+def test_doctor_completes_every_check_past_an_unbuildable_embedder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """BL-36: `NotImplementedError` escaped `_check_semantic_index`.
+
+    The blast radius is wider than one check. `_check_semantic_index` is
+    called unguarded, so the traceback also cost the four checks sequenced
+    after it -- a diagnostic silently reporting less than it ran.
+    """
+    monkeypatch.setenv("KC_LOCAL_KEY", "test-key")
+    config = tmp_path / "aimodels.yaml"
+    _write_config_with_unsupported_embedder(config, with_voyage=False)
+    _write_store(tmp_path)
+    _publish_generation(
+        tmp_path / "knowcode_index",
+        provider="dummy",
+        model_name="deterministic-sha256",
+    )
+
+    result = _run_doctor(tmp_path, config)
+
+    assert not isinstance(result.exception, NotImplementedError), result.exception
+    names = [check["name"] for check in json.loads(result.output)["checks"]]
+    assert "Semantic index" in names
+    for trailing in (
+        "Disk footprint",
+        "Agent rules",
+        "Supported languages",
+        "Freshness",
+    ):
+        assert trailing in names, names
+
+
+def test_doctor_fails_config_naming_the_only_embedder_it_cannot_build(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With no buildable entry left, nothing configured can ever embed.
+
+    The BL-35 comparison cannot catch this one: `configured_embedding_config`
+    steps over the unusable entry too, so both yardsticks read `dummy` and
+    agree. Naming the entry is the only place the truth survives.
+    """
+    monkeypatch.setenv("KC_LOCAL_KEY", "test-key")
+    config = tmp_path / "aimodels.yaml"
+    _write_config_with_unsupported_embedder(config, with_voyage=False)
+    _write_store(tmp_path)
+    _publish_generation(
+        tmp_path / "knowcode_index",
+        provider="dummy",
+        model_name="deterministic-sha256",
+    )
+
+    check = _config_check(_run_doctor(tmp_path, config))
+
+    assert check["status"] == "fail"
+    assert "bge-m3" in check["message"]
+    assert "local" in check["message"]
+
+
+def test_doctor_warns_when_an_unbuildable_entry_leaves_a_usable_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A dead entry beside a working one is a config defect, not unreadiness.
+
+    The semantic index check must keep going and settle on the entry that
+    does build, which is the half of BL-36 the crash hid.
+    """
+    monkeypatch.setenv("KC_LOCAL_KEY", "test-key")
+    monkeypatch.setenv("KC_TEST_EMBED_KEY", "test-key")
+    config = tmp_path / "aimodels.yaml"
+    _write_config_with_unsupported_embedder(config, with_voyage=True)
+    _write_store(tmp_path)
+    _publish_generation(tmp_path / "knowcode_index")
+
+    result = _run_doctor(tmp_path, config)
+
+    check = _config_check(result)
+    assert check["status"] == "warn"
+    assert "bge-m3" in check["message"]
+    assert _semantic_check(result)["status"] == "pass"
+
+
+def test_doctor_config_passes_when_every_embedder_is_buildable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The report stays quiet about a config with nothing wrong with it."""
+    monkeypatch.setenv("KC_TEST_EMBED_KEY", "test-key")
+    config = tmp_path / "aimodels.yaml"
+    _write_config(config)
+    _write_store(tmp_path)
+    _publish_generation(tmp_path / "knowcode_index")
+
+    check = _config_check(_run_doctor(tmp_path, config))
+
+    assert check["status"] == "pass"
+    assert "bge-m3" not in check["message"]

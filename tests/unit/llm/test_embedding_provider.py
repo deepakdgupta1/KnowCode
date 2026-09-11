@@ -524,3 +524,103 @@ def test_no_warning_when_the_dummy_is_the_configured_intent(
         create_embedding_provider(app_config=AppConfig(embedding_models=[]))
 
     assert [r for r in caplog.records if r.levelname == "WARNING"] == []
+
+
+# --- An entry naming a provider this build cannot construct is stepped over,
+# --- not raised (BL-36) ----------------------------------------------------
+
+
+def _unsupported_model() -> ModelConfig:
+    """A configured entry `build_provider_from_model` refuses to construct."""
+    return ModelConfig(name="bge-m3", provider="local", api_key_env="KC_LOCAL_KEY")
+
+
+def test_effective_embedding_config_steps_over_a_provider_it_cannot_build(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """BL-36: this raised `NotImplementedError` and took `doctor` down with it.
+
+    The key is present, so the entry clears the key gate and reaches the
+    build. A provider this release does not implement is a configuration
+    error to report, not an exception to propagate into a diagnostic.
+    """
+    monkeypatch.setenv("KC_LOCAL_KEY", "test-key")
+
+    config = effective_embedding_config(
+        AppConfig(embedding_models=[_unsupported_model()])
+    )
+
+    assert config.provider == "dummy"
+    assert config.model_name == "deterministic-sha256"
+
+
+def test_selection_continues_past_an_unsupported_provider_to_the_next_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The remaining models are what "first usable model" was always about."""
+    monkeypatch.setenv("KC_LOCAL_KEY", "test-key")
+    monkeypatch.setenv("VOYAGE_API_KEY_1", "test-key")
+    app_config = AppConfig(
+        embedding_models=[
+            _unsupported_model(),
+            ModelConfig(
+                name="voyage-code-3",
+                provider="voyageai",
+                api_key_env="VOYAGE_API_KEY_1",
+            ),
+        ]
+    )
+
+    provider = create_embedding_provider(app_config=app_config)
+
+    assert isinstance(provider, VoyageAIEmbeddingProvider)
+    assert provider.config.model_name == "voyage-code-3"
+    assert effective_embedding_config(app_config).provider == "voyageai"
+
+
+def test_prose_selection_continues_past_an_unsupported_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The prose selection loop has the same gate and the same defect."""
+    monkeypatch.setenv("KC_LOCAL_KEY", "test-key")
+    monkeypatch.setenv("VOYAGE_API_KEY_1", "test-key")
+
+    provider = create_prose_embedding_provider(
+        app_config=AppConfig(
+            prose_embedding_models=[
+                _unsupported_model(),
+                ModelConfig(
+                    name="voyage-code-3",
+                    provider="voyageai",
+                    api_key_env="VOYAGE_API_KEY_1",
+                ),
+            ]
+        )
+    )
+
+    assert isinstance(provider, VoyageAIEmbeddingProvider)
+    assert provider.config.model_name == "voyage-code-3"
+
+
+def test_dummy_fallback_names_the_unsupported_provider_as_the_reason(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Falling back for an unbuildable provider must not report a missing key.
+
+    BL-35 made the substitution loud; the sentence it used says no key is
+    set. Here the key *is* set, so that sentence would be a false reading of
+    a real config error.
+    """
+    monkeypatch.setenv("KC_LOCAL_KEY", "test-key")
+
+    with caplog.at_level("WARNING", logger="knowcode.llm.embedding"):
+        provider = create_embedding_provider(
+            app_config=AppConfig(embedding_models=[_unsupported_model()])
+        )
+
+    assert isinstance(provider, DummyEmbeddingProvider)
+    messages = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert any("bge-m3" in m and "local" in m for m in messages), messages
+    assert any("deterministic-sha256" in m for m in messages), messages
+    assert not any("No embedding API key is set" in m for m in messages), messages
