@@ -20,8 +20,10 @@ from knowcode.indexing.generations import ResolvedGeneration
 from knowcode.indexing.indexer import Indexer
 from knowcode.llm.embedding import (
     DUMMY_EMBEDDING_PROVIDER,
+    SUPPORTED_EMBEDDING_PROVIDERS,
     configured_embedding_config,
     effective_embedding_config,
+    embedding_config_for_model,
 )
 from knowcode.mcp.tools import PRIMARY_TOOL_NAME
 from knowcode.readiness import (
@@ -256,19 +258,65 @@ def _check_config(
             )
         )
     else:
-        checks.append(
-            DoctorCheck(
-                name="Config",
-                status="pass",
-                message=(
-                    f"Loaded {resolved} "
-                    f"({len(config.models)} LLM, "
-                    f"{len(config.embedding_models)} embedding, "
-                    f"{len(config.reranking_models)} reranking models)."
-                ),
-            )
-        )
+        checks.append(_loaded_config_check(resolved, config))
     return config, resolved
+
+
+def _unbuildable_embedding_models(config: AppConfig) -> list[str]:
+    """Name each embedding entry whose provider this build cannot construct.
+
+    BL-36: these entries used to raise `NotImplementedError` out of the
+    semantic index check. Selection steps over them now, which makes this the
+    only place that can report they were asked for -- the embedding comparison
+    cannot, because `configured_embedding_config` steps over them too and then
+    both of its yardsticks read `dummy` and agree.
+    """
+    unbuildable: list[str] = []
+    for model in config.embedding_models:
+        try:
+            embedding_config_for_model(model)
+        except (NotImplementedError, ValueError):
+            unbuildable.append(f"{model.name} (provider {model.provider!r})")
+    return unbuildable
+
+
+def _loaded_config_check(resolved: Path, config: AppConfig) -> DoctorCheck:
+    """Report a loaded config, and any embedding entry it cannot honour."""
+    summary = (
+        f"Loaded {resolved} "
+        f"({len(config.models)} LLM, "
+        f"{len(config.embedding_models)} embedding, "
+        f"{len(config.reranking_models)} reranking models)."
+    )
+    unbuildable = _unbuildable_embedding_models(config)
+    if not unbuildable:
+        return DoctorCheck(name="Config", status="pass", message=summary)
+
+    named = ", ".join(unbuildable)
+    hint = (
+        "Set `provider` on that entry to one of: "
+        f"{', '.join(SUPPORTED_EMBEDDING_PROVIDERS)}."
+    )
+    # Severity is what the bad entry costs, not that it exists. Beside a
+    # buildable entry it is dead weight the selection skips; as the last one
+    # standing it means nothing configured can ever embed.
+    if len(unbuildable) < len(config.embedding_models):
+        return DoctorCheck(
+            name="Config",
+            status="warn",
+            message=f"{summary} Skipping an unsupported embedding model: {named}.",
+            hint=hint,
+        )
+    return DoctorCheck(
+        name="Config",
+        status="fail",
+        message=(
+            f"{summary} No configured embedding model can be built: {named}. "
+            "Embeddings fall back to deterministic hashes carrying no "
+            "semantic signal."
+        ),
+        hint=hint,
+    )
 
 
 def _check_api_keys(config: AppConfig, checks: list[DoctorCheck]) -> None:

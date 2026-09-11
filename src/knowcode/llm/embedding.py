@@ -316,12 +316,27 @@ class DummyEmbeddingProvider(EmbeddingProvider):
         return [x / norm for x in vec] if norm > 0 else vec
 
 
+#: Accepted spellings, aliases included, of each embedding provider family.
+_VOYAGE_PROVIDERS = frozenset({"voyageai", "voyage"})
+_OPENAI_PROVIDERS = frozenset({"openai", "openrouter", "mistralai"})
+
+#: The spellings worth suggesting to someone whose `provider` is unsupported.
+#: Aliases are accepted above but not advertised here, so the hint reads as a
+#: list of distinct choices rather than of synonyms.
+SUPPORTED_EMBEDDING_PROVIDERS: tuple[str, ...] = (
+    "mistralai",
+    "openai",
+    "openrouter",
+    "voyageai",
+)
+
+
 def resolve_embedding_dimension(provider: str, model_name: str) -> int:
     """Resolve the vector dimension for a configured embedding model."""
     normalized_provider = provider.lower()
-    if normalized_provider in {"voyageai", "voyage"}:
+    if normalized_provider in _VOYAGE_PROVIDERS:
         return _VOYAGE_EMBED_DIMENSIONS.get(model_name, 1024)
-    if normalized_provider in {"openai", "openrouter", "mistralai"}:
+    if normalized_provider in _OPENAI_PROVIDERS:
         return _OPENAI_EMBED_DIMENSIONS.get(model_name, 1536)
     raise ValueError(f"Unsupported embedding provider: {provider}")
 
@@ -336,14 +351,14 @@ def embedding_config_for_model(model: ModelConfig) -> EmbeddingConfig:
     """
     provider = model.provider.lower()
 
-    if provider in {"voyageai", "voyage"}:
+    if provider in _VOYAGE_PROVIDERS:
         return EmbeddingConfig(
             provider="voyageai",
             model_name=model.name,
             dimension=resolve_embedding_dimension(provider, model.name),
         )
 
-    if provider in {"openai", "openrouter", "mistralai"}:
+    if provider in _OPENAI_PROVIDERS:
         return EmbeddingConfig(
             provider="openai",
             model_name=model.name,
@@ -460,19 +475,36 @@ def create_embedding_provider(
         return OpenAIEmbeddingProvider(embedding_config)
 
     if app_config and app_config.embedding_models:
+        unusable: list[str] = []
         for model in app_config.embedding_models:
-            api_key = os.environ.get(model.api_key_env)
-            if not api_key:
+            if not os.environ.get(model.api_key_env):
+                unusable.append(f"{model.name} (no {model.api_key_env} is set)")
+                continue
+
+            # The predicate is `embedding_config_for_model` itself, not a catch
+            # around the build, so "skipped here" and "named by doctor's Config
+            # check" are the same question asked of the same function. Catching
+            # around the build would also swallow a genuine construction error
+            # as though it were an unsupported provider.
+            try:
+                embedding_config_for_model(model)
+            except (NotImplementedError, ValueError) as exc:
+                unusable.append(_describe_unusable_model(model, exc))
                 continue
 
             return build_provider_from_model(model)
 
-        _warn_dummy_fallback(app_config.embedding_models)
+        _warn_dummy_fallback(unusable)
 
     return _dummy_embedding_provider()
 
 
-def _warn_dummy_fallback(skipped: list[ModelConfig]) -> None:
+def _describe_unusable_model(model: ModelConfig, exc: Exception) -> str:
+    """Name a configured entry and why this build cannot construct it."""
+    return f"{model.name} (provider {model.provider!r}: {exc})"
+
+
+def _warn_dummy_fallback(reasons: list[str]) -> None:
     """Say that a configured embedder was asked for and not delivered.
 
     BL-35: a build with no key in the environment printed a chunk count and an
@@ -480,14 +512,19 @@ def _warn_dummy_fallback(skipped: list[ModelConfig]) -> None:
     nowhere. Everything downstream then reads as a working semantic plane. The
     one place that knows the substitution happened is the selection itself, so
     it is the one place that can say so for every caller.
+
+    BL-36 gave the substitution a second cause. Selection now steps over an
+    entry whose provider this build cannot construct rather than raising, so
+    the fallback is reachable with every key in the environment, and the
+    sentence names the reason per entry instead of asserting a missing key.
     """
-    wanted = ", ".join(f"{m.name} ({m.api_key_env})" for m in skipped)
     logger.warning(
-        "No embedding API key is set, so embeddings fall back to %s, whose "
-        "vectors are deterministic hashes carrying no semantic signal. "
-        "Semantic ranking will not work until a key is exported for one of: %s.",
+        "No configured embedding model is usable, so embeddings fall back to "
+        "%s, whose vectors are deterministic hashes carrying no semantic "
+        "signal. Semantic ranking will not work until one of these is "
+        "resolved: %s.",
         DUMMY_EMBEDDING_MODEL_NAME,
-        wanted,
+        "; ".join(reasons),
     )
 
 
@@ -523,6 +560,18 @@ def create_prose_embedding_provider(
         for model in app_config.prose_embedding_models:
             if not os.environ.get(model.api_key_env):
                 continue
+            # BL-36, the same gate on the prose plane: an unbuildable provider
+            # would otherwise raise out of a build rather than fall through to
+            # the code embedder this function already promises as its step 3.
+            try:
+                embedding_config_for_model(model)
+            except (NotImplementedError, ValueError) as exc:
+                logger.warning(
+                    "Skipping prose embedding model %s.",
+                    _describe_unusable_model(model, exc),
+                )
+                continue
+
             return build_provider_from_model(model)
 
     # No usable prose model — fall back to the code embedder, then the dummy.

@@ -10,6 +10,7 @@ from knowcode.config import AppConfig, ModelConfig
 from knowcode.data_models import EmbeddingConfig
 from knowcode.llm.embedding import (
     _VOYAGE_EMBED_DIMENSIONS,
+    SUPPORTED_EMBEDDING_PROVIDERS,
     DummyEmbeddingProvider,
     OpenAIEmbeddingProvider,
     VoyageAIEmbeddingProvider,
@@ -18,6 +19,7 @@ from knowcode.llm.embedding import (
     create_embedding_provider,
     create_prose_embedding_provider,
     effective_embedding_config,
+    embedding_config_for_model,
     resolve_embedding_dimension,
 )
 
@@ -624,3 +626,16 @@ def test_dummy_fallback_names_the_unsupported_provider_as_the_reason(
     assert any("bge-m3" in m and "local" in m for m in messages), messages
     assert any("deterministic-sha256" in m for m in messages), messages
     assert not any("No embedding API key is set" in m for m in messages), messages
+
+
+def test_every_advertised_provider_is_one_this_build_accepts() -> None:
+    """The hint BL-36's Config check prints must not name a dead spelling.
+
+    `doctor` tells the user to set `provider` to one of these, so each has to
+    survive the function that rejected theirs.
+    """
+    for provider in SUPPORTED_EMBEDDING_PROVIDERS:
+        config = embedding_config_for_model(
+            ModelConfig(name="model", provider=provider, api_key_env="KC_TEST_KEY")
+        )
+        assert config.provider in {"voyageai", "openai"}
