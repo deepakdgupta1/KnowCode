@@ -6,6 +6,7 @@ import importlib
 import json
 import sqlite3
 from pathlib import Path
+from typing import Any
 
 from click.testing import CliRunner
 import pytest
@@ -71,20 +72,29 @@ def _write_sqlite_store(path: Path) -> None:
     store.close()
 
 
+def _embedding_block(dimension: int, provider: str, model_name: str) -> dict:
+    return {
+        "provider": provider,
+        "model_name": model_name,
+        "dimension": dimension,
+        "normalize": True,
+    }
+
+
 def _write_index(
-    path: Path, *, dimension: int = 1024, backend: str | None = None
+    path: Path,
+    *,
+    dimension: int = 1024,
+    backend: str | None = None,
+    provider: str = "voyageai",
+    model_name: str = "voyage-code-3",
 ) -> None:
     path.mkdir(parents=True, exist_ok=True)
     (path / "index_manifest.json").write_text(
         json.dumps(
             {
                 "schema_version": Indexer.SCHEMA_VERSION,
-                "embedding": {
-                    "provider": "voyageai",
-                    "model_name": "voyage-code-3",
-                    "dimension": dimension,
-                    "normalize": True,
-                },
+                "embedding": _embedding_block(dimension, provider, model_name),
                 "chunking": {},
             }
         ),
@@ -123,13 +133,21 @@ def _publish_generation(
     backend: str | None = None,
     kind: str = generations.KIND_FULL,
     builder: dict | None = None,
+    provider: str = "voyageai",
+    model_name: str = "voyage-code-3",
 ) -> Path:
     """Publish a complete generation the way a real build does (Step 14)."""
     with generations.staged_generation(index_root) as staging:
         _write_sqlite_store(staging.path / "knowledge.db")
         chunk_ids: list[str] = []
         if kind == generations.KIND_FULL:
-            _write_index(staging.path, dimension=dimension, backend=backend)
+            _write_index(
+                staging.path,
+                dimension=dimension,
+                backend=backend,
+                provider=provider,
+                model_name=model_name,
+            )
             _write_chunks_db(staging.path / "chunks.db")
 
         manifest = generations.build_manifest(
@@ -140,12 +158,7 @@ def _publish_generation(
             relationship_count=0,
             chunk_ids=chunk_ids,
             vector_count=0,
-            embedding={
-                "provider": "voyageai",
-                "model_name": "voyage-code-3",
-                "dimension": dimension,
-                "normalize": True,
-            },
+            embedding=_embedding_block(dimension, provider, model_name),
             vector={"backend": backend or "faiss", "dimension": dimension},
             builder=builder,
         )
@@ -606,3 +619,114 @@ def test_doctor_warns_when_generation_predates_the_builder_stamp(
     check = next(c for c in report.checks if c.name == "Builder drift")
     assert check.status == "warn"
     assert "predates" in check.message
+
+
+# --- A dummy-built semantic index never passes while a real embedder is
+# --- configured, key present or not (BL-35) --------------------------------
+
+
+def _write_config_without_embedding_models(path: Path) -> None:
+    path.write_text(
+        """
+natural_language_models:
+  - name: gemini-test
+    provider: google
+    api_key_env: KC_TEST_LLM_KEY
+config:
+  sufficiency_threshold: 0.8
+""",
+        encoding="utf-8",
+    )
+
+
+def _semantic_check(result: Any) -> dict:
+    payload = json.loads(result.output)
+    return next(
+        check for check in payload["checks"] if check["name"] == "Semantic index"
+    )
+
+
+def test_doctor_fails_a_dummy_built_index_when_no_key_is_present(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """BL-35: without a key both sides used to degrade to dummy and agree."""
+    monkeypatch.delenv("KC_TEST_EMBED_KEY", raising=False)
+    config = tmp_path / "aimodels.yaml"
+    _write_config(config)
+    _write_store(tmp_path)
+    _publish_generation(
+        tmp_path / "knowcode_index",
+        provider="dummy",
+        model_name="deterministic-sha256",
+    )
+
+    result = CliRunner().invoke(
+        cli_module.cli,
+        ["doctor", "--store", str(tmp_path), "--config", str(config), "--json"],
+    )
+
+    semantic = _semantic_check(result)
+    assert semantic["status"] == "fail"
+    assert "dummy" in semantic["message"]
+    assert "voyage-code-3" in semantic["message"]
+
+
+def test_doctor_fails_a_dummy_built_index_when_the_key_is_present(
+    tmp_path: Path,
+) -> None:
+    """The half BL-27 already caught stays caught."""
+    config = tmp_path / "aimodels.yaml"
+    _write_config(config)
+    _write_store(tmp_path)
+    _publish_generation(
+        tmp_path / "knowcode_index",
+        provider="dummy",
+        model_name="deterministic-sha256",
+    )
+
+    result = CliRunner().invoke(
+        cli_module.cli,
+        ["doctor", "--store", str(tmp_path), "--config", str(config), "--json"],
+    )
+
+    assert _semantic_check(result)["status"] == "fail"
+
+
+def test_doctor_passes_a_dummy_index_when_no_embedding_model_is_configured(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Nothing better was ever asked for, so the dummy is the intent."""
+    monkeypatch.delenv("KC_TEST_EMBED_KEY", raising=False)
+    config = tmp_path / "aimodels.yaml"
+    _write_config_without_embedding_models(config)
+    _write_store(tmp_path)
+    _publish_generation(
+        tmp_path / "knowcode_index",
+        provider="dummy",
+        model_name="deterministic-sha256",
+    )
+
+    result = CliRunner().invoke(
+        cli_module.cli,
+        ["doctor", "--store", str(tmp_path), "--config", str(config), "--json"],
+    )
+
+    assert _semantic_check(result)["status"] == "pass"
+
+
+def test_doctor_fails_a_real_index_the_running_process_cannot_query(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A real index plus a missing key means queries would use the dummy."""
+    monkeypatch.delenv("KC_TEST_EMBED_KEY", raising=False)
+    config = tmp_path / "aimodels.yaml"
+    _write_config(config)
+    _write_store(tmp_path)
+    _publish_generation(tmp_path / "knowcode_index")
+
+    result = CliRunner().invoke(
+        cli_module.cli,
+        ["doctor", "--store", str(tmp_path), "--config", str(config), "--json"],
+    )
+
+    assert _semantic_check(result)["status"] == "fail"
