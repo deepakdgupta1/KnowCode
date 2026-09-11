@@ -26,6 +26,8 @@ from knowcode.api.main import create_app
 from knowcode.api.rate_limit import limiter
 from knowcode.config import AppConfig
 from knowcode.doctor import run_doctor
+
+from tests.helpers.offline_config import write_offline_config
 from knowcode.indexing.background_indexer import BackgroundIndexer
 from knowcode.indexing.generations import resolve_current_generation
 from knowcode.service import KnowCodeService
@@ -175,7 +177,7 @@ def test_a_hot_swapped_service_leaves_a_coherent_generation_on_disk(
 
     resolved = resolve_current_generation(tmp_path / "knowcode_index")
     assert resolved is not None
-    report = run_doctor(store_path=tmp_path)
+    report = run_doctor(store_path=tmp_path, config_path=write_offline_config(tmp_path))
     generation_check = next(
         check for check in report.checks if check.name == "Index generation"
     )
@@ -320,7 +322,9 @@ def test_a_watch_session_leaves_a_generation_doctor_accepts(
     )
     service.close()
 
-    report_ = run_doctor(store_path=tmp_path)
+    report_ = run_doctor(
+        store_path=tmp_path, config_path=write_offline_config(tmp_path)
+    )
     for name in ("Index generation", "Knowledge store", "Semantic index", "Freshness"):
         check = next(item for item in report_.checks if item.name == name)
         assert check.status != "fail", check.message

@@ -29,6 +29,8 @@ import pytest
 
 from knowcode.config import AppConfig
 from knowcode.doctor import run_doctor
+
+from tests.helpers.offline_config import write_offline_config
 from knowcode.indexing import generations
 from knowcode.indexing.background_indexer import BackgroundIndexer
 from knowcode.indexing.generations import resolve_current_generation
@@ -319,7 +321,9 @@ def test_watch_lifecycle_add_modify_duplicate_delete_move(
     service.close()
 
     # doctor accepts the resulting generation, and a restart sees the mutations.
-    report_ = run_doctor(store_path=repo.output)
+    report_ = run_doctor(
+        store_path=repo.output, config_path=write_offline_config(repo.output)
+    )
     for name in ("Index generation", "Semantic index"):
         check = next(item for item in report_.checks if item.name == name)
         assert check.status != "fail", check.message

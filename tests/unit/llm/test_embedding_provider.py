@@ -14,8 +14,10 @@ from knowcode.llm.embedding import (
     OpenAIEmbeddingProvider,
     VoyageAIEmbeddingProvider,
     build_provider_from_model,
+    configured_embedding_config,
     create_embedding_provider,
     create_prose_embedding_provider,
+    effective_embedding_config,
     resolve_embedding_dimension,
 )
 
@@ -438,3 +440,87 @@ def test_voyage_provider_without_proxy_env_keeps_the_native_client(
 
     assert isinstance(provider, VoyageAIEmbeddingProvider)
     assert provider.base_url is None
+
+
+# --- The dummy fallback announces itself, and stays distinguishable from
+# --- the configured model even when no key is present (BL-35) --------------
+
+
+def test_configured_embedding_config_ignores_the_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The configured yardstick is what aimodels.yaml names, key or no key."""
+    monkeypatch.delenv("VOYAGE_API_KEY_1", raising=False)
+    model = ModelConfig(
+        name="voyage-code-3", provider="voyageai", api_key_env="VOYAGE_API_KEY_1"
+    )
+
+    config = configured_embedding_config(AppConfig(embedding_models=[model]))
+
+    assert config.provider == "voyageai"
+    assert config.model_name == "voyage-code-3"
+    assert config.dimension == 1024
+
+
+def test_configured_embedding_config_is_the_dummy_when_nothing_is_configured() -> None:
+    """With no embedding model configured, the dummy is the intent, not a fall."""
+    config = configured_embedding_config(AppConfig(embedding_models=[]))
+
+    assert config.provider == "dummy"
+    assert config.model_name == "deterministic-sha256"
+
+
+def test_configured_and_effective_diverge_exactly_when_the_key_is_absent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The two yardsticks must not collapse into one.
+
+    BL-35: doctor compared the recorded label against the *resolved* provider,
+    which degrades to the dummy the same way the build did, so the comparison
+    was vacuous. This holds the property that makes the check possible.
+    """
+    model = ModelConfig(
+        name="voyage-code-3", provider="voyageai", api_key_env="VOYAGE_API_KEY_1"
+    )
+    app_config = AppConfig(embedding_models=[model])
+
+    monkeypatch.delenv("VOYAGE_API_KEY_1", raising=False)
+    assert configured_embedding_config(app_config) != effective_embedding_config(
+        app_config
+    )
+
+    monkeypatch.setenv("VOYAGE_API_KEY_1", "test-key")
+    assert configured_embedding_config(app_config) == effective_embedding_config(
+        app_config
+    )
+
+
+def test_dummy_fallback_names_the_model_and_key_it_could_not_use(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Selecting the dummy over a configured model is never silent (BL-35)."""
+    monkeypatch.delenv("VOYAGE_API_KEY_1", raising=False)
+    model = ModelConfig(
+        name="voyage-code-3", provider="voyageai", api_key_env="VOYAGE_API_KEY_1"
+    )
+
+    with caplog.at_level("WARNING", logger="knowcode.llm.embedding"):
+        create_embedding_provider(app_config=AppConfig(embedding_models=[model]))
+
+    warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert len(warnings) == 1
+    message = warnings[0].getMessage()
+    assert "voyage-code-3" in message
+    assert "VOYAGE_API_KEY_1" in message
+    assert "deterministic-sha256" in message
+
+
+def test_no_warning_when_the_dummy_is_the_configured_intent(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Nothing was asked for, so nothing was lost, so nothing is reported."""
+    with caplog.at_level("WARNING", logger="knowcode.llm.embedding"):
+        create_embedding_provider(app_config=AppConfig(embedding_models=[]))
+
+    assert [r for r in caplog.records if r.levelname == "WARNING"] == []

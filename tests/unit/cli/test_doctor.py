@@ -730,3 +730,46 @@ def test_doctor_fails_a_real_index_the_running_process_cannot_query(
     )
 
     assert _semantic_check(result)["status"] == "fail"
+
+
+def test_doctor_names_the_key_before_the_rebuild_when_none_is_usable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Rebuilding without a key selects the dummy again, so say the key first."""
+    monkeypatch.delenv("KC_TEST_EMBED_KEY", raising=False)
+    config = tmp_path / "aimodels.yaml"
+    _write_config(config)
+    _write_store(tmp_path)
+    _publish_generation(
+        tmp_path / "knowcode_index",
+        provider="dummy",
+        model_name="deterministic-sha256",
+    )
+
+    result = CliRunner().invoke(
+        cli_module.cli,
+        ["doctor", "--store", str(tmp_path), "--config", str(config), "--json"],
+    )
+
+    assert "KC_TEST_EMBED_KEY" in _semantic_check(result)["hint"]
+
+
+def test_doctor_keeps_the_rebuild_hint_when_a_key_is_usable(tmp_path: Path) -> None:
+    """With a key present a rebuild is the whole fix, so nothing else is said."""
+    config = tmp_path / "aimodels.yaml"
+    _write_config(config)
+    _write_store(tmp_path)
+    _publish_generation(
+        tmp_path / "knowcode_index",
+        provider="dummy",
+        model_name="deterministic-sha256",
+    )
+
+    result = CliRunner().invoke(
+        cli_module.cli,
+        ["doctor", "--store", str(tmp_path), "--config", str(config), "--json"],
+    )
+
+    hint = _semantic_check(result)["hint"]
+    assert "KC_TEST_EMBED_KEY" not in hint
+    assert "knowcode build" in hint

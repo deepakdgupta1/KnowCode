@@ -11,6 +11,14 @@ from typing import Any, cast
 
 from knowcode.config import AppConfig, ModelConfig
 from knowcode.data_models import EmbeddingConfig
+from knowcode.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
+#: Labels the no-key fallback records, so a dummy-built generation is never
+#: mistaken for a real one (BL-27) and never vouched for (BL-35).
+DUMMY_EMBEDDING_PROVIDER = "dummy"
+DUMMY_EMBEDDING_MODEL_NAME = "deterministic-sha256"
 
 _OPENAI_EMBED_DIMENSIONS: dict[str, int] = {
     "text-embedding-3-small": 1536,
@@ -318,43 +326,66 @@ def resolve_embedding_dimension(provider: str, model_name: str) -> int:
     raise ValueError(f"Unsupported embedding provider: {provider}")
 
 
-def build_provider_from_model(model: ModelConfig) -> EmbeddingProvider:
-    """Build an embedding provider from one model configuration."""
+def embedding_config_for_model(model: ModelConfig) -> EmbeddingConfig:
+    """Describe one configured embedding model, without building a client.
+
+    The config half of :func:`build_provider_from_model`, split out so the
+    labels a build records and the labels a diagnostic compares against come
+    from one derivation. Reachable without the model's API key, which is what
+    lets :func:`configured_embedding_config` answer for an unusable model.
+    """
     provider = model.provider.lower()
 
     if provider in {"voyageai", "voyage"}:
-        config = EmbeddingConfig(
+        return EmbeddingConfig(
             provider="voyageai",
             model_name=model.name,
             dimension=resolve_embedding_dimension(provider, model.name),
         )
-        return VoyageAIEmbeddingProvider(
-            config,
-            api_key_env=model.api_key_env,
-            base_url=os.environ.get("VOYAGE_BASE_URL"),
-        )
 
     if provider in {"openai", "openrouter", "mistralai"}:
-        base_url = (
-            "https://openrouter.ai/api/v1"
-            if provider in {"openrouter", "mistralai"}
-            else None
-        )
-        config = EmbeddingConfig(
+        return EmbeddingConfig(
             provider="openai",
             model_name=model.name,
             dimension=resolve_embedding_dimension(provider, model.name),
-        )
-        return OpenAIEmbeddingProvider(
-            config,
-            api_key_env=model.api_key_env,
-            base_url=base_url,
         )
 
     if provider == "local":
         raise NotImplementedError("The local embedding provider is not implemented.")
 
     raise ValueError(f"Unsupported embedding provider: {model.provider}")
+
+
+def build_provider_from_model(model: ModelConfig) -> EmbeddingProvider:
+    """Build an embedding provider from one model configuration."""
+    config = embedding_config_for_model(model)
+
+    if config.provider == "voyageai":
+        return VoyageAIEmbeddingProvider(
+            config,
+            api_key_env=model.api_key_env,
+            base_url=os.environ.get("VOYAGE_BASE_URL"),
+        )
+
+    base_url = (
+        "https://openrouter.ai/api/v1"
+        if model.provider.lower() in {"openrouter", "mistralai"}
+        else None
+    )
+    return OpenAIEmbeddingProvider(
+        config,
+        api_key_env=model.api_key_env,
+        base_url=base_url,
+    )
+
+
+def dummy_embedding_config() -> EmbeddingConfig:
+    """Return the labels a dummy-built generation records."""
+    return EmbeddingConfig(
+        provider=DUMMY_EMBEDDING_PROVIDER,
+        model_name=DUMMY_EMBEDDING_MODEL_NAME,
+        dimension=1024,
+    )
 
 
 def _dummy_embedding_provider() -> EmbeddingProvider:
@@ -369,13 +400,34 @@ def _dummy_embedding_provider() -> EmbeddingProvider:
     that mismatch visible exactly where it is checked. The dimension stays
     1024 so a dummy-built index remains self-consistent for offline use.
     """
-    return DummyEmbeddingProvider(
-        EmbeddingConfig(
-            provider="dummy",
-            model_name="deterministic-sha256",
-            dimension=1024,
-        )
-    )
+    return DummyEmbeddingProvider(dummy_embedding_config())
+
+
+def configured_embedding_config(app_config: AppConfig | None) -> EmbeddingConfig:
+    """Return the embedding the configuration asks for, whatever the environment.
+
+    The key-independent mirror of :func:`effective_embedding_config`. A
+    diagnostic needs both. The effective config says what this process would
+    embed with; the configured config says what was asked for. BL-35 is what
+    happens when only the first exists: with no key set, a dummy-built index
+    and a dummy-resolving runtime agree, and the comparison proves nothing.
+
+    A model this build cannot describe is reported and stepped over rather
+    than raised, because a diagnostic that crashes on a bad config line
+    diagnoses nothing at all. With every entry unusable the dummy is what the
+    configuration effectively asks for, which is what this returns.
+    """
+    for model in (app_config.embedding_models if app_config else None) or ():
+        try:
+            return embedding_config_for_model(model)
+        except (NotImplementedError, ValueError) as exc:
+            logger.warning(
+                "Configured embedding model %r (provider %r) cannot be used: %s",
+                model.name,
+                model.provider,
+                exc,
+            )
+    return dummy_embedding_config()
 
 
 def effective_embedding_config(app_config: AppConfig | None) -> EmbeddingConfig:
@@ -415,7 +467,28 @@ def create_embedding_provider(
 
             return build_provider_from_model(model)
 
+        _warn_dummy_fallback(app_config.embedding_models)
+
     return _dummy_embedding_provider()
+
+
+def _warn_dummy_fallback(skipped: list[ModelConfig]) -> None:
+    """Say that a configured embedder was asked for and not delivered.
+
+    BL-35: a build with no key in the environment printed a chunk count and an
+    index path, both true of a file that exists, and named the embedder
+    nowhere. Everything downstream then reads as a working semantic plane. The
+    one place that knows the substitution happened is the selection itself, so
+    it is the one place that can say so for every caller.
+    """
+    wanted = ", ".join(f"{m.name} ({m.api_key_env})" for m in skipped)
+    logger.warning(
+        "No embedding API key is set, so embeddings fall back to %s, whose "
+        "vectors are deterministic hashes carrying no semantic signal. "
+        "Semantic ranking will not work until a key is exported for one of: %s.",
+        DUMMY_EMBEDDING_MODEL_NAME,
+        wanted,
+    )
 
 
 def create_prose_embedding_provider(

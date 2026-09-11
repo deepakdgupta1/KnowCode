@@ -34,6 +34,8 @@ from pathlib import Path
 from knowcode.config import AppConfig
 from knowcode.data_models import TaskType
 from knowcode.doctor import run_doctor
+
+from tests.helpers.offline_config import write_offline_config
 from knowcode.indexing.background_indexer import BackgroundIndexer
 from knowcode.indexing.monitor import IndexingHandler
 from knowcode.llm.prompt_contract import (
@@ -203,7 +205,9 @@ def test_a_watched_edit_refreshes_retrieval_and_the_graph(
 
     # doctor now reports the generation fresh, because it is: the graph half
     # was rewritten by the same transaction that rewrote the chunks.
-    report_ = run_doctor(store_path=repo.output)
+    report_ = run_doctor(
+        store_path=repo.output, config_path=write_offline_config(repo.output)
+    )
     freshness = next(c for c in report_.checks if c.name == "Freshness")
     assert freshness.status == "pass", freshness.message
     assert "store_stale_source_changed" not in freshness.message

@@ -30,105 +30,40 @@ measured reason not to build something is worth more than silence.
 
 ## Open
 
-### BL-35 - `doctor` vouches for a dummy semantic index when credentials are absent
+### BL-36 - `doctor` crashes on a configured embedding model it cannot build
 
-**Severity:** High. **Found:** 2026-09-09, re-running `doctor --mcp` to complete
-P2's conformance audit, first without provider keys in the environment and then
-with them loaded from the Keychain.
+**Severity:** Medium. **Found:** 2026-09-11, while fixing [BL-35](backlog.md),
+by asking what `configured_embedding_config` should do with a config entry
+`build_provider_from_model` refuses.
 
-`create_embedding_provider` walks `app_config.embedding_models` and skips any
-model whose `api_key_env` is not set, falling through to
-`_dummy_embedding_provider()`:
-
-```python
-for model in app_config.embedding_models:
-    api_key = os.environ.get(model.api_key_env)
-    if not api_key:
-        continue
-    return build_provider_from_model(model)
-
-return _dummy_embedding_provider()
-```
-
-[BL-27](backlog.md) made that fallback honest at the *index*: a generation built
-without keys records `provider='dummy'`, `model_name='deterministic-sha256'`
-rather than the configured model. The compatibility check in `service.py`
-compares that recorded label against the provider that resolves **now**, and
-that resolution runs through the same silent fallback. With no key set, current
-also resolves to `dummy`, the two degraded values match, and the check passes.
-
-Reproduced on generation `20260908T180710492470Z-92863146`, same store, same
-command, only the environment differing:
-
-| `VOYAGE_API_KEY_1` | `doctor` Semantic index |
-|---|---|
-| unset | `[PASS] ... (schema v8, dummy/deterministic-sha256, dimension 1024)` |
-| set | `[FAIL] provider mismatch: index='dummy' current='voyageai'; model_name mismatch: index='deterministic-sha256' current='voyage-code-3'` |
-
-The passing verdict is the wrong one. A developer who clones this repository,
-builds without credentials, and runs `doctor` is told the semantic index is
-healthy when its vectors are deterministic SHA-256 output carrying no semantic
-signal. Semantic ranking is meaningless in that state while the exact, path, and
-FTS planes still work, so the failure is quiet rather than obvious.
-
-**`build` does not warn** (verified 2026-09-09 on a fresh two-file corpus, no
-keys in the environment). Nothing in the build output names the embedder — not
-"dummy", not "embedding", not "provider". `embedding.py` contains no logger at
-all; the word "warning" appears in it exactly once, inside BL-27's docstring
-describing the older bug. What the operator sees instead is:
+`embedding_models` naming `provider: local`, with that model's key exported,
+takes `knowcode doctor` down with an uncaught `NotImplementedError`:
 
 ```
-  Indexed chunks: 4
-  Semantic index: <path>/knowcode_index
+  File "src/knowcode/llm/embedding.py", line 355, in build_provider_from_model
+    raise NotImplementedError("The local embedding provider is not implemented.")
+NotImplementedError: The local embedding provider is not implemented.
 ```
 
-Both true in the sense that a file exists, and both read as a working semantic
-plane. The build does warn about a missing git commit for the manifest, so the
-silence is specific to the embedder rather than a generally quiet command.
+Reproduced with a two-line config and `KC_LOCAL_KEY=x`. It predates BL-35 and
+is unchanged by that fix: `effective_embedding_config` resolves a provider to
+report the expectation, and `create_embedding_provider` raises rather than
+skipping an entry whose provider is unsupported. An unsupported provider is
+exactly what a diagnostic exists to report, so a traceback is the one thing it
+must not do. The Config check should name the bad entry and the semantic index
+check should continue against the remaining models.
 
-So the whole path is quiet at build time, and the fix belongs at provider
-selection or build reporting rather than in `doctor` alone.
-
-Two things keep this `High` rather than `Critical`. `doctor` does print
-`[FAIL] API keys: Missing environment variables: ...` in the same run, so the
-operator is not entirely without signal — though nothing connects that line to
-the semantic index, and `[PASS] Semantic index` directly contradicts the
-conclusion it should lead to. And the PASS line already prints the answer:
-
-```
-[PASS] Semantic index: Loaded ... (schema v8, dummy/deterministic-sha256, dimension 1024)
-```
-
-The label is not hidden. It is rendered next to the word `PASS`. That makes the
-narrow fix very cheap: the data the check needs is already in hand, only the
-verdict is wrong.
-
-Full chain, reproduced end to end on generation
-`20260909T075420632911Z-5e689a90`, built by this repository's own code:
-
-| Step | Result |
-|---|---|
-| `knowcode build` with no keys | Succeeds. No mention of the embedder. |
-| manifest | `provider: dummy`, `model_name: deterministic-sha256` — BL-27's honest label works |
-| `doctor` with no keys | `[PASS] Semantic index ... dummy/deterministic-sha256`, `[PASS] Freshness` |
-| `doctor`, same store, keys loaded | `[FAIL] provider mismatch: index='dummy' current='voyageai'` |
-
-BL-27 fixed the mirror image of this: a dummy-built index being *accepted once a
-key appeared*. Its honest labels are what make the check work when a key is
-present. This is the residual half — the index being accepted while no key is
-present — which the honest label alone cannot catch, because the value it is
-compared against degrades the same way.
-
-A candidate fix is to make the comparison independent of current credentials:
-compare the recorded label against the *configured* model in `aimodels.yaml`
-rather than the resolved provider, so a dummy-built index fails against a
-configured real provider whether or not its key happens to be present. A build
-that selects the dummy should also say so on the way past.
+Deliberately out of BL-35's scope: BL-35 is about a verdict being wrong, this
+is about the command not producing one, and the fix belongs with the Config
+check rather than the embedding comparison. BL-35's
+`configured_embedding_config` steps over an entry it cannot describe and logs
+why, so it does not widen this to the no-key case.
 
 ## Closed
 
 | Item | Resolution |
 | --- | --- |
+| `doctor` vouched for a dummy semantic index when credentials were absent, and `build` never said it had selected one (BL-35) | Fixed 2026-09-11. `_check_semantic_index` compared the manifest's embedding label against `effective_embedding_config`, which resolves through the same key-gated fallback the build did, so with no key both sides read `dummy`, the comparison was vacuous, and doctor printed `[PASS] Semantic index ... dummy/deterministic-sha256` over vectors carrying no semantic signal. BL-27's honest labels could not catch it alone, because the value they are compared against degrades the same way. The check now holds two yardsticks from one module, so they cannot drift: `effective_embedding_config` still answers what this process would query with (which is what catches a real index the running process has no key to read), and the new `configured_embedding_config` answers what `aimodels.yaml` asks for, key-independent, built from the `embedding_config_for_model` derivation `build_provider_from_model` now also uses. A manifest recording `dummy` while a real embedder is configured fails, whether or not a key happens to be present. Configuring no embedding model at all keeps passing, because then the dummy is the intent rather than a substitution. **The hint had to change too**: `knowcode build` does not clear this failure, since the rebuild selects the same fallback, so with no usable key the hint names the key first. **The build half** is fixed at selection rather than in the reporting, because selection is the only place that knows the substitution happened and every caller (build, retrieval, MCP, the API) passes through it: `create_embedding_provider` now logs a warning naming the fallback, the models it skipped, and their key variables, beside the git-commit warning that proved the command was not generally quiet. Verified end to end on a two-file corpus: same store, same command, only the environment differing, the BL-35 table now reads FAIL/FAIL where it read PASS/FAIL. Seven integration and e2e tests were asserting the old verdict; each builds offline and then called `run_doctor` with no config, silently inheriting this repository's own `aimodels.yaml` from the cwd — a verdict that depended on a file outside the fixture. They now write an explicit no-embedding-model config (`tests/helpers/offline_config.py`, placed beside the store root rather than inside it, where freshness would read it as a changed source), so an offline test declares that it is offline. Pinned by six doctor tests (both key states, the configured-dummy escape hatch, a real index the process cannot query, and both hints) and five embedding tests, among them the relational one holding `configured != effective` exactly when the key is absent, which is the property the whole check rests on. Each new guard was mutation-probed red. Full suite 2,159 passed; `mypy --strict` and ruff clean. |
 | 502 receiver holes the BL-33 pass could not see: module-scope bindings, literal types, and qualified factory returns (BL-34) | Fixed 2026-09-01, the day BL-33's residue was decomposed. BL-33 typed receivers from function-scope knowledge only, so three statement kinds the same file still makes were invisible to it: top-level assignments (a module body is a scope every function in the file closes over — `logger = logging.getLogger(__name__)` alone accounted for 85 holes), literal displays and constants (`seen = {}`, `prefix = "x"` state their builtin type exactly as an annotation would, worth ~240), and factory return annotations that name their own origin (`-> logging.Logger`, without which an in-repo `get_logger` cannot honestly say where `.info` lives, worth ~130). The module-scope table lives in `FileKnowledge`, built from direct top-level statements only — a binding inside a conditional import-time `if` is conditional, which one pass cannot treat as unconditional — and is consulted after the function's own table, with the shadowing order the runtime uses: an ambiguous local binding, and any parameter annotated or not, stops the lookup; a module binding shadows the imports. That last rule fixed a latent BL-33 defect the new tests caught: a locally ambiguous name used to fall through to its from-import binding. The builder gained the matching halves: `unique_top_level` now searches a package subtree for re-exported factories and classes by the same reasoning `unique_class` already had, and `_return_annotation_origin` reads a module-qualified return as its own origin — an in-repo module links the class, any other module answers `external::<module>::<Class.method>`. Resolution rate 0.764 → 0.790 (15,350/19,427; external answers 6,380 → 6,906, among them `external::logging::Logger.warning` traced through this repository's own `get_logger` signature). The remaining 4,077 holes barely moved in character: 2,867 receiver-qualified calls whose file states no type at all, 1,210 ambiguous or unknown bare names (116 of them `receiver_unknown` calls the scoped pass correctly refuses to name-link, verified as by-design), and 37 typed-but-unbound. Pinned by six new parser tests (module factories, imported constructors, literals, parameter shadowing, conflicting top-level producers) and six new builder tests (external producer answers, package-subtree class links, literal builtins answers, qualified returns in-repo and external, shadowed-hole guard). Full suite 2,112 passed; `mypy --strict` and ruff clean. |
 | 7,206 receiver-qualified call edges could not bind without knowing the receiver's type (BL-33) | Fixed 2026-09-01, the workstream BL-31's residue named. BL-31 bound what import bindings could name and left the rest: calls like `store.get(...)`, `self.helper.parse_file(...)`, `Path.cwd()`, and `thing.make()` where the receiver is a local, a parameter, an attribute, a class object, or a factory product — 7,206 of the 8,369 holes at the 0.555 baseline, called "the type inference this graph deliberately does not do". The graph now does the bounded version of it, in two halves that keep the BL-31 discipline: the parser states, the builder classifies, and ambiguity always keeps the hole. New `python_receiver_types` module: per scope, a receiver earns a type only from what its own file says — a constructor call, a parameter or annotated-assignment type (with `Optional[X]`/`X | None` peeled and builtin-generic roots like `dict[str, int]` answered as builtins), an in-file factory's return annotation, a `self.attr`/`cls.attr` table collected across the enclosing class, or the enclosing class behind `cls.m()` and unresolvable `self.m()`. An imported name in construction position (`from m import n; x = n()`) deliberately types nothing — class or factory is a question one file cannot answer — so it rides as a `receiver_from_call` fact instead. `GraphBuilder._resolve_receiver_typed_references` then classifies with repository knowledge: an in-repo class links the entity carrying the method, walking resolved in-repo base classes when the class itself does not declare it (first level must provide it exactly once); a member-imported receiver (`from pkg import sub`) links the module's symbol, with a package-subtree fallback for re-exported definitions; a factory resolves through the callee entity's kind and signature — a class entity binds directly, an annotated `-> Store` binds the returned class in the factory's own file, `-> str` answers builtins; and every origin outside the repository becomes an `external::<module>::<Name.method>` answer rather than a hole. Resolution rate 0.555 → 0.764 (14,773/19,346; external answers 4,591 → 6,380). The remaining 4,573 holes decompose honestly: 3,368 receiver-qualified calls whose file states no type at all — unannotated parameters and cross-function dataflow, the residue that genuinely needs a type checker — 1,205 ambiguous or unknown bare names, and 41 typed-but-unbound holes (a method inherited from an external base or declared in a module the graph did not index), which preflight's evidence now reports separately as `unresolved_typed_receivers`. Pinned by sixteen parser tests in `tests/unit/parsers/test_python_parser.py` (conflict, loop-rebinding, member-import, and factory-hop emission included), eighteen builder tests in `tests/unit/indexing/test_graph_builder_receiver_types.py` (base-class walks, two-bases ambiguity, re-export fallback, external answers), and the typed-hole evidence test in `tests/unit/analysis/test_preflight.py`. `mypy --strict` clean across `src/`. Full suite 2,101 passed. |
 | The MCP tool environment served stale code with no signal (BL-32) | Fixed 2026-08-31, hours after it was filed. `uvx --from <checkout>[mcp]` resolves onto the named tool environment under `~/.local/share/uv/tools/knowcode` and reuses it indefinitely for a path source — `--refresh` does not rebuild it, and `--force` alone reinstalls from the cached wheel — so an MCP server executed pre-audit code for hours while the repository moved fifteen commits, reporting the pre-BL-28 perfect resolution rate over a graph the repository's own build scored 0.158. Every generation manifest now carries a builder stamp: a content fingerprint (sha256 over the package's `*.py` files in sorted relative-path order) of the code that built it. The field is additive and omitted when absent, so manifests stay readable by older and newer binaries alike; a generation that predates the stamp is a rebuild-worthy warning, not corruption; and a stat-signature cache keeps repeated stamps near-free without going blind to edits. Two surfaces speak the stamp: `knowcode doctor` gains a Builder drift check that fails loudly, naming both fingerprints, with the reinstall command (cache clean included) as its suggestion; and the mcp-server startup banner prints a one-line warning through the same primitive, best-effort, because a readiness problem must never block serving. Demonstrated live on this repository: one appended comment to `src/knowcode/readiness.py` between build and doctor turned the check FAIL with both fingerprints named, reverting restored PASS, and a tool-environment binary against a repo-venv-built store PASSes — the fingerprint is content identity, not install identity, which is exactly what lets the two environments agree on one commit and disagree the moment one moves. Pinned by six fingerprint tests, three manifest round-trip tests, two drift-primitive tests, and three doctor drift tests; the hotswap race test now disables the rate limiter, whose 60/minute standard limit was turning the stamp's first-publish hashing into a 429 that said nothing about the handoff under test. Full suite 2,068 passed. |

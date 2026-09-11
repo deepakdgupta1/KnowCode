@@ -14,10 +14,15 @@ from pathlib import Path
 from typing import Any, Literal, Optional
 
 from knowcode.config import AppConfig
+from knowcode.data_models import EmbeddingConfig
 from knowcode.indexing import generations
 from knowcode.indexing.generations import ResolvedGeneration
 from knowcode.indexing.indexer import Indexer
-from knowcode.llm.embedding import effective_embedding_config
+from knowcode.llm.embedding import (
+    DUMMY_EMBEDDING_PROVIDER,
+    configured_embedding_config,
+    effective_embedding_config,
+)
 from knowcode.mcp.tools import PRIMARY_TOOL_NAME
 from knowcode.readiness import (
     IDEAL_SETUP_FEATURE_KEYS,
@@ -747,6 +752,29 @@ def _check_builder_drift(context: ReadinessContext, checks: list[DoctorCheck]) -
     )
 
 
+def _semantic_index_hint(
+    context: ReadinessContext, expected_embedding: EmbeddingConfig
+) -> str:
+    """Say what actually clears the failure, not just how to rebuild.
+
+    A rebuild fixes a stale or mismatched index. It cannot fix an absent key:
+    the rebuild selects the same dummy fallback and doctor fails again on the
+    same line, so the hint has to name the key first.
+    """
+    rebuild = "Rebuild the semantic index with `knowcode build <dir>`."
+    if expected_embedding.provider != DUMMY_EMBEDDING_PROVIDER:
+        return rebuild
+
+    keys = sorted({model.api_key_env for model in context.config.embedding_models})
+    if not keys:
+        return rebuild
+    return (
+        f"Export an API key for the configured embedding model ({', '.join(keys)}), "
+        "then rebuild with `knowcode build <dir>`. Rebuilding without one selects "
+        "the dummy embedder again."
+    )
+
+
 def _check_semantic_index(context: ReadinessContext, checks: list[DoctorCheck]) -> None:
     """Validate semantic index files, schemas, and embedding dimensions.
 
@@ -814,12 +842,15 @@ def _check_semantic_index(context: ReadinessContext, checks: list[DoctorCheck]) 
     chunk_failures, _chunk_version = _inspect_chunk_store(index_path)
     failures.extend(chunk_failures)
 
-    # The expectation is what the runtime would query with, not what the
-    # config file names: without a usable key that is the honestly-labelled
-    # dummy, and an index built offline is self-consistent rather than
-    # broken. With a key, a dummy-built index fails here -- and at retrieval
-    # -- instead of serving pseudo-vectors to a real model.
+    # Two yardsticks, because one cannot answer both questions. The effective
+    # config is what this process would query with, so comparing the manifest
+    # against it catches an index the runtime cannot read. The configured
+    # config is what aimodels.yaml asks for, and comparing against that is the
+    # only way to catch a dummy-built index while no key is present (BL-35):
+    # the effective config degrades to the dummy the same way the build did,
+    # so the two agree and the first comparison proves nothing.
     expected_embedding = effective_embedding_config(context.config)
+    configured_embedding = configured_embedding_config(context.config)
     recorded_embedding = manifest.get("embedding", {})
     if isinstance(recorded_embedding, dict):
         for key in ("provider", "model_name", "dimension", "normalize"):
@@ -831,6 +862,17 @@ def _check_semantic_index(context: ReadinessContext, checks: list[DoctorCheck]) 
                 failures.append(
                     f"{key} mismatch: index={recorded!r} current={expected!r}"
                 )
+
+        if (
+            recorded_embedding.get("provider") == DUMMY_EMBEDDING_PROVIDER
+            and configured_embedding.provider != DUMMY_EMBEDDING_PROVIDER
+        ):
+            failures.append(
+                "built with the dummy embedder while "
+                f"{configured_embedding.provider}/{configured_embedding.model_name} "
+                "is configured, so its vectors are deterministic hashes "
+                "carrying no semantic signal"
+            )
 
     recorded_dimension = vector_metadata.get("dimension")
     if recorded_dimension is not None:
@@ -854,7 +896,7 @@ def _check_semantic_index(context: ReadinessContext, checks: list[DoctorCheck]) 
                 name="Semantic index",
                 status="fail",
                 message=f"{index_path}: {'; '.join(failures)}.",
-                hint="Rebuild the semantic index with `knowcode build <dir>`.",
+                hint=_semantic_index_hint(context, expected_embedding),
                 suggestions=(
                     DoctorSuggestion(
                         label="Rebuild semantic index",
