@@ -38,7 +38,10 @@ embedding_models:
 
 The rate-limiter fields keep `ask` inside your provider's free tier; when a
 provider reports resource exhaustion, KnowCode fails over to the next
-configured model.
+configured model. `prose_embedding_models` is also a recognized top-level
+section and uses the same model-entry shape as `embedding_models`. The legacy
+`models:` top-level key is still accepted as a synonym for
+`natural_language_models`.
 
 ### `config` section — retrieval behavior
 
@@ -50,8 +53,12 @@ configured model.
 | `hybrid_alpha` | `0.2` | Sparse/dense blend in hybrid search. `0.2` = 80% BM25 lexical / 20% vector similarity. Raise toward `1.0` to favor semantic similarity over exact-identifier matching. |
 | `reranker_top_k_multiplier` | `5` | The cross-encoder reranks the top `limit × multiplier` fused candidates. |
 | `vector_backend` | `lancedb` | Vector store backend: `lancedb` or `faiss`. |
+| `entity_source` | `disk` | Where `entities.source_code` is served from. `disk` reads it from the working tree, verifying it against the stored content hash and failing closed on drift; `stored` serves the persisted copy, which may be stale. |
 
-Unknown keys in `config` warn (or raise in strict server/MCP mode).
+Unknown keys in `config` warn (or raise in strict server/MCP mode). Values
+are validated at load: `sufficiency_threshold`, `routing_quality_floor`, and
+`hybrid_alpha` must lie in [0, 1], and `reranker_top_k_multiplier` must lie in
+[1, 100]. Unknown top-level keys are treated exactly the same way.
 
 ### `preflight` section
 
@@ -75,9 +82,11 @@ defaults use:
 | `GOOGLE_API_KEY` | Optional Gemini chat models |
 | `KNOWCODE_ROUTING_POLICY_ARTIFACT` / `KNOWCODE_ROUTING_POLICY_SHA256` | Path + expected SHA-256 of the machine-verified routing policy artifact (see [retrieval evals](../engineering/testing.md)) |
 | `KNOWCODE_TELEMETRY_RAW` | `1` enables opt-in raw query capture — see [telemetry](telemetry.md#opt-in-raw-query-capture) |
+| `KNOWCODE_TESTING` | Test-only: set by the test suite so telemetry writes run synchronously instead of on the background pool. Never set it in normal use. |
 
-`.env.example` in the repository root documents the same variables and is a
-safe template to copy to `.env` (gitignored).
+`.env.example` documents the API keys and base URLs; the `KNOWCODE_*`
+behavioral variables above are documented only here. It is a safe template to
+copy to `.env` (gitignored).
 
 ## Optional extras
 
