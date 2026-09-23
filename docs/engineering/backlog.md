@@ -123,6 +123,11 @@ it is not, `windows-latest` should leave the matrix, and the honest version of
 that is to say so rather than to keep a job that has never tested anything. Do
 not fix the 53 fixture assertions before that decision is made.
 
+**Decision (2026-09-23):** the pytest step in `ci-cd.yml` runs with
+`continue-on-error` on `windows-latest`. Every PR was blocked on a suite that
+has never been green, while the failures stay visible as step annotations.
+Removing the flag belongs to closing this item; nothing else depends on it.
+
 ### BL-41 - A build whose embeddings all fail publishes a chunkless generation, and every check passes it
 
 **Severity:** Critical. **Found:** 2026-09-23, rebuilding this repository's own
