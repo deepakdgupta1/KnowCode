@@ -108,8 +108,10 @@ against the running package, and on mismatch the fix is
 `uv cache clean && uv tool install --force` — semantic index schema and
 embedding dimensions (fails a dummy-built index when a real embedding
 provider is configured, and names the missing API key), artifact disk
-footprint (default threshold 500 MB), unsupported-language warnings,
-freshness, and optionally a live MCP stdio handshake.
+footprint (default threshold 500 MB), agent rules (presence of
+`.agent/rules/context.md`), unsupported-language warnings,
+freshness, codebase quality (grades the persisted preflight report against
+the configured minimum score), and optionally a live MCP stdio handshake.
 
 ```bash
 knowcode doctor [--store <path>] [--index <path>] [--config <path>] [--max-disk-mb <n>] [--mcp] [--json]
