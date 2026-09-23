@@ -90,7 +90,7 @@ the cost is real money and hours rather than a `git bisect run`. Roadmap P1 owns
 the harness this depends on, and its work item 3 re-selects the threshold over
 the same evidence.
 
-### BL-39 - A shutdown budgeted at 0.2 seconds blocked for about ten, then reported a drain it cannot name
+### BL-39 - Shutdown waits out an in-flight commit whatever its budget, and can then report a drain it cannot name
 
 **Severity:** Medium. **Found:** 2026-09-22 in CI run `35742967500`, job
 `macos-latest / py3.10`. Seen twice more on 2026-09-23 in run `35840662218`, on
@@ -124,28 +124,33 @@ report can name nothing only if the worker had finished both, because it lists
 what is pending, in flight or failed. So the report was taken after the work it
 should describe had completed, about fifty times past the budget.
 
-**What blocked is not known.** The stage outcomes carry no durations, and two
-places fit.
+**Reproduced locally, and the passing runs overrun the budget too.**
+`ServiceWatchWriter` holds one `RLock` across a whole commit, and the test's
+gated `replace_file` runs inside it. `BackgroundIndexer.stop()` then calls
+`_publish_pending()`, whose `publish_pending()` takes that lock with no
+deadline, and `_report()` reads `pending_paths()`, which takes it again. So
+shutdown waits for the in-flight commit however long it takes. Lock handoff
+between the two threads is not fair. When the worker re-takes the lock for its
+next file first, the report comes after both files have finished and names
+nothing, which is the CI failure. A scratch test that makes the shutdown thread
+wait for the worker's second commit before publishing reproduces it on every
+run, printing `shutdown took 10.1s against a 0.2s budget; commits=2
+completed=False incomplete_work=()`. Without that forcing the test passes, and
+shutdown still takes 10.1 seconds, because `pending_paths()` waits out the
+second commit.
 
-- `_stop_monitor()` runs first. If stopping the file watcher waited on the gated
-  worker, `_drain_worker` then handed `worker.stop` a zero `_remaining(deadline)`,
-  and `thread.join(0)` found the now idle worker still alive. That gives
-  `completed=False` with nothing left to name.
-- `BackgroundIndexer.stop` samples `drained` and `stopped` near its top, but
-  reads `pending`, `in_flight` and `failures` in `self._report()` after
-  `self._publish_pending()`. If publishing waited on the gated worker, the two
-  halves of the report describe instants ten seconds apart.
+**Fix the wait, not the report.** `stop()` promises a bound "even when a commit
+hangs", and in watch mode a commit includes embedding calls over the network.
+Bounding the lock waits on the shutdown path, both for publishing and for
+reading unpublished paths, keeps the budget and lets the report name the files
+in flight and pending. Deriving `completed` from the report's own instant would
+instead hide a shutdown that overran its budget fiftyfold.
 
-**Fix what blocked, not the report.** Deriving `completed` from the report's own
-instant would make the report consistent, and it would describe as clean a
-shutdown that overran its budget fiftyfold. Find which call waits on the
-worker, then make shutdown keep its budget.
-
-**Not reproduced.** The whole file passes locally. Shrinking only the test's
-`gate.wait` to 0.05s forces a *different* inconsistency, `completed=True` with
-`incomplete_work=()`, failing one assertion earlier; 0.5s and 1.0s both pass. A
-local loop that logs each shutdown stage's duration and runs until the test
-fails would name the blocking call.
+**Reproduce.** In `test_lifespan_shutdown_reports_incomplete_work`, wrap the
+worker's `_publish_pending` so that, when called from any thread other than the
+worker's, it first waits until `replace_file` has been entered a second time.
+The final assertion then fails on every run, and timing the `TestClient` exit
+shows the ten seconds.
 
 ### BL-40 - A watched edit did not reach the graph once, on one CI job
 
