@@ -30,6 +30,27 @@ measured reason not to build something is worth more than silence.
 
 ## Open
 
+### BL-46 - BackgroundIndexer.stop() can outlive its budget when publication blocks
+
+**Severity:** Low–Medium (liveness and diagnostics, not data loss).
+**Found:** 2026-09-23, de-flaking `test_lifespan_shutdown_reports_incomplete_work`
+for PR #32.
+
+`stop(timeout)` in `src/knowcode/indexing/background_indexer.py` promises an
+upper bound on the whole drain, but after its deadline-bounded queue and
+thread joins it calls `_publish_pending()` unconditionally, and
+`ServiceWatchWriter.publish_pending()` in `src/knowcode/service_watch.py`
+acquires the writer's batch lock untimed — the same lock an in-flight commit
+holds across a whole commit and publication. A commit hung inside that lock
+stretches `stop()` — and the server's "One deadline" shutdown promise in
+`src/knowcode/api/lifecycle.py` — past any configured `shutdown_timeout`.
+
+**The flaky lifespan test masked this for the project's life.** Its 5-second
+gate timeout accidentally released the lock mid-shutdown. The defect surfaced
+when the gate was made untimed and the test deadlocked deterministically:
+the worker holds the lock and waits on the gate, shutdown waits untimed on
+the lock, and the test's `finally` never runs to open the gate.
+
 ### BL-45 - The MCP server writes log lines onto stdout, which is its protocol channel
 
 **Severity:** Medium. **Found:** 2026-09-23, calling the MCP server through
