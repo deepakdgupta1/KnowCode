@@ -11,12 +11,12 @@ illustrate them.
 
 | Diagram | Shows | Canonical documentation |
 |---|---|---|
-| [`architecture_overview`](architecture_overview.svg) | The five-layer system map: user interfaces (CLI, REST API, MCP server), service layer (`KnowCodeService`), core processing pipelines (parsing, indexing, retrieval, synthesis), LLM agent, storage, and infrastructure/plugins — plus the separately deployed Agent Gateway | [engineering/architecture.md](../engineering/architecture.md) |
+| [`architecture_overview`](architecture_overview.svg) | The five-layer system map: user interfaces (CLI, REST API, MCP server), service layer (`KnowCodeService`), core processing pipelines (parsing, indexing, retrieval, synthesis), LLM agent, storage, and infrastructure/plugins | [engineering/architecture.md](../engineering/architecture.md) |
 | [`seq_indexing`](seq_indexing.svg) | Indexing & analysis sequence: scan → parse → graph build → chunking → embeddings → staged generation publication; the optional file-watch loop | [internals/indexing-generations.md](../engineering/internals/indexing-generations.md) |
 | [`seq_query_retrieval`](seq_query_retrieval.svg) | Query & retrieval sequence: entry point → service → classification → hybrid search → rerank → dependency expansion → context synthesis → response with sufficiency and freshness | [internals/retrieval-synthesis.md](../engineering/internals/retrieval-synthesis.md) |
 | [`seq_mcp`](seq_mcp.svg) | MCP server interaction: agent → `knowcode_retrieve` (`action="query"`, minimal first) → sufficiency-gated escalation → focused follow-up tools | [mcp-contract.md](../mcp-contract.md) · [user/ide-integration.md](../user/ide-integration.md) |
 | [`seq_file_watch`](seq_file_watch.svg) | Watch mode: filesystem event → monitor → watch queue → prepare/commit file-update transaction → background indexer → generation publication → server hot-swap | [internals/indexing-generations.md](../engineering/internals/indexing-generations.md#watch-mode) |
-| [`seq_agent_gateway`](seq_agent_gateway.svg) | Agent Gateway (removed from this repository in `82fcd14`; diagram kept for history) | [user/rest-api.md](../user/rest-api.md) |
+| [`seq_agent_gateway`](seq_agent_gateway.svg) | Agent Gateway (removed from this repository in `82fdc14`; diagram kept for history) | [user/rest-api.md](../user/rest-api.md) |
 
 ## Maintaining these diagrams
 
