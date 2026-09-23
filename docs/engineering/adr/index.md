@@ -2,7 +2,9 @@
 
 Numbered decisions with status. ADRs 1–7 were extracted from the hardening
 blueprint's contracts document (Step 01, 2026-08-12); ADR 8 is the
-persistence-format analysis; ADR 9 amends ADR 4's artifact set.
+persistence-format analysis; ADR 9 amends ADR 4's artifact set; ADR 10 moved
+ids to root-relative storage; ADR 11 made top-level declarations
+module-scoped.
 
 | # | Title | Status | Date |
 |---|---|---|---|
