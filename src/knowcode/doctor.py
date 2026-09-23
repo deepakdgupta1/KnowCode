@@ -1074,7 +1074,10 @@ async def _check_mcp_handshake(
     )
     import tempfile
 
-    with tempfile.TemporaryFile(mode="w+t") as errlog:
+    with (
+        tempfile.TemporaryDirectory() as errdir,
+        open(Path(errdir) / "mcp-stderr.log", "w+", encoding="utf-8") as errlog,
+    ):
         async with stdio_client(params, errlog=errlog) as (read_stream, write_stream):
             async with ClientSession(read_stream, write_stream) as session:
                 await asyncio.wait_for(session.initialize(), timeout=timeout_seconds)
