@@ -40,6 +40,14 @@ def test_incremental_indexer_reuses_embeddings() -> None:
         import subprocess
 
         subprocess.run(["git", "init"], cwd=str(repo_dir), check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "test@example.com"],
+            cwd=str(repo_dir),
+            check=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "Test"], cwd=str(repo_dir), check=True
+        )
         subprocess.run(["git", "add", "."], cwd=str(repo_dir), check=True)
         subprocess.run(
             ["git", "commit", "-m", "initial"], cwd=str(repo_dir), check=True
