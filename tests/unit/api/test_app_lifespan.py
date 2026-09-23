@@ -27,13 +27,6 @@ TIMEOUT = 5.0
 
 
 @pytest.fixture(autouse=True)
-def _offline(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No test in this module may reach an embedding provider over the network."""
-    monkeypatch.delenv("VOYAGE_API_KEY_1", raising=False)
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-
-
-@pytest.fixture(autouse=True)
 def _restore_global_service():  # type: ignore[no-untyped-def]
     """The module-level service is process state; never leak it between tests."""
     original = api._service

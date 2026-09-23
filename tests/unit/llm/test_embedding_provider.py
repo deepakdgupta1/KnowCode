@@ -7,6 +7,7 @@ import threading
 from collections.abc import Callable, Iterator
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -409,31 +410,6 @@ def test_voyage_provider_reads_proxy_base_url_from_env(
     assert provider.base_url == "http://127.0.0.1:4000"
 
 
-def test_voyage_proxy_embeddings_keep_input_type(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """input_type rides in the request body through the OpenAI-compatible path."""
-    from types import SimpleNamespace
-
-    monkeypatch.setenv("VOYAGE_API_KEY_1", "test-key")
-    captured: dict[str, Any] = {}
-
-    class FakeEmbeddings:
-        def create(self, **kwargs: Any) -> Any:
-            captured.update(kwargs)
-            return SimpleNamespace(data=[SimpleNamespace(embedding=[1.0, 0.0])])
-
-    provider = VoyageAIEmbeddingProvider(
-        EmbeddingConfig(), base_url="http://127.0.0.1:4000"
-    )
-    provider._proxy_client = SimpleNamespace(embeddings=FakeEmbeddings())
-
-    provider.embed_single("query text")
-
-    assert captured["model"] == "voyage-code-3"
-    assert captured["extra_body"] == {"input_type": "query"}
-
-
 def test_voyage_provider_targets_litellm_proxy_by_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -454,8 +430,12 @@ def test_voyage_provider_targets_litellm_proxy_by_default(
 
 
 @pytest.fixture
-def proxy_requests(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[dict[str, Any]]]:
-    """Stand in for the proxy on a local socket and record every request."""
+def stand_in(monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleNamespace]:
+    """Answer embedding requests on a local socket and record each one.
+
+    Voyage embeddings are pointed at it through ``VOYAGE_BASE_URL``. A test
+    that needs another provider pointed at it reads ``url``.
+    """
     requests: list[dict[str, Any]] = []
 
     class Handler(BaseHTTPRequestHandler):
@@ -481,10 +461,16 @@ def proxy_requests(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[dict[str, A
             pass
 
     server = HTTPServer(("127.0.0.1", 0), Handler)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    monkeypatch.setenv("VOYAGE_BASE_URL", f"http://127.0.0.1:{server.server_port}")
+    threading.Thread(
+        target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True
+    ).start()
+    url = f"http://127.0.0.1:{server.server_port}"
+    # httpx honours HTTP_PROXY even for 127.0.0.1 unless told otherwise.
+    monkeypatch.setenv("NO_PROXY", "127.0.0.1")
+    monkeypatch.setenv("no_proxy", "127.0.0.1")
+    monkeypatch.setenv("VOYAGE_BASE_URL", url)
     try:
-        yield requests
+        yield SimpleNamespace(url=url, requests=requests)
     finally:
         server.shutdown()
         server.server_close()
@@ -499,10 +485,10 @@ def proxy_requests(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[dict[str, A
     ],
     ids=["code-entry", "prose-entry", "no-config-file"],
 )
-def test_an_entry_that_names_no_key_sends_a_request_the_proxy_accepts(
+def test_an_entry_that_names_no_key_sends_requests_the_proxy_accepts(
     section: str | None,
     select: Callable[..., EmbeddingProvider],
-    proxy_requests: list[dict[str, Any]],
+    stand_in: SimpleNamespace,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -512,7 +498,8 @@ def test_an_entry_that_names_no_key_sends_a_request_the_proxy_accepts(
     Sent the provider's key, LiteLLM reads it as a virtual key and, with no
     database, answers ``400 No connected db``; asked for
     ``voyage/voyage-code-3`` it answers ``Invalid model name``. So this reads
-    the request off the wire rather than off the client object.
+    the requests off the wire rather than off the client object, for the
+    document path a build takes and the query path a search takes.
     """
     monkeypatch.setenv("LITELLM_MASTER_KEY", "proxy-key")
     monkeypatch.setenv("VOYAGE_API_KEY_1", "provider-key")
@@ -525,13 +512,40 @@ def test_an_entry_that_names_no_key_sends_a_request_the_proxy_accepts(
         )
         app_config = AppConfig.load(str(path))
 
-    select(app_config=app_config).embed(["def add(a, b): return a + b"])
+    provider = select(app_config=app_config)
+    provider.embed(["def add(a, b): return a + b"])
+    provider.embed_single("where is add defined")
 
-    (request,) = proxy_requests
-    assert request["authorization"] == "Bearer proxy-key"
-    assert request["body"]["model"] == "voyage-code-3"
-    assert request["body"]["input"] == ["def add(a, b): return a + b"]
-    assert request["body"]["input_type"] == "document"
+    document, query = stand_in.requests
+    for request in (document, query):
+        assert request["authorization"] == "Bearer proxy-key"
+        assert request["body"]["model"] == "voyage-code-3"
+    assert document["body"]["input"] == ["def add(a, b): return a + b"]
+    assert document["body"]["input_type"] == "document"
+    assert query["body"]["input"] == ["where is add defined"]
+    assert query["body"]["input_type"] == "query"
+
+
+def test_a_provider_called_directly_never_receives_the_proxy_key(
+    stand_in: SimpleNamespace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An OpenAI entry that names no key sends OpenAI's key, not the proxy's.
+
+    The proxy's key fronts every provider key the proxy holds. An earlier
+    default gave every embedding entry that key, whatever its provider.
+    """
+    monkeypatch.setenv("LITELLM_MASTER_KEY", "proxy-key")
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-key")
+    monkeypatch.setenv("OPENAI_BASE_URL", stand_in.url)
+    path = tmp_path / "aimodels.yaml"
+    path.write_text(
+        "embedding_models:\n  - name: text-embedding-3-small\n    provider: openai\n"
+    )
+
+    create_embedding_provider(app_config=AppConfig.load(str(path))).embed(["x"])
+
+    (request,) = stand_in.requests
+    assert request["authorization"] == "Bearer openai-key"
 
 
 # --- The dummy fallback announces itself, and stays distinguishable from

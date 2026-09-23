@@ -698,7 +698,9 @@ def _glm_agent(provider: str) -> Agent:
         _RoutingService(),
         AppConfig(
             models=[
-                ModelConfig(name="glm-5", provider=provider, api_key_env="GLM_API_KEY")
+                ModelConfig(
+                    name="glm-5", provider=provider, api_key_env="LITELLM_MASTER_KEY"
+                )
             ]
         ),
     )
@@ -712,7 +714,7 @@ def test_glm_client_targets_litellm_proxy_by_default(
     ``base_url=None`` aimed the OpenAI client at api.openai.com with a GLM
     key it cannot accept, for an opaque auth failure.
     """
-    monkeypatch.setenv("GLM_API_KEY", "test-key")
+    monkeypatch.setenv("LITELLM_MASTER_KEY", "test-key")
     monkeypatch.delenv("GLM_BASE_URL", raising=False)
 
     agent = _glm_agent("z-ai")
@@ -720,12 +722,13 @@ def test_glm_client_targets_litellm_proxy_by_default(
 
     assert client is not None
     assert str(client.base_url).rstrip("/") == "http://127.0.0.1:4000"
+    assert client.api_key == "test-key"
 
 
 def test_glm_base_url_env_overrides_the_proxy_address(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("GLM_API_KEY", "test-key")
+    monkeypatch.setenv("LITELLM_MASTER_KEY", "test-key")
     monkeypatch.setenv("GLM_BASE_URL", "https://proxy.example.internal/v1")
 
     agent = _glm_agent("glm")

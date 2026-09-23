@@ -8,9 +8,34 @@ from typing import Any, Optional
 
 import yaml
 
-from knowcode.llm.routing import LITELLM_KEY_ENV
-
 logger = logging.getLogger(__name__)
+
+#: The variable holding the key the LiteLLM proxy authenticates callers with.
+#: GLM chat and Voyage embeddings take the proxy route
+#: (``knowcode.llm.routing``), and the proxy holds the provider keys itself.
+#: Sent a provider key instead, LiteLLM reads it as a virtual key, and with no
+#: database connected it answers ``400 No connected db``.
+LITELLM_KEY_ENV = "LITELLM_MASTER_KEY"
+
+#: The key a chat or embedding entry reads when it names none. Only providers
+#: reached through the proxy default to the proxy's key, so an entry for a
+#: provider called directly never sends that key to another host. Reranking
+#: calls VoyageAI directly, so its entries keep their own default.
+_DEFAULT_KEY_ENV_BY_PROVIDER = {
+    "z-ai": LITELLM_KEY_ENV,
+    "glm": LITELLM_KEY_ENV,
+    "voyageai": LITELLM_KEY_ENV,
+    "voyage": LITELLM_KEY_ENV,
+    "google": "GOOGLE_API_KEY",
+    "openai": "OPENAI_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
+    "mistralai": "OPENROUTER_API_KEY",
+}
+
+
+def _default_key_env(provider: str, fallback: str) -> str:
+    """Name the key an entry for ``provider`` reads when it names none."""
+    return _DEFAULT_KEY_ENV_BY_PROVIDER.get(provider.lower(), fallback)
 
 
 @dataclass
@@ -235,11 +260,14 @@ class AppConfig:
             for m in model_list or []:
                 if not isinstance(m, dict):
                     raise ValueError("Each model entry must be an object.")
+                provider = m.get("provider", "google")
                 models.append(
                     ModelConfig(
                         name=m["name"],
-                        provider=m.get("provider", "google"),
-                        api_key_env=m.get("api_key_env", "GOOGLE_API_KEY"),
+                        provider=provider,
+                        api_key_env=m.get(
+                            "api_key_env", _default_key_env(provider, "GOOGLE_API_KEY")
+                        ),
                         rpm_free_tier_limit=m.get("rpm_free_tier_limit", 10),
                         rpd_free_tier_limit=m.get("rpd_free_tier_limit", 1000),
                     )
@@ -250,11 +278,15 @@ class AppConfig:
             for m in data.get("embedding_models") or []:
                 if not isinstance(m, dict):
                     raise ValueError("Each embedding model entry must be an object.")
+                provider = m.get("provider", "voyageai")
                 embedding_models.append(
                     ModelConfig(
                         name=m["name"],
-                        provider=m.get("provider", "voyageai"),
-                        api_key_env=m.get("api_key_env", LITELLM_KEY_ENV),
+                        provider=provider,
+                        api_key_env=m.get(
+                            "api_key_env",
+                            _default_key_env(provider, "VOYAGE_API_KEY_1"),
+                        ),
                         tokens_free_tier_limit=m.get("tokens_free_tier_limit", 0),
                     )
                 )
@@ -266,11 +298,15 @@ class AppConfig:
                     raise ValueError(
                         "Each prose embedding model entry must be an object."
                     )
+                provider = m.get("provider", "voyageai")
                 prose_embedding_models.append(
                     ModelConfig(
                         name=m["name"],
-                        provider=m.get("provider", "voyageai"),
-                        api_key_env=m.get("api_key_env", LITELLM_KEY_ENV),
+                        provider=provider,
+                        api_key_env=m.get(
+                            "api_key_env",
+                            _default_key_env(provider, "VOYAGE_API_KEY_1"),
+                        ),
                         tokens_free_tier_limit=m.get("tokens_free_tier_limit", 0),
                     )
                 )
