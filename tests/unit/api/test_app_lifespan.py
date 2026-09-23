@@ -142,25 +142,42 @@ def test_lifespan_shutdown_reports_incomplete_work(tmp_path: Path) -> None:
     entered = threading.Event()
     gate = threading.Event()
 
-    with TestClient(app) as client:
-        client.get("/api/v1/health")
-        indexer = api._service.get_indexer()
-        real_replace = indexer.replace_file
+    try:
+        with TestClient(app) as client:
+            client.get("/api/v1/health")
+            worker = app.state.bg_indexer
+            # Patch the writer the worker drives, not the indexer underneath
+            # it: ServiceWatchWriter holds its batch lock across the whole
+            # commit, and shutdown's publish_pending() needs that same lock.
+            # Parking the worker on the writer's method blocks it BEFORE the
+            # lock is taken, keeping the drain live; parking it on the
+            # indexer's method deadlocks shutdown against an untimed gate.
+            writer = worker.indexer
+            real_replace = writer.replace_file
 
-        def slow_replace(path, **kwargs):  # type: ignore[no-untyped-def]
-            entered.set()
-            gate.wait(timeout=TIMEOUT)
-            return real_replace(path, **kwargs)
+            def slow_replace(path, **kwargs):  # type: ignore[no-untyped-def]
+                entered.set()
+                # No timeout: the test, not the clock, decides when work may
+                # finish, so no CI stall can empty the queue before the drain
+                # samples it. The finally below is the only thing that opens
+                # the gate.
+                gate.wait()
+                return real_replace(path, **kwargs)
 
-        indexer.replace_file = slow_replace  # type: ignore[method-assign]
-        worker = app.state.bg_indexer
-        worker.queue_file(tmp_path / "m.py")
-        assert entered.wait(TIMEOUT), "the worker never began a commit"
-        (tmp_path / "n.py").write_text("def beta():\n    return 2\n", encoding="utf-8")
-        worker.queue_file(tmp_path / "n.py")
+            writer.replace_file = slow_replace  # type: ignore[method-assign]
+            worker.queue_file(tmp_path / "m.py")
+            assert entered.wait(TIMEOUT), "the worker never began a commit"
+            (tmp_path / "n.py").write_text(
+                "def beta():\n    return 2\n", encoding="utf-8"
+            )
+            worker.queue_file(tmp_path / "n.py")
+    finally:
+        # The worker is parked on the gate inside the indexer; open it even if
+        # an assertion failed, or the blocked thread leaks into the next
+        # test's live-worker count.
+        gate.set()
+        worker.join(timeout=TIMEOUT)
 
-    gate.set()
-    worker.join(timeout=TIMEOUT)
     report = app.state.shutdown_report
     assert not report.completed
     assert report.incomplete_work
