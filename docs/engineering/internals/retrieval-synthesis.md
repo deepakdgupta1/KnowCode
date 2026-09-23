@@ -27,8 +27,9 @@ used by `ask`.
 5. **Dependency expansion** (`completeness.py`): 1-hop callees pulled in,
    labeled `source="dependency"`, score 0.0 — completeness without
    polluting evidence ranking.
-6. Per-entity token budget: `max(200, min(2000, max_tokens /
-   limit_entities))`.
+6. Per-entity token budget: `max(1, min(2000, max_tokens //
+   limit_entities))` — the 200-token floor was removed in BL-29
+   (`src/knowcode/retrieval/orchestrator.py:185`).
 
 ## Hybrid fusion
 
@@ -77,6 +78,14 @@ query substring in content ×1.5, query == chunk kind ×2.0.
   of the template priority list (`weight = 1/(i+1)`), +0.2 source bonus,
   +0.1 docstring > 50 chars, ×0.5 when the bundle is under 100
   characters; normalized by max score.
+
+Source inclusion is governed by
+`src/knowcode/retrieval/response_profiles.py`: `query`/`context` responses
+are summary-first, and raw source is included only when verbosity ≥
+`standard` or the task type is source-hungry (`debug`, `review` — pinned by
+`tests/unit/retrieval/test_response_profiles.py:44`). `search`/`trace` never
+carry source; `semantic_search` always does. This supersedes the older
+`summarize=True` knob described above.
 
 ## Local-vs-LLM routing
 
