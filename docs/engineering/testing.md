@@ -1,7 +1,9 @@
 # Testing & Evaluation
 
-How KnowCode is tested and how retrieval quality is gated. Layout mirrors
-`src/knowcode/` so a module's tests are where you expect them.
+How KnowCode is tested and how retrieval quality is gated. Layout roughly
+mirrors `src/knowcode/` so a module's tests are where you expect them;
+`tests/unit/` also holds top-level config, readiness, routing-policy, and
+telemetry test modules.
 
 ## Layout
 
