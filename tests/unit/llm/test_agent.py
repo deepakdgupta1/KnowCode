@@ -736,3 +736,33 @@ def test_glm_base_url_env_overrides_the_proxy_address(
 
     assert client is not None
     assert str(client.base_url).startswith("https://proxy.example.internal/v1")
+
+
+@pytest.mark.parametrize("provider", ["glm", "GLM", "Glm", "z-ai", "Z-AI", "Z-Ai"])
+@pytest.mark.parametrize("base_url", [None, "https://proxy.example.internal/v1"])
+def test_loaded_glm_aliases_keep_default_credentials_on_the_proxy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    provider: str,
+    base_url: str | None,
+) -> None:
+    monkeypatch.setenv("LITELLM_MASTER_KEY", "test-proxy-key")
+    if base_url is None:
+        monkeypatch.delenv("GLM_BASE_URL", raising=False)
+    else:
+        monkeypatch.setenv("GLM_BASE_URL", base_url)
+    config_path = tmp_path / "aimodels.yaml"
+    config_path.write_text(
+        f"natural_language_models:\n  - name: glm-5\n    provider: {provider}\n"
+    )
+    config = AppConfig.load(str(config_path))
+    agent = Agent(_RoutingService(), config)
+
+    client = agent._get_client(config.models[0])
+
+    assert client is not None
+    try:
+        assert str(client.base_url).rstrip("/") == (base_url or "http://127.0.0.1:4000")
+        assert client.api_key == "test-proxy-key"
+    finally:
+        client.close()

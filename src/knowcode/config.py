@@ -260,7 +260,7 @@ class AppConfig:
             for m in model_list or []:
                 if not isinstance(m, dict):
                     raise ValueError("Each model entry must be an object.")
-                provider = m.get("provider", "google")
+                provider = m.get("provider", "google").lower()
                 models.append(
                     ModelConfig(
                         name=m["name"],
