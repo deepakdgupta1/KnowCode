@@ -50,3 +50,5 @@ policy is the [MCP contract](mcp-contract.md).
   backlog of known defects.
 - **Research** — exploratory designs and evaluation studies feeding the
   roadmap.
+
+Superseded documents live under `docs/archive/`, excluded from this site — never edit them.
