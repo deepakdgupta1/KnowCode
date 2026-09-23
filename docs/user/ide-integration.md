@@ -16,7 +16,9 @@ prompt. The low-token workflow:
 2. Agent calls `knowcode_retrieve` with `action="query"` and
    `verbosity="minimal"`.
 3. KnowCode returns compact `context_text`, `sufficiency_score`, and token
-   count.
+   count, plus a `freshness` block, a `reduction_summary` (or
+   `source_included: true` when raw source is included), and `errors` when
+   present.
 4. Agent answers locally when the configured threshold is met
    (`sufficiency_threshold`, default 0.8).
 5. Agent escalates budget or verbosity only when minimal context is not
@@ -103,7 +105,11 @@ script `bin/knowcode-mcp.sh` works around provenance checks.
 The server starts whether or not artifacts exist, so an agent in a
 repository KnowCode has never seen can build them itself: call
 `knowcode_lifecycle` with `action="build"`, then poll `knowcode_inspect`
-`action="job_status"`. No terminal step is required.
+`action="job_status"`. No terminal step is required. Two guardrails shape
+this flow: `action="export"` requires `output` (the directory the Markdown
+export is written to), and only one lifecycle job runs at a time — a submit
+while another job is still running fails with `job_already_running`, so poll
+the running job to a terminal state before submitting the next.
 
 ### Permissions
 
@@ -126,9 +132,11 @@ quota, so this is deliberate.
 ### Long builds
 
 Lifecycle actions return a `job_id` immediately rather than blocking, because
-indexing costs one embedding round-trip per file with no cross-file batching
-or concurrency — a few hundred files is minutes, a few thousand is tens of
-minutes. Claude Code's stdio idle timeout defaults to 30 minutes
+indexing makes many embedding calls to the configured provider. Those calls
+are cross-file batched at the provider's own limit, overlap under bounded
+concurrency, and retry transient failures with backoff
+(`src/knowcode/indexing/embedding_batch.py`) — but a build is still a long,
+network-bound job. Claude Code's stdio idle timeout defaults to 30 minutes
 (`CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT`), which a synchronous build could
 exceed. Polling is cheap and read-only.
 
