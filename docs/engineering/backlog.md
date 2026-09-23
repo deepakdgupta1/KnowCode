@@ -30,7 +30,88 @@ measured reason not to build something is worth more than silence.
 
 ## Open
 
-Nothing open. Items land here as they are found.
+### BL-41 - A build whose embeddings all fail publishes a chunkless generation, and every check passes it
+
+**Severity:** Critical. **Found:** 2026-09-23, rebuilding this repository's own
+served index after [BL-37](backlog.md) changed the default embedding route.
+
+Every embedding call failed. The build printed four warnings, then this:
+
+```
+✓ Build complete!
+  Entities: 4956
+  Relationships: 26512
+  Errors: 4
+  Indexed chunks: 0
+```
+
+It exited 0, published generation `20260923T035253724946Z-a906d9ac`, and
+retired a superseded one. `doctor` over that generation then passed every
+single check:
+
+```
+[PASS] Index generation: ... is complete (4956 entities, 0 chunks, 0 vectors; 2 retained)
+[PASS] Semantic index: ... (schema v8, voyageai/voyage-code-3, dimension 1024)
+[PASS] Freshness: Knowledge store and semantic index are fresh and match the source tree.
+```
+
+**A generation with no chunks has no retrieval at all.** The semantic, FTS, and
+exact planes all read chunk rows, so this store answers nothing, and the MCP
+server serving it says nothing is wrong. "Complete" is asserted over a count of
+zero, "Semantic index" reports the configured model rather than whether any
+vector exists, and "Freshness" is true and irrelevant: the artifacts are newer
+than the source and empty.
+
+This is the [BL-35](backlog.md) family with the label problem solved and the
+count problem left. BL-35 made the recorded provider honest; nothing yet
+compares chunk or vector counts against the entities they were built from.
+
+**Reproduce.** Point the embedding provider at an endpoint that rejects every
+request, then `knowcode build . -i "docs/**" -i "*.md"` and `knowcode doctor`
+over the published generation. [BL-42](backlog.md) is one way to arrange that
+and was how this was found.
+
+**Two candidate gates, and they are not the same gate.** `build` should not
+publish a generation whose chunk count is zero while its entity count is not,
+and should not exit 0 having said `Errors: 4`. `doctor` should compare chunks
+and vectors against entities rather than reporting a completeness flag that a
+zero satisfies. The first prevents the artifact; the second catches one that
+already exists, including one restored from elsewhere.
+
+**Rolled back by hand, which is itself a gap.** There is no CLI to select a
+generation, so recovery meant editing `knowcode_index/current.json` to name the
+previous generation id and its `created_at`. That file is the publication
+pointer, and hand-editing it is the only lever a user has after a bad publish.
+
+### BL-42 - Voyage embeddings default to a proxy route that has no embedding model
+
+**Severity:** High. **Found:** 2026-09-23, the first build after `ccda0b0`.
+
+[BL-37](backlog.md) made `build_provider_from_model` default to
+`http://127.0.0.1:4000` when `VOYAGE_BASE_URL` is unset, so that Voyage traffic
+follows the same single-route contract as GLM. On the machine that change was
+written for, that proxy serves ten models and none of them embed:
+
+| probe | result |
+| --- | --- |
+| `GET /health/readiness` | `{"status":"healthy","db":"Not connected"}` |
+| `GET /v1/models` | 10 ids, all `glm-*`, none matching embed, voyage, bge, e5, or gte |
+| `POST /v1/embeddings` with `voyage-code-3` | `400 Invalid model name passed in model=voyage-code-3` |
+
+**The error the build surfaces is not the error that happened.** Indexing
+reported `400 No connected db`, which sends a reader after the proxy's database
+rather than its model list. The direct probe above names the real cause.
+
+**Not a verdict on BL-37's decision.** Routing embeddings through the proxy is
+the deployment's own rule. The defect is that the default now depends on proxy
+configuration this repository neither checks nor documents, and that the
+failure is silent enough to publish an empty index ([BL-41](backlog.md)).
+
+**Either fix ends it, and they are different promises.** Register a voyage
+embedding model on the proxy and the default works as BL-37 intended. Set
+`VOYAGE_BASE_URL` to the provider endpoint and builds work while leaving the
+routing contract unmet. A third option is for `doctor` to probe the configured
+embedding route once, which turns a silent build failure into a readiness check.
 
 ## Closed
 
