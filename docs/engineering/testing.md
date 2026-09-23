@@ -14,7 +14,7 @@ telemetry test modules.
 | `tests/e2e/` | Release gates: pipeline, security, soak, limitations, IDE integration |
 | `tests/helpers/` | Shared assertions: adversarial repo, graph gates, parser/vector contract assertions |
 | `tests/fixtures/` | Parser fixtures (fixture gates enforce the [parser matrix](parser-matrix.md)) |
-| `tests/test_mcp_workflow.md` | Manual MCP test plan with expected sufficiency scores |
+| `docs/archive/test_mcp_workflow.md` | Archived manual MCP test plan with expected sufficiency scores |
 | `tests/eval/` | Marker registered; the live harness lives externally (below) |
 
 ## Running

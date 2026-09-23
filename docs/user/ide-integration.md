@@ -188,7 +188,7 @@ orchestration implemented?”* Expected: the agent calls `knowcode_retrieve`
 with `action="query"` and `verbosity="minimal"` first, answers locally when
 `sufficiency_score` meets the threshold, and escalates only if
 insufficient. A manual test plan with expected sufficiency scores per
-question is in `tests/test_mcp_workflow.md`.
+question is archived in `docs/archive/test_mcp_workflow.md`.
 
 Target baselines to aim for (actuals depend on your codebase and queries):
 70%+ of queries with `sufficiency_score ≥ 0.8`, and a 50%+ reduction in
