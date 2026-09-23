@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import json
+import threading
+from collections.abc import Iterator
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -424,7 +429,7 @@ def test_voyage_proxy_embeddings_keep_input_type(
 
     provider.embed_single("query text")
 
-    assert captured["model"] == "voyage/voyage-code-3"
+    assert captured["model"] == "voyage-code-3"
     assert captured["extra_body"] == {"input_type": "query"}
 
 
@@ -442,6 +447,90 @@ def test_voyage_provider_targets_litellm_proxy_by_default(
 
     assert isinstance(provider, VoyageAIEmbeddingProvider)
     assert provider.base_url == "http://127.0.0.1:4000"
+
+
+# --- A proxied embedding request is one the proxy accepts (BL-42) -----------
+
+
+@pytest.fixture
+def proxy_requests(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[dict[str, Any]]]:
+    """Stand in for the proxy on a local socket and record every request."""
+    requests: list[dict[str, Any]] = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            requests.append(
+                {"authorization": self.headers["Authorization"], "body": body}
+            )
+            data = [
+                {"object": "embedding", "index": index, "embedding": [1.0, 0.0]}
+                for index, _ in enumerate(body["input"])
+            ]
+            reply = json.dumps(
+                {"object": "list", "model": body["model"], "data": data, "usage": {}}
+            ).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(reply)))
+            self.end_headers()
+            self.wfile.write(reply)
+
+        def log_message(self, *args: Any) -> None:
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    monkeypatch.setenv("VOYAGE_BASE_URL", f"http://127.0.0.1:{server.server_port}")
+    try:
+        yield requests
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.mark.parametrize(
+    ("section", "select"),
+    [
+        ("embedding_models", create_embedding_provider),
+        ("prose_embedding_models", create_prose_embedding_provider),
+        (None, create_embedding_provider),
+    ],
+    ids=["code-entry", "prose-entry", "no-config-file"],
+)
+def test_an_entry_that_names_no_key_sends_a_request_the_proxy_accepts(
+    section: str | None,
+    select: Any,
+    proxy_requests: list[dict[str, Any]],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The proxy authenticates with its own key and serves models by its own names.
+
+    Both halves failed against the real proxy while stubbed clients passed.
+    Sent the provider's key, LiteLLM reads it as a virtual key and, with no
+    database, answers ``400 No connected db``; asked for
+    ``voyage/voyage-code-3`` it answers ``Invalid model name``. So this reads
+    the request off the wire rather than off the client object.
+    """
+    monkeypatch.setenv("LITELLM_MASTER_KEY", "proxy-key")
+    monkeypatch.setenv("VOYAGE_API_KEY_1", "provider-key")
+    if section is None:
+        app_config = AppConfig.default()
+    else:
+        path = tmp_path / "aimodels.yaml"
+        path.write_text(
+            f"{section}:\n  - name: voyage-code-3\n    provider: voyageai\n"
+        )
+        app_config = AppConfig.load(str(path))
+
+    select(app_config=app_config).embed(["def add(a, b): return a + b"])
+
+    (request,) = proxy_requests
+    assert request["authorization"] == "Bearer proxy-key"
+    assert request["body"]["model"] == "voyage-code-3"
+    assert request["body"]["input"] == ["def add(a, b): return a + b"]
+    assert request["body"]["input_type"] == "document"
 
 
 # --- The dummy fallback announces itself, and stays distinguishable from
