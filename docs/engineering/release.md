@@ -15,7 +15,9 @@ the [ADR index](adr/index.md).
       `tests/e2e/test_release_gate_security.py`,
       `tests/e2e/test_release_gate_soak.py`, and
       `tests/e2e/test_release_gate_limitations.py` for **both** vector backends.
-- [ ] `uv run ruff check .`, `uv run mypy src/`, and `uv run mkdocs build --strict` pass.
+- [ ] `uv run ruff check .`, `uv run mypy src/`, `uv run mkdocs build`
+      (deliberately **not** `--strict` — docs link into `src/`), and
+      `uv run python scripts/check_doc_links.py` pass.
 - [ ] The seeded soak is stable: run
       `uv run pytest tests/e2e/test_release_gate_soak.py` a few times (a red run
       prints its seed and op-log — reproduce with `KNOWCODE_GATE_SEED=<seed>`).
@@ -29,9 +31,9 @@ the [ADR index](adr/index.md).
 - [ ] `uv run knowcode doctor --mcp` verifies the MCP server exposes
       `knowcode_retrieve` and honors `action="query"`, `verbosity="minimal"`,
       `max_tokens=1500`, `limit_entities=1`.
-- [ ] After a **watched** edit, doctor's **Freshness** check warns
-      `store_stale_source_changed` (expected — see Known limitations) and a full
-      `knowcode build` clears it.
+- [ ] After a **watched** edit, doctor's **Freshness** check must **not** report
+      `store_stale_source_changed` — the release gate pins this
+      (`tests/e2e/test_release_gate_limitations.py`).
 
 ## 3. Generation integrity and migration
 
@@ -40,9 +42,9 @@ the [ADR index](adr/index.md).
       counts (`entities`/`chunks`/`vectors`) and checksums agree.
 - [ ] **Migration:** legacy v1/v2 artifacts (`chunks.db` without the embedding
       column; `vectors.json` at an old schema) fail closed with a `knowcode build`
-      instruction rather than being adopted. The committed `knowcode_index/` is a
-      legacy layout and must be rebuilt. Confirm doctor reports the rebuild need
-      rather than a silent in-memory migration.
+      instruction rather than being adopted. The local `knowcode_index/` is
+      untracked; every checkout builds its own. Confirm doctor reports the
+      rebuild need rather than a silent in-memory migration.
 - [ ] **No vector artifact is published.** The generation directory holds
       `knowledge.db`, `chunks.db`, `index_manifest.json`, `manifest.json`, and
       `preflight_report.json`, and nothing named `vectors.*`
@@ -79,8 +81,9 @@ the [ADR index](adr/index.md).
 
 - [ ] Directory-level watch events are not expanded into their files; a rebuild
       re-keys the subtree.
-- [ ] A watched edit refreshes retrieval (chunks/vectors) but not the knowledge
-      graph until a rebuild; doctor warns.
+- [ ] A watched edit refreshes retrieval (chunks/vectors) **and** the knowledge
+      graph for the parsed file; only cross-file edges (e.g. after a rename)
+      still need a rebuild.
 - [ ] An empty LanceDB index is never written as a loadable artifact (the caller
       guard keeps the backend residual unreachable).
 
@@ -94,7 +97,8 @@ These are pinned by `tests/e2e/test_release_gate_limitations.py`. If a release
       implemented behavior.
 - [ ] Configuration examples (`aimodels.yaml`) reflect any new environment
       variables or supported model families.
-- [ ] Docs drift audit: `uv run mkdocs build --strict` passes; any new or
+- [ ] Docs drift audit: `uv run mkdocs build` and
+      `uv run python scripts/check_doc_links.py` pass; any new or
       renamed command/flag/endpoint/config key is reflected in exactly one
       canonical page (`docs/user/cli-reference.md`,
       `docs/user/configuration.md`, `docs/user/rest-api.md`) with other
