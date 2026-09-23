@@ -84,6 +84,63 @@ the cost is real money and hours rather than a `git bisect run`. Roadmap P1 owns
 the harness this depends on, and its work item 3 re-selects the threshold over
 the same evidence.
 
+### BL-39 - A bounded shutdown can report a drain it cannot name
+
+**Severity:** Medium. **Found:** 2026-09-22 in CI run `35742967500`, job
+`macos-latest / py3.10`, where
+`test_lifespan_shutdown_reports_incomplete_work` failed while the same test
+passed on py3.11 and py3.12 in that run.
+
+```
+>       assert report.incomplete_work
+E       AssertionError: assert ()
+E        +  where () = ShutdownReport(completed=False, stages=(... StageOutcome(
+       name='worker', ok=False,
+       detail='0 path(s) not indexed as their events implied') ...),
+       incomplete_work=())
+```
+
+A report saying the worker stage failed while naming zero paths is the exact
+state that test exists to forbid: a drain that cannot finish is stated, never
+reported as clean. The count in the detail string and the empty tuple are the
+same value, so the message is self-consistent and the *report* is not.
+
+**The mechanism is a lead, not a finding.** `BackgroundIndexer.stop` samples the
+two halves of that report at different instants. `drained` and `stopped` come
+from `self._queue.join(timeout)` and `thread.join(...)` near the top; `pending`,
+`in_flight` and `failures` are read by `self._report()` after
+`self._publish_pending()` has run. Work that lands in between leaves
+`completed=False` with nothing outstanding to name. The CI log supports
+something blocking in that window without proving what: the app logged its
+first line at `14:51:18.162` and the incomplete-shutdown warning at
+`14:51:28.296`, ten seconds for a shutdown budgeted at `0.2`.
+
+**Not reproduced.** The whole file passes locally. Shrinking only the test's
+`gate.wait` to 0.05s forces a *different* inconsistency, `completed=True` with
+`incomplete_work=()`, failing one assertion earlier; 0.5s and 1.0s both pass.
+The cheap next probe is to delay `_publish_pending` while the worker finishes,
+which the sampling gap predicts will reproduce the CI report exactly. If it
+does, the fix is to derive `completed` from the same instant the report
+describes.
+
+### BL-40 - A watched edit did not reach the graph once, on one CI job
+
+**Severity:** Medium. **Found:** 2026-09-15 in CI run `34928841437`, job
+`macos-latest / py3.10`, where
+`test_a_watched_edit_refreshes_retrieval_and_the_graph` failed at
+`assert service.search("gamma_handler")` with "the graph did not follow the
+watched edit", after `worker.stop(timeout=60)` had returned a completed report
+and the chunk-side assertion above it had passed.
+
+**Nothing is diagnosed here, and this row exists so the next sighting is the
+second one rather than the first.** It has not recurred in the two runs since
+(`35742967500`, `35755451528`), and the test passed nine consecutive times
+locally under py3.10, so by this backlog's own standard it is one observation
+short of being reproducible. It is filed rather than dropped because the
+retrieval half passing while the graph half fails is exactly the split
+[BL-17](backlog.md) closed, and a return of it would be a correctness
+regression rather than a flaky assertion.
+
 ## Closed
 
 | Item | Resolution |
