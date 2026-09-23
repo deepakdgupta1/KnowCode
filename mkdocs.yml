@@ -5,7 +5,12 @@ repo_name: deepakdgupta1/KnowCode
 edit_uri: edit/main/docs/
 
 # Superseded docs are kept for history but excluded from the built site.
-exclude_docs: archive/*
+# gpt-actions-rag is a vendored, gitignored clone — excluding it keeps local
+# builds identical to CI checkouts. superpowers/ holds working plans, not docs.
+exclude_docs: |
+  archive/*
+  research/gpt-actions-rag/*
+  superpowers/*
 
 theme:
   name: material
