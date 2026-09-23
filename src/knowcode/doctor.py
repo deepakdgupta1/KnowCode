@@ -1074,9 +1074,14 @@ async def _check_mcp_handshake(
     )
     import tempfile
 
+    # The child writes stderr in the platform's locale encoding, and on Windows
+    # it may still hold the file while the directory is removed. Neither may
+    # turn a handshake that passed into a failure.
     with (
-        tempfile.TemporaryDirectory() as errdir,
-        open(Path(errdir) / "mcp-stderr.log", "w+", encoding="utf-8") as errlog,
+        tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as errdir,
+        open(
+            Path(errdir) / "mcp-stderr.log", "w+", encoding="locale", errors="replace"
+        ) as errlog,
     ):
         async with stdio_client(params, errlog=errlog) as (read_stream, write_stream):
             async with ClientSession(read_stream, write_stream) as session:
