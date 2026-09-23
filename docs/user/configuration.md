@@ -84,9 +84,10 @@ defaults use:
 | `KNOWCODE_TELEMETRY_RAW` | `1` enables opt-in raw query capture — see [telemetry](telemetry.md#opt-in-raw-query-capture) |
 | `KNOWCODE_TESTING` | Test-only: set by the test suite so telemetry writes run synchronously instead of on the background pool. Never set it in normal use. |
 
-`.env.example` documents the API keys and base URLs; the `KNOWCODE_*`
-behavioral variables above are documented only here. It is a safe template to
-copy to `.env` (gitignored).
+`.env.example` documents the API keys and base URLs and mentions
+`KNOWCODE_TELEMETRY_RAW` and `KNOWCODE_TESTING` in comments; this page is the
+canonical documentation of the `KNOWCODE_*` behavioral variables. It is a safe
+template to copy to `.env` (gitignored).
 
 ## Optional extras
 

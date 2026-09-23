@@ -107,7 +107,7 @@ git commit -m "chore(docs): exclude the vendored research clone and working plan
 
 ## Phase 1 — Repo-root meta documents (README, CONTRIBUTING, CHANGELOG)
 
-Three files that describe the project and its process. The changelog tracking question is decided here because README and CONTRIBUTING both link to a file that is currently gitignored (`.gitignore:214`; deleted from the repo in commit `82fcd14`), and the CI changelog job runs `git add CHANGELOG.md` (`.github/workflows/ci-cd.yml:121`), which fails on an ignored path.
+Three files that describe the project and its process. The changelog tracking question is decided here because README and CONTRIBUTING both link to a file that is currently gitignored (`.gitignore:214`; deleted from the repo in commit `82fdc14`), and the CI changelog job runs `git add CHANGELOG.md` (`.github/workflows/ci-cd.yml:121`), which fails on an ignored path.
 
 ### Task 1.1: README.md — build gate, Vue parser wording
 
@@ -777,7 +777,7 @@ git commit -m "docs(research): banner marking the 50M-LOC synthesis as a point-i
 
 - [ ] **Step 1: Fix the seq_mcp caption** — "agent → `retrieve_context_for_query` (minimal first)" becomes "agent → `knowcode_retrieve` (`action="query"`, minimal first)". The diagram PNG/SVG itself is a follow-up (out of markdown scope).
 
-- [ ] **Step 2: Fix the seq_agent_gateway row** — the agent-gateway microservice was removed from this repository in `82fcd14`; reword the row to "Agent Gateway (removed from this repository in `82fcd14`; diagram kept for history)" — or delete the row if the diagram pair should go too. Default: keep + reword, flag the diagram for later removal.
+- [ ] **Step 2: Fix the seq_agent_gateway row** — the agent-gateway microservice was removed from this repository in `82fdc14`; reword the row to "Agent Gateway (removed from this repository in `82fdc14`; diagram kept for history)" — or delete the row if the diagram pair should go too. Default: keep + reword, flag the diagram for later removal.
 
 - [ ] **Step 3: Verify and commit**
 
