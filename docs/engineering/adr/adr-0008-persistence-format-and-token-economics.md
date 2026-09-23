@@ -12,6 +12,17 @@
 > attribute; and the local-answer gate additionally requires a
 > machine-verified routing policy (fail-closed). Text below is annotated
 > where it described the pre-generation layout.
+>
+> **Update (2026-09-22):** Since this ADR was drafted: the knowledge store is
+> SQLite `knowledge.db` published inside each generation (not
+> `knowcode_knowledge.json`; landed `aea573a`, 2026-08-14); the §1.2 artifact
+> set (`chunks.json` / `vectors.index` / `vectors.json`) was superseded by
+> ADR 0009's five-file generation; Option D (SQLite-backed graph store) is
+> implemented in `storage/sqlite_knowledge_store.py`; Phase 2's proposed
+> `SourceResolver` exists as `analysis/live_source_loader.py`; and the MCP
+> surface is three consolidated tools plus five opt-in legacy tools, not the
+> four schemas in §2.1. Status remains Proposed pending a formal disposition
+> of the unshipped phases.
 
 ---
 
