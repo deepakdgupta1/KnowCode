@@ -52,14 +52,20 @@ hidden:
 | `48b6eaf` | 2026-06-11 | 0.514 | 0.549 | 0.379 | 0.738 | 12/15 |
 | `7e9ca96` | 2026-09-09 | 0.469 | 0.519 | 0.379 | 0.673 | 11/15 |
 
-The defect is that delta, 0.045 MRR and 0.065 locate MRR under identical
-conditions. [DR-4](../research/storage_optimization_2026_v4.md) forbids a phase
-that costs retrieval quality, and 185 commits separate these two, so a phase
-that did is unidentified rather than absent.
+The defect, if it is one, is that delta of 0.045 MRR and 0.065 locate MRR
+under identical conditions. **It is one run per commit with no variance
+estimate.** `P@1` is identical at 0.379, and easy `P@1` moved by one query, so
+the whole delta is a handful of rank changes over 58 records. The first reading
+of this same pair was an artifact, so repeat both measurements before spending
+anything on a bisect. [DR-4](../research/storage_optimization_2026_v4.md)
+forbids a phase that costs retrieval quality, and 185 commits separate these
+two, so if the delta holds, a phase that caused it is unidentified rather than
+absent.
 
-**Ruled out.** Blend mistuning. Forcing `hybrid_alpha` to 0.5 at the later
-commit gives 0.470 against 0.469 at 0.2, so the blend is insensitive once the
-dense arm is real, and `d239b22`'s 0.5 to 0.2 cut neither caused nor fixed this.
+**Ruled out.** `d239b22`'s cut of `hybrid_alpha` from 0.5 to 0.2. Forcing 0.5
+back at the later commit gives 0.470 against 0.469, so reverting that commit
+does not recover the delta. Two points at one commit say nothing wider about
+how sensitive the blend is.
 
 **The open lead is coverage, and it is a lead rather than a finding.** The later
 commit indexes 7,555 chunks where the earlier indexes 7,946 from the identical
@@ -105,23 +111,41 @@ state that test exists to forbid: a drain that cannot finish is stated, never
 reported as clean. The count in the detail string and the empty tuple are the
 same value, so the message is self-consistent and the *report* is not.
 
-**The mechanism is a lead, not a finding.** `BackgroundIndexer.stop` samples the
-two halves of that report at different instants. `drained` and `stopped` come
-from `self._queue.join(timeout)` and `thread.join(...)` near the top; `pending`,
+**Two mechanisms fit the report, and they call for opposite fixes.**
+
+The first is a sampling gap. `BackgroundIndexer.stop` samples the two halves of
+that report at different instants. `drained` and `stopped` come from
+`self._queue.join(timeout)` and `thread.join(...)` near the top; `pending`,
 `in_flight` and `failures` are read by `self._report()` after
 `self._publish_pending()` has run. Work that lands in between leaves
-`completed=False` with nothing outstanding to name. The CI log supports
-something blocking in that window without proving what: the app logged its
+`completed=False` with nothing outstanding to name.
+
+The second is a spent budget. The lifespan shutdown runs `_stop_monitor()`
+before `_drain_worker`, which hands `worker.stop` whatever `_remaining(deadline)`
+is left, never less than zero. If stopping the file watcher overruns the
+0.2-second budget, `stop` gets zero. By then the worker has drained and
+published, so `queue.join(0)` finds an empty queue while `thread.join(0)`
+finds a live thread. That gives `stopped=False`, `completed=False`, and nothing
+to name, with no sampling race at all.
+
+The sampling gap is fixed by deriving `completed` from the instant the report
+describes. Under the spent budget, that same change would report a shutdown
+whose thread is still running as clean, which is the defect this test exists to
+catch. So the fix waits on knowing which one fired.
+
+The CI log's timestamps do not decide it. The ten seconds between the app's
 first line at `14:51:18.162` and the incomplete-shutdown warning at
-`14:51:28.296`, ten seconds for a shutdown budgeted at `0.2`.
+`14:51:28.296` span startup, the index build and the test body, including a
+`gate.wait` of up to five seconds by design, so they do not measure the
+shutdown.
 
 **Not reproduced.** The whole file passes locally. Shrinking only the test's
 `gate.wait` to 0.05s forces a *different* inconsistency, `completed=True` with
 `incomplete_work=()`, failing one assertion earlier; 0.5s and 1.0s both pass.
-The cheap next probe is to delay `_publish_pending` while the worker finishes,
-which the sampling gap predicts will reproduce the CI report exactly. If it
-does, the fix is to derive `completed` from the same instant the report
-describes.
+Two cheap probes separate the mechanisms. Delaying `_publish_pending` while the
+worker finishes should reproduce the CI report if the sampling gap is the
+cause. Delaying `_stop_monitor` past the budget should reproduce it if the
+spent budget is. Fix whichever one reproduces it.
 
 ### BL-40 - A watched edit did not reach the graph once, on one CI job
 
@@ -133,10 +157,10 @@ watched edit", after `worker.stop(timeout=60)` had returned a completed report
 and the chunk-side assertion above it had passed.
 
 **Nothing is diagnosed here, and this row exists so the next sighting is the
-second one rather than the first.** It has not recurred in the two runs since
-(`35742967500`, `35755451528`), and the test passed nine consecutive times
-locally under py3.10, so by this backlog's own standard it is one observation
-short of being reproducible. It is filed rather than dropped because the
+second one rather than the first.** It has not recurred in the four runs since
+(`35404359382`, `35742967500`, `35755451528`, `35816034884`), and the test
+passed nine consecutive times locally under py3.10, so by this backlog's own
+standard it is one observation short of being reproducible. It is filed rather than dropped because the
 retrieval half passing while the graph half fails is exactly the split
 [BL-17](backlog.md) closed, and a return of it would be a correctness
 regression rather than a flaky assertion.
@@ -145,6 +169,7 @@ regression rather than a flaky assertion.
 
 | Item | Resolution |
 | --- | --- |
+| CI committed a changelog that is not in version control, and failed on every push to `main` (BL-46) | Closed 2026-09-23 by removing the commit step, not by tracking the file again. `82fdc14` stopped tracking `CHANGELOG.md` and `.gitignore` lists it, so the `Generate Changelog` job's `git add CHANGELOG.md` has failed ever since. The job still generates the entry and uploads it as the `changelog-update` artifact, and the workflow token drops to `contents: read` because nothing writes to the repository any more. **The changelog now persists nowhere.** The artifact expires with its run, the `changelog_summary` dispatch input only shapes that artifact, and the one copy holding the `[Unreleased]` section is a maintainer's untracked local file. Whether to track it again is a release-notes decision rather than a CI one, and it belongs to whoever owns releases. |
 | `doctor` crashed on a configured embedding model it cannot build (BL-36) | Fixed 2026-09-11, the day it was filed. An `embedding_models` entry naming `provider: local` with its key exported cleared the key gate in `create_embedding_provider`, reached `build_provider_from_model`, and raised `NotImplementedError` out through `effective_embedding_config` into `_check_semantic_index`. **The blast radius was wider than the command's exit code.** `_check_semantic_index` is called unguarded, so the traceback also cost the four checks sequenced after it -- disk footprint, agent rules, supported languages, freshness -- and a diagnostic that reports less than it ran is the one thing it must not do. Selection now steps over an entry this build cannot construct and continues to the next model, which is what "first usable model" always meant. **The skip predicate is `embedding_config_for_model` itself, not a catch around the build**, for two reasons: it is the same function doctor's Config check calls, so "skipped by selection" and "named by the diagnostic" cannot drift apart the way BL-35's two yardsticks could; and catching around the construction would swallow a genuine client error as though it were an unsupported provider. The prose plane had the same defect at the same gate -- `create_prose_embedding_provider` would have raised out of a *build* rather than falling through to the code embedder its own docstring promises as step 3 -- so it is fixed there too. **Reporting it is the Config check's job, not the embedding comparison's.** BL-35's comparison provably cannot catch this case: `configured_embedding_config` steps over the unusable entry too, so both yardsticks read `dummy` and agree, exactly the vacuous comparison BL-35 existed to remove. Severity there is what the bad entry costs rather than that it exists -- beside a buildable entry it is dead weight selection skips (`warn`), as the last one standing it means nothing configured can ever embed (`fail`), and its hint names the providers that do work, pinned by a test so the advice cannot drift into a dead spelling. `_warn_dummy_fallback` had to change with it: its BL-35 sentence asserts no key is set, which is false on this path, so it now names the reason per entry. Verified on the original two-line config: `doctor` completes all fourteen checks and fails Config naming `bge-m3`.
 | `doctor` vouched for a dummy semantic index when credentials were absent, and `build` never said it had selected one (BL-35) | Fixed 2026-09-11. `_check_semantic_index` compared the manifest's embedding label against `effective_embedding_config`, which resolves through the same key-gated fallback the build did, so with no key both sides read `dummy`, the comparison was vacuous, and doctor printed `[PASS] Semantic index ... dummy/deterministic-sha256` over vectors carrying no semantic signal. BL-27's honest labels could not catch it alone, because the value they are compared against degrades the same way. The check now holds two yardsticks from one module, so they cannot drift: `effective_embedding_config` still answers what this process would query with (which is what catches a real index the running process has no key to read), and the new `configured_embedding_config` answers what `aimodels.yaml` asks for, key-independent, built from the `embedding_config_for_model` derivation `build_provider_from_model` now also uses. A manifest recording `dummy` while a real embedder is configured fails, whether or not a key happens to be present. Configuring no embedding model at all keeps passing, because then the dummy is the intent rather than a substitution. **The hint had to change too**: `knowcode build` does not clear this failure, since the rebuild selects the same fallback, so with no usable key the hint names the key first. **The build half** is fixed at selection rather than in the reporting, because selection is the only place that knows the substitution happened and every caller (build, retrieval, MCP, the API) passes through it: `create_embedding_provider` now logs a warning naming the fallback, the models it skipped, and their key variables, beside the git-commit warning that proved the command was not generally quiet. Verified end to end on a two-file corpus: same store, same command, only the environment differing, the BL-35 table now reads FAIL/FAIL where it read PASS/FAIL. Seven integration and e2e tests were asserting the old verdict; each builds offline and then called `run_doctor` with no config, silently inheriting this repository's own `aimodels.yaml` from the cwd — a verdict that depended on a file outside the fixture. They now write an explicit no-embedding-model config (`tests/helpers/offline_config.py`, placed beside the store root rather than inside it, where freshness would read it as a changed source), so an offline test declares that it is offline. Pinned by six doctor tests (both key states, the configured-dummy escape hatch, a real index the process cannot query, and both hints) and five embedding tests, among them the relational one holding `configured != effective` exactly when the key is absent, which is the property the whole check rests on. Each new guard was mutation-probed red. Full suite 2,159 passed; `mypy --strict` and ruff clean. |
 | 502 receiver holes the BL-33 pass could not see: module-scope bindings, literal types, and qualified factory returns (BL-34) | Fixed 2026-09-01, the day BL-33's residue was decomposed. BL-33 typed receivers from function-scope knowledge only, so three statement kinds the same file still makes were invisible to it: top-level assignments (a module body is a scope every function in the file closes over — `logger = logging.getLogger(__name__)` alone accounted for 85 holes), literal displays and constants (`seen = {}`, `prefix = "x"` state their builtin type exactly as an annotation would, worth ~240), and factory return annotations that name their own origin (`-> logging.Logger`, without which an in-repo `get_logger` cannot honestly say where `.info` lives, worth ~130). The module-scope table lives in `FileKnowledge`, built from direct top-level statements only — a binding inside a conditional import-time `if` is conditional, which one pass cannot treat as unconditional — and is consulted after the function's own table, with the shadowing order the runtime uses: an ambiguous local binding, and any parameter annotated or not, stops the lookup; a module binding shadows the imports. That last rule fixed a latent BL-33 defect the new tests caught: a locally ambiguous name used to fall through to its from-import binding. The builder gained the matching halves: `unique_top_level` now searches a package subtree for re-exported factories and classes by the same reasoning `unique_class` already had, and `_return_annotation_origin` reads a module-qualified return as its own origin — an in-repo module links the class, any other module answers `external::<module>::<Class.method>`. Resolution rate 0.764 → 0.790 (15,350/19,427; external answers 6,380 → 6,906, among them `external::logging::Logger.warning` traced through this repository's own `get_logger` signature). The remaining 4,077 holes barely moved in character: 2,867 receiver-qualified calls whose file states no type at all, 1,210 ambiguous or unknown bare names (116 of them `receiver_unknown` calls the scoped pass correctly refuses to name-link, verified as by-design), and 37 typed-but-unbound. Pinned by six new parser tests (module factories, imported constructors, literals, parameter shadowing, conflicting top-level producers) and six new builder tests (external producer answers, package-subtree class links, literal builtins answers, qualified returns in-repo and external, shadowed-hole guard). Full suite 2,112 passed; `mypy --strict` and ruff clean. |
