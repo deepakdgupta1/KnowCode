@@ -141,6 +141,7 @@ def test_lifespan_shutdown_reports_incomplete_work(tmp_path: Path) -> None:
 
     entered = threading.Event()
     gate = threading.Event()
+    worker = None
 
     try:
         with TestClient(app) as client:
@@ -172,11 +173,12 @@ def test_lifespan_shutdown_reports_incomplete_work(tmp_path: Path) -> None:
             )
             worker.queue_file(tmp_path / "n.py")
     finally:
-        # The worker is parked on the gate inside the indexer; open it even if
+        # The worker is parked on the gate inside the writer; open it even if
         # an assertion failed, or the blocked thread leaks into the next
         # test's live-worker count.
         gate.set()
-        worker.join(timeout=TIMEOUT)
+        if worker is not None:
+            worker.join(timeout=TIMEOUT)
 
     report = app.state.shutdown_report
     assert not report.completed
