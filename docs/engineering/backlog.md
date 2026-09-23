@@ -30,7 +30,59 @@ measured reason not to build something is worth more than silence.
 
 ## Open
 
-Nothing open. Items land here as they are found.
+### BL-38 - Retrieval quality fell between two commits and the cause is unlocated
+
+**Severity:** High. **Found:** 2026-09-09 in `knowcode-evals`, re-binding the
+golden set to KnowCode HEAD (P-1, `df5989f`), then confirmed by a keyed
+re-measurement recorded in `43a1787`.
+
+The first reading said retrieval had collapsed, MRR `0.682 → 0.344`. That
+reading was an artifact. `VOYAGE_API_KEY_1` was not exported, selection fell
+through to the dummy embedder, and the dense arm was a hash stub. The harness
+now refuses to score such a run at all (`1ca97ac`, rule in
+`tests/eval/harness/provenance.py`, escape hatch `--allow-stub-embeddings`), so
+that particular wrong number cannot be produced again.
+
+With the key exported and the index rebuilt on the same pinned corpus and the
+same 58 records, the real picture is a smaller regression that the stub had
+hidden:
+
+| commit | date | live MRR | R@10 | P@1 | locate MRR | easy P@1 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `48b6eaf` | 2026-06-11 | 0.514 | 0.549 | 0.379 | 0.738 | 12/15 |
+| `7e9ca96` | 2026-09-09 | 0.469 | 0.519 | 0.379 | 0.673 | 11/15 |
+
+The defect is that delta, 0.045 MRR and 0.065 locate MRR under identical
+conditions. [DR-4](../research/storage_optimization_2026_v4.md) forbids a phase
+that costs retrieval quality, and 185 commits separate these two, so a phase
+that did is unidentified rather than absent.
+
+**Ruled out.** Blend mistuning. Forcing `hybrid_alpha` to 0.5 at the later
+commit gives 0.470 against 0.469 at 0.2, so the blend is insensitive once the
+dense arm is real, and `d239b22`'s 0.5 to 0.2 cut neither caused nor fixed this.
+
+**The open lead is coverage, and it is a lead rather than a finding.** The later
+commit indexes 7,555 chunks where the earlier indexes 7,946 from the identical
+tree. Fewer chunks is not by itself a loss: `ed537b1` made a class chunk carry
+its shell rather than its members' bodies, and `12c7b0a` replaced the prose
+extractor with heading-hierarchy chunking that merges small siblings. Both
+legitimately cover the same bytes with fewer rows. Whether any *content* stopped
+being reachable is unmeasured, and that measurement is the next step, not a
+bisect.
+
+**Reproduce.** In `knowcode-evals` on `main`, build an index at each commit and
+score the same golden set:
+
+```bash
+VOYAGE_API_KEY_1="<key>" uv run python scripts/evaluate.py \
+  tests/eval/golden/golden_v1.0.json <index_dir> --threshold 0.4
+```
+
+**Deferred on purpose.** Naming the commit needs a keyed bisect over those 185
+commits, and every point costs an index rebuild with live embedding calls, so
+the cost is real money and hours rather than a `git bisect run`. Roadmap P1 owns
+the harness this depends on, and its work item 3 re-selects the threshold over
+the same evidence.
 
 ## Closed
 
