@@ -40,7 +40,7 @@ read the current generation through leases.
 | Component | Location | Responsibility |
 |---|---|---|
 | Scanner | `indexing/scanner.py` | File discovery honoring the root `.gitignore`; fixed supported-extension set |
-| Parsers | `parsers/` | Python `ast`; tree-sitter for JS/TS/Java/Rust/Vue; custom Markdown/YAML/RST. Per-construct coverage: [parser matrix](parser-matrix.md) |
+| Parsers | `parsers/` | Python `ast`; tree-sitter for JS/TS/Java/Rust; custom Markdown/YAML/RST; and Vue — a custom SFC scanner (`parsers/vue_parser.py`) that delegates embedded script blocks to the tree-sitter JS/TS parsers. Per-construct coverage: [parser matrix](parser-matrix.md) |
 | Graph builder | `indexing/graph_builder.py` | Entities + relationships into a networkx graph; unresolved references stay visible (`unresolved::…`) |
 | Knowledge store | `storage/knowledge_store.py`, `sqlite_knowledge_store.py` | In-memory graph with JSON/SQLite persistence; graph queries, tracing, impact |
 | Chunker | `indexing/chunker.py`, `prose_chunker.py` | Entity-aligned code chunks (1000 chars/100 overlap); prototype heading-hierarchy prose chunking |
@@ -51,7 +51,7 @@ read the current generation through leases.
 | Context synthesizer | `analysis/context_synthesizer.py` | Task-typed, token-budgeted bundles with sufficiency scoring |
 | Service | `service.py` | The central `KnowCodeService` wiring everything; generation lifecycle; freshness |
 | Watch pipeline | `indexing/monitor.py`, `watch_queue.py`, `background_indexer.py`, `file_updates.py`, `service_watch.py` | File-event monitoring, debounced incremental re-indexing, prepare/commit transactions |
-| Surfaces | `cli/cli.py`, `api/`, `mcp/server.py` | CLI (16 commands), FastAPI server (12 endpoints, 2 rate-limit tiers), MCP stdio server (5 tools) |
+| Surfaces | `cli/cli.py`, `api/`, `mcp/server.py` | CLI (16 commands), FastAPI server (12 endpoints, 2 rate-limit tiers), MCP stdio server (3 consolidated tools — `knowcode_retrieve`, `knowcode_lifecycle`, `knowcode_inspect` — plus 5 flat legacy tools behind `mcp-server --legacy-tools`) (`src/knowcode/mcp/tools.py`) |
 | LLM layer | `llm/` | Provider clients (Google/OpenAI-compatible), failover + free-tier rate limiting, query classification, prompt contract |
 | Analysis extras | `analysis/` | Preflight assessment, documentation synthesis, temporal/behavior signals |
 | Doctor | `doctor.py`, `readiness.py` | Setup verification incl. live MCP handshake |
@@ -84,8 +84,8 @@ read the current generation through leases.
 
 ## Extension points
 
-`protocols.py` defines the seams — `EmbeddingProviderProtocol`,
-`VectorStoreProtocol`, `KnowledgeStoreProtocol`, `ChunkRepository` ABC.
+`protocols.py` defines the embedding/vector/knowledge-store seams;
+the `ChunkRepository` ABC lives in `src/knowcode/storage/chunk_repository.py:29`.
 Adding a vector backend or embedding provider means implementing the
 protocol and registering in config; the contract versions and capability
 checks are explicit ([ADR 7](adr/adr-0007-protocol-and-artifact-evolution-inventory.md)).
