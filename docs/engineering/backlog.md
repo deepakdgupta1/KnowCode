@@ -90,12 +90,12 @@ the cost is real money and hours rather than a `git bisect run`. Roadmap P1 owns
 the harness this depends on, and its work item 3 re-selects the threshold over
 the same evidence.
 
-### BL-39 - A bounded shutdown can report a drain it cannot name
+### BL-39 - A shutdown budgeted at 0.2 seconds blocked for about ten, then reported a drain it cannot name
 
 **Severity:** Medium. **Found:** 2026-09-22 in CI run `35742967500`, job
-`macos-latest / py3.10`, where
-`test_lifespan_shutdown_reports_incomplete_work` failed while the same test
-passed on py3.11 and py3.12 in that run.
+`macos-latest / py3.10`, and seen again on 2026-09-23 in run `35840662218`, job
+`macos-latest / py3.11`. Both times `test_lifespan_shutdown_reports_incomplete_work`
+failed while every other job passed it.
 
 ```
 >       assert report.incomplete_work
@@ -111,41 +111,39 @@ state that test exists to forbid: a drain that cannot finish is stated, never
 reported as clean. The count in the detail string and the empty tuple are the
 same value, so the message is self-consistent and the *report* is not.
 
-**Two mechanisms fit the report, and they call for opposite fixes.**
+**The shutdown blocked, and the empty report follows from that.** The test
+gates the worker inside `replace_file` for up to five seconds per file and
+queues two files, but those waits run on the worker thread. The test's own
+thread reaches shutdown within a second of startup, with a 0.2-second budget.
+Both sightings logged the incomplete-shutdown warning about ten seconds after
+the app's first line, `14:51:18.162` to `14:51:28.296` and then `09:04:47.935`
+to `09:04:58.234`. Ten seconds is the two gated files expiring in turn, and the
+report can name nothing only if the worker had finished both, because it lists
+what is pending, in flight or failed. So the report was taken after the work it
+should describe had completed, about fifty times past the budget.
 
-The first is a sampling gap. `BackgroundIndexer.stop` samples the two halves of
-that report at different instants. `drained` and `stopped` come from
-`self._queue.join(timeout)` and `thread.join(...)` near the top; `pending`,
-`in_flight` and `failures` are read by `self._report()` after
-`self._publish_pending()` has run. Work that lands in between leaves
-`completed=False` with nothing outstanding to name.
+**What blocked is not known.** The stage outcomes carry no durations, and two
+places fit.
 
-The second is a spent budget. The lifespan shutdown runs `_stop_monitor()`
-before `_drain_worker`, which hands `worker.stop` whatever `_remaining(deadline)`
-is left, never less than zero. If stopping the file watcher overruns the
-0.2-second budget, `stop` gets zero. By then the worker has drained and
-published, so `queue.join(0)` finds an empty queue while `thread.join(0)`
-finds a live thread. That gives `stopped=False`, `completed=False`, and nothing
-to name, with no sampling race at all.
+- `_stop_monitor()` runs first. If stopping the file watcher waited on the gated
+  worker, `_drain_worker` then handed `worker.stop` a zero `_remaining(deadline)`,
+  and `thread.join(0)` found the now idle worker still alive. That gives
+  `completed=False` with nothing left to name.
+- `BackgroundIndexer.stop` samples `drained` and `stopped` near its top, but
+  reads `pending`, `in_flight` and `failures` in `self._report()` after
+  `self._publish_pending()`. If publishing waited on the gated worker, the two
+  halves of the report describe instants ten seconds apart.
 
-The sampling gap is fixed by deriving `completed` from the instant the report
-describes. Under the spent budget, that same change would report a shutdown
-whose thread is still running as clean, which is the defect this test exists to
-catch. So the fix waits on knowing which one fired.
-
-The CI log's timestamps do not decide it. The ten seconds between the app's
-first line at `14:51:18.162` and the incomplete-shutdown warning at
-`14:51:28.296` span startup, the index build and the test body, including a
-`gate.wait` of up to five seconds by design, so they do not measure the
-shutdown.
+**Fix what blocked, not the report.** Deriving `completed` from the report's own
+instant would make the report consistent, and it would describe as clean a
+shutdown that overran its budget fiftyfold. Find which call waits on the
+worker, then make shutdown keep its budget.
 
 **Not reproduced.** The whole file passes locally. Shrinking only the test's
 `gate.wait` to 0.05s forces a *different* inconsistency, `completed=True` with
-`incomplete_work=()`, failing one assertion earlier; 0.5s and 1.0s both pass.
-Two cheap probes separate the mechanisms. Delaying `_publish_pending` while the
-worker finishes should reproduce the CI report if the sampling gap is the
-cause. Delaying `_stop_monitor` past the budget should reproduce it if the
-spent budget is. Fix whichever one reproduces it.
+`incomplete_work=()`, failing one assertion earlier; 0.5s and 1.0s both pass. A
+local loop that logs each shutdown stage's duration and runs until the test
+fails would name the blocking call.
 
 ### BL-40 - A watched edit did not reach the graph once, on one CI job
 
