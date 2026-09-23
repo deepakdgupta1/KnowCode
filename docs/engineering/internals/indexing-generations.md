@@ -16,13 +16,15 @@ records: [ADR 4](../adr/adr-0004-complete-index-generations.md),
 3. **Graph build** (`GraphBuilder`) — entities/relationships assembled;
    unresolved references remain visible as `unresolved::…` targets (never
    silently dropped). Note: preflight's `unresolved_references` dimension
-   counts leftover legacy `ref::` placeholders, not `unresolved::` endpoints.
+   counts both leftover legacy `ref::` placeholders and `unresolved::`
+   endpoints (classified via `classify_endpoint_id`).
 4. **Chunk** (`chunker.py`) — entity-aligned chunks (signature +
    docstring + source; 1000 chars / 100 overlap) plus module-header and
-   imports chunks; MD5 content hash, mtime, and `has_docstring` recorded
+   imports chunks; SHA-256 content hash, mtime, and `has_docstring` recorded
    as rerank signals.
 5. **Embed** (`llm/embedding.py`, `indexing/embedding_batch.py`) — provider
-   selection VoyageAI → OpenAI-compatible → deterministic
+   selection is config-driven: explicit embedding config → first usable
+   entry of `embedding_models` from `aimodels.yaml` → deterministic
    `DummyEmbeddingProvider` (SHA-derived pseudo-embeddings: search still
    works, BM25-dominated). Bulk pipelines batch chunks **across** files up to
    the provider's configured limit and overlap a bounded number of those
@@ -35,9 +37,12 @@ The artifact root holds immutable generation directories plus one pointer:
 
 ```text
 artifact-root/
-  generations/<generation-id>/{knowledge.db, chunks.db, index_manifest.json, manifest.json}
+  generations/<generation-id>/{knowledge.db, chunks.db, preflight_report.json,
+                               index_manifest.json, manifest.json}
   current.json
 ```
+
+`chunks.content` in `chunks.db` is stored zlib-deflated.
 
 - **No vector artifact is published.** The ANN index is derived from the
   durable embeddings in `chunks.db` and rebuilt in memory when a generation is
