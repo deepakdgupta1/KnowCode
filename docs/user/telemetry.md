@@ -12,8 +12,10 @@ Telemetry is an append-only JSON Lines file, `knowcode_telemetry.jsonl`, in the
 root. It is never written inside `knowcode_index/`, because index generations
 are immutable and are retired on a schedule you do not control.
 
-Every record carries `telemetry_schema_version`, `timestamp`, and `event_type`.
-Each event type has a fixed field allowlist defined in
+Every record carries `telemetry_schema_version`, `timestamp`, and `event_type`,
+and may also carry `dropped_field_count` when fields were omitted by the
+allowlist schema (`src/knowcode/telemetry_policy.py:36,186-187`). Each event
+type has a fixed field allowlist defined in
 `src/knowcode/telemetry_policy.py`; a field outside it is dropped before the
 record is written, and an event type outside it is not written at all.
 
@@ -42,8 +44,11 @@ through the CLI, the API, or MCP.
 
 These describe a query that has *already* been counted, so they are excluded
 from `total_queries`. `agent_decision` records local-versus-LLM routing and the
-thresholds that produced it. `tool_call` records which MCP tool ran, how many
-arguments it received, and whether it succeeded — never the arguments
+thresholds that produced it. `tool_call` records which MCP tool ran, **which
+`action`** it dispatched, `query_id`/`query_chars` when the call carried a
+query, the argument count, the outcome, **`payload_bytes`** (serialized
+response size), and `duration_ms` (`src/knowcode/telemetry_policy.py:88-106`,
+emission in `mcp/server.py:570-593`) — never the arguments
 themselves, which are client-supplied and routinely contain pasted code.
 `reranker_latency` records reranking method and latency.
 
@@ -94,6 +99,14 @@ knowcode telemetry clear --store . --yes
 
 `clear` removes the log, every rotation, the opt-in raw file, and the
 correlation key. Deleting the files by hand is equally safe.
+
+### The `payload_bytes_by_action` summary block
+
+`get_telemetry_summary` — and therefore `knowcode_inspect` with
+`action="telemetry"` — returns a `payload_bytes_by_action` block keyed by
+`tool_name:action`, with the count and nearest-rank p50/p95/max of
+`payload_bytes` per action (`src/knowcode/telemetry.py:371-393,449`). The CLI
+`telemetry show` does not print this block.
 
 ## Opt-in raw query capture
 
