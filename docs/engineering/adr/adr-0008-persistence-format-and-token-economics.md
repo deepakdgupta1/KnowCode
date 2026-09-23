@@ -21,7 +21,7 @@
 > implemented in `storage/sqlite_knowledge_store.py`; Phase 2's proposed
 > `SourceResolver` exists as `analysis/live_source_loader.py`; and the MCP
 > surface is three consolidated tools plus five opt-in legacy tools, not the
-> four schemas in §2.1. Status remains Proposed pending a formal disposition
+> four schemas in §2.3. Status remains Proposed pending a formal disposition
 > of the unshipped phases.
 
 ---
