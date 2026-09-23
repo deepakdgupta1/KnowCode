@@ -93,9 +93,11 @@ the same evidence.
 ### BL-39 - A shutdown budgeted at 0.2 seconds blocked for about ten, then reported a drain it cannot name
 
 **Severity:** Medium. **Found:** 2026-09-22 in CI run `35742967500`, job
-`macos-latest / py3.10`, and seen again on 2026-09-23 in run `35840662218`, job
-`macos-latest / py3.11`. Both times `test_lifespan_shutdown_reports_incomplete_work`
-failed while every other job passed it.
+`macos-latest / py3.10`. Seen twice more on 2026-09-23 in run `35840662218`, on
+both `macos-latest / py3.10` and `macos-latest / py3.11`. Each time
+`test_lifespan_shutdown_reports_incomplete_work` was the only failure in its
+job, and neither the test nor the shutdown path runs git, so the test
+environment changes on this branch cannot reach it.
 
 ```
 >       assert report.incomplete_work
@@ -115,9 +117,9 @@ same value, so the message is self-consistent and the *report* is not.
 gates the worker inside `replace_file` for up to five seconds per file and
 queues two files, but those waits run on the worker thread. The test's own
 thread reaches shutdown within a second of startup, with a 0.2-second budget.
-Both sightings logged the incomplete-shutdown warning about ten seconds after
-the app's first line, `14:51:18.162` to `14:51:28.296` and then `09:04:47.935`
-to `09:04:58.234`. Ten seconds is the two gated files expiring in turn, and the
+All three sightings logged the incomplete-shutdown warning about ten seconds
+after the app's first line: `14:51:18.162` to `14:51:28.296`, `09:04:47.935` to
+`09:04:58.234`, and `09:05:06.012` to `09:05:16.359`. Ten seconds is the two gated files expiring in turn, and the
 report can name nothing only if the worker had finished both, because it lists
 what is pending, in flight or failed. So the report was taken after the work it
 should describe had completed, about fifty times past the budget.
