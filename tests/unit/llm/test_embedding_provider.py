@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any
@@ -17,6 +17,7 @@ from knowcode.llm.embedding import (
     _VOYAGE_EMBED_DIMENSIONS,
     SUPPORTED_EMBEDDING_PROVIDERS,
     DummyEmbeddingProvider,
+    EmbeddingProvider,
     OpenAIEmbeddingProvider,
     VoyageAIEmbeddingProvider,
     build_provider_from_model,
@@ -465,7 +466,7 @@ def proxy_requests(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[dict[str, A
             )
             data = [
                 {"object": "embedding", "index": index, "embedding": [1.0, 0.0]}
-                for index, _ in enumerate(body["input"])
+                for index in range(len(body["input"]))
             ]
             reply = json.dumps(
                 {"object": "list", "model": body["model"], "data": data, "usage": {}}
@@ -500,7 +501,7 @@ def proxy_requests(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[dict[str, A
 )
 def test_an_entry_that_names_no_key_sends_a_request_the_proxy_accepts(
     section: str | None,
-    select: Any,
+    select: Callable[..., EmbeddingProvider],
     proxy_requests: list[dict[str, Any]],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

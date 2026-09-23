@@ -1,14 +1,16 @@
 natural_language_models:
   - name: glm-5
     provider: z-ai
-    api_key_env: GLM_API_KEY
+    # The proxy's key, not the provider's. This traffic goes to the LiteLLM
+    # proxy, which holds the provider keys itself.
+    api_key_env: LITELLM_MASTER_KEY
     rpm_free_tier_limit: 99999
     rpd_free_tier_limit: 99999
 
 embedding_models:
   - name: voyage-code-3
     provider: voyageai
-    api_key_env: VOYAGE_API_KEY_1
+    api_key_env: LITELLM_MASTER_KEY
     tokens_free_tier_limit: 200000000
 
 eval_models:

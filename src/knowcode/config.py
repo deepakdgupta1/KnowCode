@@ -8,6 +8,8 @@ from typing import Any, Optional
 
 import yaml
 
+from knowcode.llm.routing import LITELLM_KEY_ENV
+
 logger = logging.getLogger(__name__)
 
 
@@ -201,7 +203,7 @@ class AppConfig:
                 ModelConfig(
                     name="voyage-code-3",
                     provider="voyageai",
-                    api_key_env="VOYAGE_API_KEY_1",
+                    api_key_env=LITELLM_KEY_ENV,
                 )
             ],
             sufficiency_threshold=0.8,
@@ -252,7 +254,7 @@ class AppConfig:
                     ModelConfig(
                         name=m["name"],
                         provider=m.get("provider", "voyageai"),
-                        api_key_env=m.get("api_key_env", "VOYAGE_API_KEY_1"),
+                        api_key_env=m.get("api_key_env", LITELLM_KEY_ENV),
                         tokens_free_tier_limit=m.get("tokens_free_tier_limit", 0),
                     )
                 )
@@ -268,7 +270,7 @@ class AppConfig:
                     ModelConfig(
                         name=m["name"],
                         provider=m.get("provider", "voyageai"),
-                        api_key_env=m.get("api_key_env", "VOYAGE_API_KEY_1"),
+                        api_key_env=m.get("api_key_env", LITELLM_KEY_ENV),
                         tokens_free_tier_limit=m.get("tokens_free_tier_limit", 0),
                     )
                 )

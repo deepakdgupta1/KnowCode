@@ -21,7 +21,7 @@ KnowCode loads configuration in this order:
 natural_language_models:
   - name: glm-5
     provider: z-ai            # or: google, openrouter, mistralai, openai
-    api_key_env: GLM_API_KEY  # env var holding this model's key
+    api_key_env: LITELLM_MASTER_KEY  # env var holding the key its requests send
     rpm_free_tier_limit: 99999   # client-side rate limiter, requests/min
     rpd_free_tier_limit: 99999   # client-side rate limiter, requests/day
 
@@ -29,12 +29,17 @@ natural_language_models:
 embedding_models:
   - name: voyage-code-3
     provider: voyageai
-    api_key_env: VOYAGE_API_KEY_1
+    api_key_env: LITELLM_MASTER_KEY
     tokens_free_tier_limit: 200000000
 
 # Reranking (cross-encoder) and evaluation models use the same shape:
 # reranking_models: [...] / eval_models: [...]
 ```
+
+`z-ai` chat and `voyageai` embedding traffic goes to the LiteLLM proxy, which
+holds the provider keys itself. Those entries therefore name the proxy's key,
+not the provider's, and an embedding entry that names no key defaults to it.
+The proxy rejects a provider key with `400 No connected db`.
 
 The rate-limiter fields keep `ask` inside your provider's free tier; when a
 provider reports resource exhaustion, KnowCode fails over to the next
@@ -75,9 +80,9 @@ defaults use:
 
 | Variable | Used for |
 |---|---|
-| `GLM_API_KEY` | Default chat model (`z-ai` provider) for `ask` |
+| `LITELLM_MASTER_KEY` | Key the LiteLLM proxy authenticates callers with, sent by the default chat model (`z-ai`) for `ask` and by voyage-code-3 embeddings |
 | `GLM_BASE_URL` | Optional address override for the LiteLLM proxy that GLM/z-ai chat traffic targets (default `http://127.0.0.1:4000`) |
-| `VOYAGE_API_KEY_1` | voyage-code-3 embeddings + rerank-2.5 cross-encoder |
+| `VOYAGE_API_KEY_1` | rerank-2.5 cross-encoder, which still calls VoyageAI directly ([BL-44](../engineering/backlog.md)) |
 | `VOYAGE_BASE_URL` | Optional address override for the OpenAI-compatible proxy that voyage embeddings target (default `http://127.0.0.1:4000`) |
 | `GOOGLE_API_KEY` | Optional Gemini chat models |
 | `KNOWCODE_ROUTING_POLICY_ARTIFACT` / `KNOWCODE_ROUTING_POLICY_SHA256` | Path + expected SHA-256 of the machine-verified routing policy artifact (see [retrieval evals](../engineering/testing.md)) |
