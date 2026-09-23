@@ -428,10 +428,10 @@ def test_voyage_proxy_embeddings_keep_input_type(
     assert captured["extra_body"] == {"input_type": "query"}
 
 
-def test_voyage_provider_without_proxy_env_keeps_the_native_client(
+def test_voyage_provider_targets_litellm_proxy_by_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """No VOYAGE_BASE_URL means the default direct VoyageAI route is kept."""
+    """No VOYAGE_BASE_URL still keeps outbound model traffic on LiteLLM."""
     monkeypatch.setenv("VOYAGE_API_KEY_1", "test-key")
     monkeypatch.delenv("VOYAGE_BASE_URL", raising=False)
     model = ModelConfig(
@@ -441,7 +441,7 @@ def test_voyage_provider_without_proxy_env_keeps_the_native_client(
     provider = build_provider_from_model(model)
 
     assert isinstance(provider, VoyageAIEmbeddingProvider)
-    assert provider.base_url is None
+    assert provider.base_url == "http://127.0.0.1:4000"
 
 
 # --- The dummy fallback announces itself, and stays distinguishable from
