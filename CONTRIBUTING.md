@@ -17,24 +17,21 @@ uv sync --dev --extra all --extra mcp --extra voyageai
 
 ## Verification
 
-Run before opening a PR — CI (`.github/workflows/ci-cd.yml`) runs the same
-gates on a 3-OS × Python 3.10–3.12 matrix:
-
-```bash
-pytest                    # tests (conftest sets KNOWCODE_TESTING=1)
-mypy src/                 # strict type checking
-ruff check src/           # lint
-ruff format src/          # format
-uv run mkdocs build --strict   # docs must build warning-free
-```
+Run before opening a PR. CI (`.github/workflows/ci-cd.yml`) runs:
+`uv run ruff check .`, `uv run mypy src` (strict), `uv run pytest`,
+`uv run mkdocs build` (deliberately **not** `--strict` — docs link into
+`src/`), and `uv run python scripts/check_doc_links.py` (every relative
+docs link must resolve). There is no `ruff format` gate; match the
+existing style instead.
 
 Conventions:
 
 - Docstrings are Google-style; CI auto-generates missing ones for changed
   files (`.github/workflows/ai-docs-enforcer.yml`), but writing them
   yourself produces better results.
-- Conventional commits — the changelog is generated from them
-  (`scripts/generate_changelog.py`).
+- Conventional commits — `CHANGELOG.md` is intentionally kept out of
+  version control; generate a local entry draft with
+  `uv run python scripts/generate_changelog.py` and curate it by hand.
 - New persisted artifacts or protocol changes must respect the fail-closed
   versioning policy ([ADR 7](docs/engineering/adr/adr-0007-protocol-and-artifact-evolution-inventory.md)).
 
