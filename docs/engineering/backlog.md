@@ -30,6 +30,45 @@ measured reason not to build something is worth more than silence.
 
 ## Open
 
+### BL-43 - Windows CI has never run the test suite, and 73 tests fail when it does
+
+**Severity:** Medium, pending a scope decision that could make it either
+Critical or nothing at all. **Found:** 2026-09-23 in run `35816034884`, the
+first run in which a Windows job ever reached `pytest`.
+
+Every Windows job used to stop at `mypy`, so `windows-latest` has sat in the
+matrix for the life of the project without once executing a test. With the type
+error fixed, all three Windows jobs run the suite and report
+`73 failed, 2094 passed, 2 skipped`.
+
+| class | count | example |
+| --- | --- | --- |
+| `AssertionError` | 53 | `assert 'D:/repo/root...c/mod.py::foo' == '/repo/root/src/mod.py::foo'` |
+| `ValueError` | 4 | root encoding rejects a drive-qualified path |
+| `TypeError` | 4 | |
+| `AttributeError` | 3 | |
+| `PermissionError` | 1 | `WinError 32`, a file held open during an incremental index |
+
+**Most of this is fixture portability rather than product portability.** The
+id-encoding tests root their fixtures at POSIX literals like `/repo/root`, which
+`Path` resolves to `D:/repo/root` on Windows, so `relativize_id` correctly
+declines to strip a root the fixture never gave it. The concentration says the
+same: `test_id_root_encoding.py`, `test_knowledge_root_encoding.py`,
+`test_chunk_repo_root_encoding.py`, and `test_graph_builder_receiver_types.py`
+account for 33 of the 73.
+
+**Two are not fixtures.** `test_every_telemetry_file_is_owner_only` asserts a
+POSIX permission model Windows does not have, and the `WinError 32` in
+`test_incremental_indexer_reuses_embeddings` is Windows refusing to replace a
+file another handle holds open, which is a real difference in how a generation
+swap must work there.
+
+**The decision comes before the work.** If Windows is a supported platform, this
+is a real defect and the two non-fixture failures are the interesting half. If
+it is not, `windows-latest` should leave the matrix, and the honest version of
+that is to say so rather than to keep a job that has never tested anything. Do
+not fix the 53 fixture assertions before that decision is made.
+
 ### BL-41 - A build whose embeddings all fail publishes a chunkless generation, and every check passes it
 
 **Severity:** Critical. **Found:** 2026-09-23, rebuilding this repository's own
