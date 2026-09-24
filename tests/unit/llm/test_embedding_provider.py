@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+import json
+import threading
+from collections.abc import Callable, Iterator
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -12,6 +18,7 @@ from knowcode.llm.embedding import (
     _VOYAGE_EMBED_DIMENSIONS,
     SUPPORTED_EMBEDDING_PROVIDERS,
     DummyEmbeddingProvider,
+    EmbeddingProvider,
     OpenAIEmbeddingProvider,
     VoyageAIEmbeddingProvider,
     build_provider_from_model,
@@ -403,31 +410,6 @@ def test_voyage_provider_reads_proxy_base_url_from_env(
     assert provider.base_url == "http://127.0.0.1:4000"
 
 
-def test_voyage_proxy_embeddings_keep_input_type(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """input_type rides in the request body through the OpenAI-compatible path."""
-    from types import SimpleNamespace
-
-    monkeypatch.setenv("VOYAGE_API_KEY_1", "test-key")
-    captured: dict[str, Any] = {}
-
-    class FakeEmbeddings:
-        def create(self, **kwargs: Any) -> Any:
-            captured.update(kwargs)
-            return SimpleNamespace(data=[SimpleNamespace(embedding=[1.0, 0.0])])
-
-    provider = VoyageAIEmbeddingProvider(
-        EmbeddingConfig(), base_url="http://127.0.0.1:4000"
-    )
-    provider._proxy_client = SimpleNamespace(embeddings=FakeEmbeddings())
-
-    provider.embed_single("query text")
-
-    assert captured["model"] == "voyage/voyage-code-3"
-    assert captured["extra_body"] == {"input_type": "query"}
-
-
 def test_voyage_provider_targets_litellm_proxy_by_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -442,6 +424,128 @@ def test_voyage_provider_targets_litellm_proxy_by_default(
 
     assert isinstance(provider, VoyageAIEmbeddingProvider)
     assert provider.base_url == "http://127.0.0.1:4000"
+
+
+# --- A proxied embedding request is one the proxy accepts (BL-42) -----------
+
+
+@pytest.fixture
+def stand_in(monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleNamespace]:
+    """Answer embedding requests on a local socket and record each one.
+
+    Voyage embeddings are pointed at it through ``VOYAGE_BASE_URL``. A test
+    that needs another provider pointed at it reads ``url``.
+    """
+    requests: list[dict[str, Any]] = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            requests.append(
+                {"authorization": self.headers["Authorization"], "body": body}
+            )
+            data = [
+                {"object": "embedding", "index": index, "embedding": [1.0, 0.0]}
+                for index in range(len(body["input"]))
+            ]
+            reply = json.dumps(
+                {"object": "list", "model": body["model"], "data": data, "usage": {}}
+            ).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(reply)))
+            self.end_headers()
+            self.wfile.write(reply)
+
+        def log_message(self, *args: Any) -> None:
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(
+        target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True
+    ).start()
+    url = f"http://127.0.0.1:{server.server_port}"
+    # httpx honours HTTP_PROXY even for 127.0.0.1 unless told otherwise.
+    monkeypatch.setenv("NO_PROXY", "127.0.0.1")
+    monkeypatch.setenv("no_proxy", "127.0.0.1")
+    monkeypatch.setenv("VOYAGE_BASE_URL", url)
+    try:
+        yield SimpleNamespace(url=url, requests=requests)
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.mark.parametrize(
+    ("section", "select"),
+    [
+        ("embedding_models", create_embedding_provider),
+        ("prose_embedding_models", create_prose_embedding_provider),
+        (None, create_embedding_provider),
+    ],
+    ids=["code-entry", "prose-entry", "no-config-file"],
+)
+def test_an_entry_that_names_no_key_sends_requests_the_proxy_accepts(
+    section: str | None,
+    select: Callable[..., EmbeddingProvider],
+    stand_in: SimpleNamespace,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The proxy authenticates with its own key and serves models by its own names.
+
+    Both halves failed against the real proxy while stubbed clients passed.
+    Sent the provider's key, LiteLLM reads it as a virtual key and, with no
+    database, answers ``400 No connected db``; asked for
+    ``voyage/voyage-code-3`` it answers ``Invalid model name``. So this reads
+    the requests off the wire rather than off the client object, for the
+    document path a build takes and the query path a search takes.
+    """
+    monkeypatch.setenv("LITELLM_MASTER_KEY", "proxy-key")
+    monkeypatch.setenv("VOYAGE_API_KEY_1", "provider-key")
+    if section is None:
+        app_config = AppConfig.default()
+    else:
+        path = tmp_path / "aimodels.yaml"
+        path.write_text(
+            f"{section}:\n  - name: voyage-code-3\n    provider: voyageai\n"
+        )
+        app_config = AppConfig.load(str(path))
+
+    provider = select(app_config=app_config)
+    provider.embed(["def add(a, b): return a + b"])
+    provider.embed_single("where is add defined")
+
+    document, query = stand_in.requests
+    for request in (document, query):
+        assert request["authorization"] == "Bearer proxy-key"
+        assert request["body"]["model"] == "voyage-code-3"
+    assert document["body"]["input"] == ["def add(a, b): return a + b"]
+    assert document["body"]["input_type"] == "document"
+    assert query["body"]["input"] == ["where is add defined"]
+    assert query["body"]["input_type"] == "query"
+
+
+def test_a_provider_called_directly_never_receives_the_proxy_key(
+    stand_in: SimpleNamespace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An OpenAI entry that names no key sends OpenAI's key, not the proxy's.
+
+    The proxy's key fronts every provider key the proxy holds. An earlier
+    default gave every embedding entry that key, whatever its provider.
+    """
+    monkeypatch.setenv("LITELLM_MASTER_KEY", "proxy-key")
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-key")
+    monkeypatch.setenv("OPENAI_BASE_URL", stand_in.url)
+    path = tmp_path / "aimodels.yaml"
+    path.write_text(
+        "embedding_models:\n  - name: text-embedding-3-small\n    provider: openai\n"
+    )
+
+    create_embedding_provider(app_config=AppConfig.load(str(path))).embed(["x"])
+
+    (request,) = stand_in.requests
+    assert request["authorization"] == "Bearer openai-key"
 
 
 # --- The dummy fallback announces itself, and stays distinguishable from

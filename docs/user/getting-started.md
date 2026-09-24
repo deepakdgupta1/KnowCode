@@ -33,9 +33,15 @@ embeddings and reranking (semantic search quality) and the LLM behind
 `knowcode ask`. Without an embedding key, search still works but is
 lexical-only.
 
+With the repository's `aimodels.yaml`, embeddings and `ask` go through a
+LiteLLM proxy at `http://127.0.0.1:4000`, which must serve `voyage-code-3` and
+`glm-5`. KnowCode sends the proxy's own key, and the proxy holds the provider
+keys. Without that file, the built-in chat models are Gemini, called directly
+with `GOOGLE_API_KEY`.
+
 ```bash
-export VOYAGE_API_KEY_1="..."   # embeddings + reranking (semantic search)
-export GLM_API_KEY="..."        # LLM for `knowcode ask` (default provider)
+export LITELLM_MASTER_KEY="..." # LiteLLM proxy key, for embeddings and `knowcode ask`
+export VOYAGE_API_KEY_1="..."   # reranking (semantic search quality)
 ```
 
 See [Configuration](configuration.md#environment-variables) for all variables

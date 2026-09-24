@@ -30,8 +30,8 @@ knowcode install
 uvx --python 3.12 --from "/path/to/KnowCode[all,mcp,voyageai]" knowcode doctor
 
 # Set API keys (only needed for the features you use; see aimodels.yaml)
-export GLM_API_KEY="..."        # LLM (GLM, default provider) for `knowcode ask`
-export VOYAGE_API_KEY_1="..."   # embeddings + reranking (semantic search)
+export LITELLM_MASTER_KEY="..." # LiteLLM proxy key, for embeddings and `knowcode ask` (GLM)
+export VOYAGE_API_KEY_1="..."   # reranking (semantic search)
 export OPENAI_API_KEY="..."     # embeddings (alternative to VoyageAI)
 export GOOGLE_API_KEY="..."     # LLM (Gemini) for `knowcode ask` (alternative)
 ```

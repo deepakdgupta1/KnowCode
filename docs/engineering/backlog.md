@@ -30,6 +30,81 @@ measured reason not to build something is worth more than silence.
 
 ## Open
 
+### BL-46 - BackgroundIndexer.stop() can outlive its budget when publication blocks
+
+**Severity:** Low–Medium (liveness and diagnostics, not data loss).
+**Found:** 2026-09-23, de-flaking `test_lifespan_shutdown_reports_incomplete_work`
+for PR #32.
+
+`stop(timeout)` in `src/knowcode/indexing/background_indexer.py` promises an
+upper bound on the whole drain, but after its deadline-bounded queue and
+thread joins it calls `_publish_pending()` unconditionally, and
+`ServiceWatchWriter.publish_pending()` in `src/knowcode/service_watch.py`
+acquires the writer's batch lock untimed — the same lock an in-flight commit
+holds across a whole commit and publication. A commit hung inside that lock
+stretches `stop()` — and the server's "One deadline" shutdown promise in
+`src/knowcode/api/lifecycle.py` — past any configured `shutdown_timeout`.
+
+**The flaky lifespan test masked this for the project's life.** Its 5-second
+gate timeout accidentally released the lock mid-shutdown. The defect surfaced
+when the gate was made untimed and the test deadlocked deterministically:
+the worker holds the lock and waits on the gate, shutdown waits untimed on
+the lock, and the test's `finally` never runs to open the gate.
+
+### BL-45 - The MCP server writes log lines onto stdout, which is its protocol channel
+
+**Severity:** Medium. **Found:** 2026-09-23, calling the MCP server through
+`knowcode-mcp-launch.sh` in a bare environment while closing
+[BL-42](backlog.md).
+
+`get_logger` gives every KnowCode logger a `StreamHandler(sys.stdout)` at INFO.
+A stdio MCP server's stdout carries JSON-RPC and nothing else, so any INFO line
+a request triggers lands in the protocol stream. Loading a generation logs
+`Rebuilt vector plane: 6567 vectors in 0.24s`, and the Python MCP client
+rejects it:
+
+```
+ValidationError: 1 validation error for JSONRPCMessage
+  Invalid JSON: trailing characters at line 1 column 5 [type=json_invalid,
+  input_value='2026-09-23 14:21:04,845 ...: 6567 vectors in 0.24s', input_type=str]
+```
+
+That client logs the line and carries on, so every call in the session still
+answered. A client that treats an unparseable line as fatal would drop the
+connection, and no MCP test would notice, because none reads stdout for
+stray lines.
+
+**Reproduce.** Start `knowcode mcp-server --store <store>` over stdio against a
+store whose vector plane is rebuilt at load, call any `knowcode_retrieve`
+action, and read the client's stderr for `JSONRPCMessage` validation errors.
+
+**The fix is likely one line, and the decision behind it is not.** Pointing the
+handler at `sys.stderr` fixes the server, and it also moves `knowcode build`'s
+warnings off stdout, where users see them today. Decide that logs belong on
+stderr for every command, which is the usual convention, before changing it.
+
+### BL-44 - Voyage reranking still calls VoyageAI directly
+
+**Severity:** Medium. **Found:** 2026-09-23, closing [BL-42](backlog.md).
+
+Chat and embeddings now reach their providers only through the LiteLLM proxy.
+The reranker does not. `get_voyageai_client` builds
+`voyageai.Client(api_key=...)` with no address, so every search that reranks
+calls `api.voyageai.com` with `VOYAGE_API_KEY_1`. That is the route the
+deployment's routing rule forbids, and it is the one reason KnowCode still reads
+`VOYAGE_API_KEY_1`.
+
+**Reproduce.** `SearchEngine` constructs `Reranker(use_voyageai=True, ...)`, and
+`src/knowcode/llm/voyageai_client.py` builds the client from a key alone. Any
+process with `VOYAGE_API_KEY_1` exported reranks against the provider directly.
+
+**Blocked on the proxy as well as the code.** The proxy serves `voyage-code-3`
+and three `voyage-4` embedding models and no reranker, so there is nothing to
+route to yet. Register `rerank-2.5` on the proxy first. Then send reranking to
+LiteLLM's `/rerank` endpoint with `LITELLM_MASTER_KEY`, and confirm the reranked
+order is unchanged on a fixed query set before deleting the direct client,
+because the reranker decides what a search returns.
+
 ### BL-43 - Windows CI has never run the test suite, and 73 tests fail when it does
 
 **Severity:** Medium, pending a scope decision that could make it either
@@ -68,6 +143,11 @@ is a real defect and the two non-fixture failures are the interesting half. If
 it is not, `windows-latest` should leave the matrix, and the honest version of
 that is to say so rather than to keep a job that has never tested anything. Do
 not fix the 53 fixture assertions before that decision is made.
+
+**Decision (2026-09-23):** the pytest step in `ci-cd.yml` runs with
+`continue-on-error` on `windows-latest`. Every PR was blocked on a suite that
+has never been green, while the failures stay visible as step annotations.
+Removing the flag belongs to closing this item; nothing else depends on it.
 
 ### BL-41 - A build whose embeddings all fail publishes a chunkless generation, and every check passes it
 
@@ -115,47 +195,29 @@ publish a generation whose chunk count is zero while its entity count is not,
 and should not exit 0 having said `Errors: 4`. `doctor` should compare chunks
 and vectors against entities rather than reporting a completeness flag that a
 zero satisfies. The first prevents the artifact; the second catches one that
-already exists, including one restored from elsewhere.
+already exists, including one restored from elsewhere. A third, carried over
+from BL-42, is for `doctor` to send one embedding request through the
+configured route, which turns a build that will fail silently into a readiness
+check that fails first.
 
 **Rolled back by hand, which is itself a gap.** There is no CLI to select a
 generation, so recovery meant editing `knowcode_index/current.json` to name the
 previous generation id and its `created_at`. That file is the publication
 pointer, and hand-editing it is the only lever a user has after a bad publish.
 
-### BL-42 - Voyage embeddings default to a proxy route that has no embedding model
-
-**Severity:** High. **Found:** 2026-09-23, the first build after `ccda0b0`.
-
-[BL-37](backlog.md) made `build_provider_from_model` default to
-`http://127.0.0.1:4000` when `VOYAGE_BASE_URL` is unset, so that Voyage traffic
-follows the same single-route contract as GLM. On the machine that change was
-written for, that proxy serves ten models and none of them embed:
-
-| probe | result |
-| --- | --- |
-| `GET /health/readiness` | `{"status":"healthy","db":"Not connected"}` |
-| `GET /v1/models` | 10 ids, all `glm-*`, none matching embed, voyage, bge, e5, or gte |
-| `POST /v1/embeddings` with `voyage-code-3` | `400 Invalid model name passed in model=voyage-code-3` |
-
-**The error the build surfaces is not the error that happened.** Indexing
-reported `400 No connected db`, which sends a reader after the proxy's database
-rather than its model list. The direct probe above names the real cause.
-
-**Not a verdict on BL-37's decision.** Routing embeddings through the proxy is
-the deployment's own rule. The defect is that the default now depends on proxy
-configuration this repository neither checks nor documents, and that the
-failure is silent enough to publish an empty index ([BL-41](backlog.md)).
-
-**Either fix ends it, and they are different promises.** Register a voyage
-embedding model on the proxy and the default works as BL-37 intended. Set
-`VOYAGE_BASE_URL` to the provider endpoint and builds work while leaving the
-routing contract unmet. A third option is for `doctor` to probe the configured
-embedding route once, which turns a silent build failure into a readiness check.
+**The next build then deleted the rollback target.** `retire_generations`
+keeps the two newest generation ids plus the current one, and ids sort by
+creation time. So the first good build after the rollback retired
+`20260911T015321471897Z-b09cf92b`, the generation the pointer had been rolled
+back to, and kept the unpublished chunkless `20260923T035253724946Z-a906d9ac`
+because it was newer. Retention counts age, not publication, so after a hand
+rollback the only good copy left was a backup made outside the index.
 
 ## Closed
 
 | Item | Resolution |
 | --- | --- |
+| Voyage embeddings on the proxy route sent the wrong key and the wrong model name, to a proxy with no embedding model (BL-42) | Fixed 2026-09-23, the day it was filed. **The filed diagnosis named one cause of three.** The row blamed the proxy's model list and called the build's `400 No connected db` misleading. That error was accurate. KnowCode sent `VOYAGE_API_KEY_1` as its bearer, and LiteLLM reads any bearer other than its master key as a virtual key, which with no database connected it answers with exactly that error. Probed against the live proxy once the operator had registered `voyage-code-3`, the master key with `voyage-code-3` returns 200 and 1,024 dimensions, `VOYAGE_API_KEY_1` or `GLM_API_KEY` returns `400 No connected db` whatever the model, and the master key with `voyage/voyage-code-3` returns `Invalid model name`. So three defects stacked. **The proxy served no embedding model**, which the operator fixed by registering `voyage-code-3` against `api.voyageai.com`. **Every proxy-routed entry named its provider's key**, so `aimodels.yaml` now names `LITELLM_MASTER_KEY` for `glm-5` and `voyage-code-3`. An entry that names no key now defaults to the key its route accepts, the proxy's only for `z-ai`, `glm` and `voyageai` (`_DEFAULT_KEY_ENV_BY_PROVIDER` in `knowcode/config.py`). The first version of that default ignored the provider, and code review caught it sending the proxy's key, which fronts every provider key the proxy holds, to OpenAI and OpenRouter entries. A `reranking_models` entry now names `VOYAGE_API_KEY_1`, because reranking still calls VoyageAI directly and doctor had stopped checking that key once embeddings no longer named it. The test session now scrubs credentials from the environment. Run with a proxy key exported and the route pointed at a stand-in, the suite sent it 1,449 embedding requests before being stopped after eighteen minutes, and with the scrub it sends none and passes in under a minute. The chat half had carried this since BL-26, so `knowcode ask` could not reach the proxy either, and now answers with only the proxy key in the environment. **`_embed_via_proxy` asked for `voyage/<model>`**, the prefix BL-26 said LiteLLM routes on, but a proxy serves only the names it registers, so it now sends the configured name. **Stubbed clients are why none of this showed.** BL-26's routing tests replaced the OpenAI client, so one of them pinned `voyage/voyage-code-3` as correct and none met the proxy's authentication. The new tests read requests off the wire from a local stand-in, for a code entry, a prose entry and the built-in default, on both the document and query paths, and for an OpenAI entry that must not receive the proxy's key. Each half of the fix was mutation-probed red. **Parity is measured, not assumed.** Rebuilt through the proxy, the served index holds 6,567 chunks and 6,567 vectors, where the build that found this held none. 886 of its chunks have text unchanged since generation `20260911T015321471897Z-b09cf92b` but were embedded again, and against the direct-API vectors stored there they score a median cosine of 0.99996 and a minimum of 0.9983. Thirteen sampled texts sent as `query` score a median of 0.981, and with no `input_type` 0.960, so the proxy forwards `input_type` and routing through it costs no retrieval quality. The reranker still bypasses the proxy, filed as [BL-44](backlog.md). Full suite 2,179 passed; `mypy --strict` and ruff clean. |
 | Voyage embeddings still bypassed the mandatory LiteLLM route by default (BL-37) | Fixed 2026-09-22. This follow-up supersedes BL-26's direct-client default: `build_provider_from_model` now uses `http://127.0.0.1:4000` when `VOYAGE_BASE_URL` is unset, matching the routing module's single-route contract and the GLM client. `VOYAGE_BASE_URL` remains the deployment override. Pinned by `test_voyage_provider_targets_litellm_proxy_by_default`. |
 | `doctor` crashed on a configured embedding model it cannot build (BL-36) | Fixed 2026-09-11, the day it was filed. An `embedding_models` entry naming `provider: local` with its key exported cleared the key gate in `create_embedding_provider`, reached `build_provider_from_model`, and raised `NotImplementedError` out through `effective_embedding_config` into `_check_semantic_index`. **The blast radius was wider than the command's exit code.** `_check_semantic_index` is called unguarded, so the traceback also cost the four checks sequenced after it -- disk footprint, agent rules, supported languages, freshness -- and a diagnostic that reports less than it ran is the one thing it must not do. Selection now steps over an entry this build cannot construct and continues to the next model, which is what "first usable model" always meant. **The skip predicate is `embedding_config_for_model` itself, not a catch around the build**, for two reasons: it is the same function doctor's Config check calls, so "skipped by selection" and "named by the diagnostic" cannot drift apart the way BL-35's two yardsticks could; and catching around the construction would swallow a genuine client error as though it were an unsupported provider. The prose plane had the same defect at the same gate -- `create_prose_embedding_provider` would have raised out of a *build* rather than falling through to the code embedder its own docstring promises as step 3 -- so it is fixed there too. **Reporting it is the Config check's job, not the embedding comparison's.** BL-35's comparison provably cannot catch this case: `configured_embedding_config` steps over the unusable entry too, so both yardsticks read `dummy` and agree, exactly the vacuous comparison BL-35 existed to remove. Severity there is what the bad entry costs rather than that it exists -- beside a buildable entry it is dead weight selection skips (`warn`), as the last one standing it means nothing configured can ever embed (`fail`), and its hint names the providers that do work, pinned by a test so the advice cannot drift into a dead spelling. `_warn_dummy_fallback` had to change with it: its BL-35 sentence asserts no key is set, which is false on this path, so it now names the reason per entry. Verified on the original two-line config: `doctor` completes all fourteen checks and fails Config naming `bge-m3`.
 | `doctor` vouched for a dummy semantic index when credentials were absent, and `build` never said it had selected one (BL-35) | Fixed 2026-09-11. `_check_semantic_index` compared the manifest's embedding label against `effective_embedding_config`, which resolves through the same key-gated fallback the build did, so with no key both sides read `dummy`, the comparison was vacuous, and doctor printed `[PASS] Semantic index ... dummy/deterministic-sha256` over vectors carrying no semantic signal. BL-27's honest labels could not catch it alone, because the value they are compared against degrades the same way. The check now holds two yardsticks from one module, so they cannot drift: `effective_embedding_config` still answers what this process would query with (which is what catches a real index the running process has no key to read), and the new `configured_embedding_config` answers what `aimodels.yaml` asks for, key-independent, built from the `embedding_config_for_model` derivation `build_provider_from_model` now also uses. A manifest recording `dummy` while a real embedder is configured fails, whether or not a key happens to be present. Configuring no embedding model at all keeps passing, because then the dummy is the intent rather than a substitution. **The hint had to change too**: `knowcode build` does not clear this failure, since the rebuild selects the same fallback, so with no usable key the hint names the key first. **The build half** is fixed at selection rather than in the reporting, because selection is the only place that knows the substitution happened and every caller (build, retrieval, MCP, the API) passes through it: `create_embedding_provider` now logs a warning naming the fallback, the models it skipped, and their key variables, beside the git-commit warning that proved the command was not generally quiet. Verified end to end on a two-file corpus: same store, same command, only the environment differing, the BL-35 table now reads FAIL/FAIL where it read PASS/FAIL. Seven integration and e2e tests were asserting the old verdict; each builds offline and then called `run_doctor` with no config, silently inheriting this repository's own `aimodels.yaml` from the cwd — a verdict that depended on a file outside the fixture. They now write an explicit no-embedding-model config (`tests/helpers/offline_config.py`, placed beside the store root rather than inside it, where freshness would read it as a changed source), so an offline test declares that it is offline. Pinned by six doctor tests (both key states, the configured-dummy escape hatch, a real index the process cannot query, and both hints) and five embedding tests, among them the relational one holding `configured != effective` exactly when the key is absent, which is the property the whole check rests on. Each new guard was mutation-probed red. Full suite 2,159 passed; `mypy --strict` and ruff clean. |

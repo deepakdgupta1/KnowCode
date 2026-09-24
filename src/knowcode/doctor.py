@@ -11,7 +11,7 @@ import sqlite3
 import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Any, Literal, Optional, TextIO, cast
 
 from knowcode.config import AppConfig
 from knowcode.data_models import EmbeddingConfig
@@ -1075,7 +1075,15 @@ async def _check_mcp_handshake(
     import tempfile
 
     with tempfile.TemporaryFile(mode="w+t") as errlog:
-        async with stdio_client(params, errlog=errlog) as (read_stream, write_stream):
+        # typeshed types TemporaryFile as _TemporaryFileWrapper[str] on
+        # Windows but IO[Any] on POSIX, and only the POSIX spelling is
+        # assignable to stdio_client's ``errlog: TextIO``. The object is a
+        # text-mode file on every platform; the cast asserts what the win32
+        # stub cannot express.
+        async with stdio_client(params, errlog=cast(TextIO, errlog)) as (
+            read_stream,
+            write_stream,
+        ):
             async with ClientSession(read_stream, write_stream) as session:
                 await asyncio.wait_for(session.initialize(), timeout=timeout_seconds)
                 tools_result = await asyncio.wait_for(

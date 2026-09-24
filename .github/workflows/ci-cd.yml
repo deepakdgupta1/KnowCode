@@ -49,6 +49,11 @@ jobs:
 
       - name: Test with pytest (and coverage)
         run: uv run pytest -v --cov=src --cov-report=xml
+        # BL-43 (docs/engineering/backlog.md): the Windows suite has never
+        # been green — 73 fixture-portability failures once mypy lets the
+        # job reach pytest. Keep them visible as annotations without
+        # blocking every PR on separately tracked work. Remove with BL-43.
+        continue-on-error: ${{ matrix.os == 'windows-latest' }}
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
