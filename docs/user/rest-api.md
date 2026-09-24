@@ -21,12 +21,12 @@ be used to rotate rate-limit buckets; proxied deployment is not supported.
 |---|---|
 | `GET /api/v1/health` | Liveness check |
 | `GET /api/v1/stats` | Entity/relationship counts by kind |
-| `GET /api/v1/search?q=<pattern>` | Lexical entity search |
-| `GET /api/v1/context?target=<name>&task_type=<type>` | Context bundle for a named entity |
+| `GET /api/v1/search?q=<pattern>` | Lexical entity search (`limit`: 1–50, default 20) |
+| `GET /api/v1/context?target=<name>&task_type=<type>` | Context bundle for a named entity (`max_tokens`: 100–8000, default 2000) |
 | `GET /api/v1/entities/{entity_id}` | Raw entity detail |
 | `GET /api/v1/callers/{entity_id}` | Direct callers |
 | `GET /api/v1/callees/{entity_id}` | Direct callees |
-| `POST /api/v1/context/query` | Semantic query with full retrieval orchestration (same pipeline as `knowcode ask`) |
+| `POST /api/v1/context/query` | Semantic query — shares the retrieval orchestration with `knowcode ask`, but returns ranked chunks instead of the LLM answer bundle |
 | `POST /api/v1/reload` | Reload the knowledge store from disk |
 | `GET /api/v1/freshness` | Whether store/index are stale relative to sources |
 
@@ -34,8 +34,28 @@ be used to rotate rate-limit buckets; proxied deployment is not supported.
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /api/v1/trace_calls/{entity_id}?direction=callers\|callees&depth=1-5` | Multi-hop BFS call-graph traversal |
-| `GET /api/v1/impact/{entity_id}?max_depth=<n>` | Transitive deletion-impact analysis with risk score |
+| `GET /api/v1/trace_calls/{entity_id}?direction=callers\|callees&depth=<n>&max_results=<n>` | Multi-hop BFS call-graph traversal (`direction`: default `callees`; `depth`: 1–5, default 1; `max_results`: 1–100, default 50) |
+| `GET /api/v1/impact/{entity_id}?max_depth=<n>` | Transitive deletion-impact analysis with risk score (`max_depth`: 1–5, default 3) |
+
+#### `POST /api/v1/context/query`
+
+**Request parameters** (JSON body):
+
+| Field | Type | Default | Bounds | Notes |
+|---|---|---|---|---|
+| `query` | string | required | — | |
+| `limit` | int | 5 | 1–20 | max chunks returned |
+| `max_tokens` | int | 4000 | ≤ 8000 | hard token budget for the response |
+| `expand_deps` | bool | true | — | pull in dependency context |
+| `task_type` | enum | `general` | no `auto` on REST | one of explain/debug/extend/review/locate/general |
+
+**Token-budget truncation.** The response is capped to `max_tokens`; chunk
+contents are truncated with a `\n... [TRUNCATED]` marker (minimum 25 tokens
+of truncatable content is kept). The budget also flows into retrieval ranking
+(`api/api.py:196-207,263-282`).
+
+**Prerequisite failures return HTTP 412** with `{"message", "code", "hint"}` —
+e.g. a missing knowledge store or semantic index (`api/api.py:208-212`).
 
 The machine-readable schema is served at `/openapi.json`.
 
@@ -52,8 +72,10 @@ changes.
 
 **Freshness.** `GET /api/v1/freshness` compares artifact state against the
 newest source change and reports `is_stale` with reasons
-(`store_stale_source_changed`, `index_stale_source_changed`, …). Retrieval
-responses carry the same block: stale results are flagged, not blocked.
+(`store_stale_source_changed`, `index_stale_source_changed`, …). The REST
+retrieval responses carry **no** freshness block — only `GET /api/v1/freshness`
+reports staleness on this surface. (The MCP surface is different:
+`knowcode_retrieve` responses embed a `freshness` block.)
 Recovery: `knowcode build .`, or `POST /api/v1/reload` after rebuilding
 artifacts out-of-band.
 

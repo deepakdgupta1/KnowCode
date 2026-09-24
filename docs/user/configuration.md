@@ -21,7 +21,7 @@ KnowCode loads configuration in this order:
 natural_language_models:
   - name: glm-5
     provider: z-ai            # or: google, openrouter, mistralai, openai
-    api_key_env: GLM_API_KEY  # env var holding this model's key
+    api_key_env: LITELLM_MASTER_KEY  # env var holding the key its requests send
     rpm_free_tier_limit: 99999   # client-side rate limiter, requests/min
     rpd_free_tier_limit: 99999   # client-side rate limiter, requests/day
 
@@ -29,16 +29,37 @@ natural_language_models:
 embedding_models:
   - name: voyage-code-3
     provider: voyageai
-    api_key_env: VOYAGE_API_KEY_1
+    api_key_env: LITELLM_MASTER_KEY
     tokens_free_tier_limit: 200000000
 
-# Reranking (cross-encoder) and evaluation models use the same shape:
-# reranking_models: [...] / eval_models: [...]
+# Reranking calls VoyageAI directly, so it names the provider's own key
+reranking_models:
+  - name: rerank-2.5
+    provider: voyageai
+    api_key_env: VOYAGE_API_KEY_1
+
+# Evaluation models use the same shape: eval_models: [...]
 ```
+
+`z-ai` chat and `voyageai` embedding traffic goes to the LiteLLM proxy, which
+holds the provider keys itself. Those entries therefore name the proxy's key,
+not the provider's, and the proxy rejects a provider key with
+`400 No connected db`. Reranking still calls VoyageAI directly
+([BL-44](../engineering/backlog.md)), so its entries name `VOYAGE_API_KEY_1`.
+
+An entry that names no key reads the one its route accepts. Chat and embedding
+entries for `z-ai`, `glm` and `voyageai` read `LITELLM_MASTER_KEY`, `openai`
+reads `OPENAI_API_KEY`, `openrouter` and `mistralai` read `OPENROUTER_API_KEY`,
+and `google` reads `GOOGLE_API_KEY`. Reranking entries read `VOYAGE_API_KEY_1`.
+Only entries whose traffic goes to the proxy default to the proxy's key, so it
+is never sent to another host.
 
 The rate-limiter fields keep `ask` inside your provider's free tier; when a
 provider reports resource exhaustion, KnowCode fails over to the next
-configured model.
+configured model. `prose_embedding_models` is also a recognized top-level
+section and uses the same model-entry shape as `embedding_models`. The legacy
+`models:` top-level key is still accepted as a synonym for
+`natural_language_models`.
 
 ### `config` section — retrieval behavior
 
@@ -50,8 +71,12 @@ configured model.
 | `hybrid_alpha` | `0.2` | Sparse/dense blend in hybrid search. `0.2` = 80% BM25 lexical / 20% vector similarity. Raise toward `1.0` to favor semantic similarity over exact-identifier matching. |
 | `reranker_top_k_multiplier` | `5` | The cross-encoder reranks the top `limit × multiplier` fused candidates. |
 | `vector_backend` | `lancedb` | Vector store backend: `lancedb` or `faiss`. |
+| `entity_source` | `disk` | Where `entities.source_code` is served from. `disk` reads it from the working tree, verifying it against the stored content hash and failing closed on drift; `stored` serves the persisted copy, which may be stale. |
 
-Unknown keys in `config` warn (or raise in strict server/MCP mode).
+Unknown keys in `config` warn (or raise in strict server/MCP mode). Values
+are validated at load: `sufficiency_threshold`, `routing_quality_floor`, and
+`hybrid_alpha` must lie in [0, 1], and `reranker_top_k_multiplier` must lie in
+[1, 100]. Unknown top-level keys are treated exactly the same way.
 
 ### `preflight` section
 
@@ -68,16 +93,19 @@ defaults use:
 
 | Variable | Used for |
 |---|---|
-| `GLM_API_KEY` | Default chat model (`z-ai` provider) for `ask` |
-| `GLM_BASE_URL` | Optional address override for the LiteLLM proxy that GLM/z-ai chat traffic targets (default `http://127.0.0.1:4000`) |
-| `VOYAGE_API_KEY_1` | voyage-code-3 embeddings + rerank-2.5 cross-encoder |
-| `VOYAGE_BASE_URL` | Optional: route voyage embeddings through an OpenAI-compatible proxy (e.g. the LiteLLM proxy at `http://127.0.0.1:4000`); unset = direct VoyageAI API |
+| `LITELLM_MASTER_KEY` | Key the LiteLLM proxy authenticates callers with, sent by the default chat model (`z-ai`) for `ask` and by voyage-code-3 embeddings |
+| `GLM_BASE_URL` | Optional address override for the LiteLLM proxy that GLM/z-ai chat traffic targets (default `http://127.0.0.1:4000`). The entry's key is sent there, so it must name a LiteLLM proxy. |
+| `VOYAGE_API_KEY_1` | rerank-2.5 cross-encoder, which still calls VoyageAI directly ([BL-44](../engineering/backlog.md)) |
+| `VOYAGE_BASE_URL` | Optional address override for the LiteLLM proxy that voyage embeddings target (default `http://127.0.0.1:4000`). The entry's key is sent there, so it must name a LiteLLM proxy. |
 | `GOOGLE_API_KEY` | Optional Gemini chat models |
 | `KNOWCODE_ROUTING_POLICY_ARTIFACT` / `KNOWCODE_ROUTING_POLICY_SHA256` | Path + expected SHA-256 of the machine-verified routing policy artifact (see [retrieval evals](../engineering/testing.md)) |
 | `KNOWCODE_TELEMETRY_RAW` | `1` enables opt-in raw query capture — see [telemetry](telemetry.md#opt-in-raw-query-capture) |
+| `KNOWCODE_TESTING` | Test-only: set by the test suite so telemetry writes run synchronously instead of on the background pool. Never set it in normal use. |
 
-`.env.example` in the repository root documents the same variables and is a
-safe template to copy to `.env` (gitignored).
+`.env.example` documents the API keys and base URLs and mentions
+`KNOWCODE_TELEMETRY_RAW` and `KNOWCODE_TESTING` in comments; this page is the
+canonical documentation of the `KNOWCODE_*` behavioral variables. It is a safe
+template to copy to `.env` (gitignored).
 
 ## Optional extras
 

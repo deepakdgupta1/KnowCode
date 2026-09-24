@@ -1,10 +1,20 @@
 import shutil
+import subprocess
 import tempfile
 from pathlib import Path
 from dataclasses import dataclass
 
 from knowcode.indexing.indexer import Indexer
 from knowcode.storage.sqlite_chunk_repository import SqliteChunkRepository
+
+
+def _git(root: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", *args],
+        cwd=str(root),
+        check=True,
+        capture_output=True,
+    )
 
 
 class MockEmbeddingProvider:
@@ -37,21 +47,16 @@ def test_incremental_indexer_reuses_embeddings() -> None:
         file1.write_text("def foo():\n    return 42\n")
 
         # Git init and commit
-        import subprocess
-
-        subprocess.run(["git", "init"], cwd=str(repo_dir), check=True)
-        subprocess.run(
-            ["git", "config", "user.email", "test@example.com"],
-            cwd=str(repo_dir),
-            check=True,
-        )
-        subprocess.run(
-            ["git", "config", "user.name", "Test"], cwd=str(repo_dir), check=True
-        )
-        subprocess.run(["git", "add", "."], cwd=str(repo_dir), check=True)
-        subprocess.run(
-            ["git", "commit", "-m", "initial"], cwd=str(repo_dir), check=True
-        )
+        _git(repo_dir, "init")
+        # A repo born in a temp dir has no identity, and a CI runner has no
+        # global one; ambient git config must never decide whether this test
+        # can run. gpgsign off for the same reason: a dev box that enforces
+        # signing globally would fail here just like the runner does.
+        _git(repo_dir, "config", "user.email", "test@example.com")
+        _git(repo_dir, "config", "user.name", "Test")
+        _git(repo_dir, "config", "commit.gpgsign", "false")
+        _git(repo_dir, "add", ".")
+        _git(repo_dir, "commit", "-m", "initial")
 
         # 2. Build initial index
         index_dir = Path(temp_dir) / "index"
@@ -70,8 +75,8 @@ def test_incremental_indexer_reuses_embeddings() -> None:
         file2.write_text("def bar():\n    return 'hello'\n")
 
         # Commit the change
-        subprocess.run(["git", "add", "."], cwd=str(repo_dir), check=True)
-        subprocess.run(["git", "commit", "-m", "second"], cwd=str(repo_dir), check=True)
+        _git(repo_dir, "add", ".")
+        _git(repo_dir, "commit", "-m", "second")
 
         # 4. Incremental update
         provider2 = MockEmbeddingProvider()
@@ -88,8 +93,8 @@ def test_incremental_indexer_reuses_embeddings() -> None:
 
         # Let's modify file1 but keep a chunk the same
         file1.write_text("def foo():\n    return 42\n\ndef baz():\n    return 99\n")
-        subprocess.run(["git", "add", "."], cwd=str(repo_dir), check=True)
-        subprocess.run(["git", "commit", "-m", "third"], cwd=str(repo_dir), check=True)
+        _git(repo_dir, "add", ".")
+        _git(repo_dir, "commit", "-m", "third")
 
         indexer2.save(index_dir)
 

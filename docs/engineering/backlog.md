@@ -30,6 +30,194 @@ measured reason not to build something is worth more than silence.
 
 ## Open
 
+### BL-46 - BackgroundIndexer.stop() can outlive its budget when publication blocks
+
+**Severity:** Low–Medium (liveness and diagnostics, not data loss).
+**Found:** 2026-09-23, de-flaking `test_lifespan_shutdown_reports_incomplete_work`
+for PR #32.
+
+`stop(timeout)` in `src/knowcode/indexing/background_indexer.py` promises an
+upper bound on the whole drain, but after its deadline-bounded queue and
+thread joins it calls `_publish_pending()` unconditionally, and
+`ServiceWatchWriter.publish_pending()` in `src/knowcode/service_watch.py`
+acquires the writer's batch lock untimed — the same lock an in-flight commit
+holds across a whole commit and publication. A commit hung inside that lock
+stretches `stop()` — and the server's "One deadline" shutdown promise in
+`src/knowcode/api/lifecycle.py` — past any configured `shutdown_timeout`.
+
+**The flaky lifespan test masked this for the project's life.** Its 5-second
+gate timeout accidentally released the lock mid-shutdown. The defect surfaced
+when the gate was made untimed and the test deadlocked deterministically:
+the worker holds the lock and waits on the gate, shutdown waits untimed on
+the lock, and the test's `finally` never runs to open the gate.
+
+**BL-39 is the same overrun.** It was found a day earlier, from this test's CI
+failures, and filed on `ci/green-pipeline` with a local reproduction. The two
+rows were filed on separate branches and merged together. Read both before
+fixing either.
+
+### BL-45 - The MCP server writes log lines onto stdout, which is its protocol channel
+
+**Severity:** Medium. **Found:** 2026-09-23, calling the MCP server through
+`knowcode-mcp-launch.sh` in a bare environment while closing
+[BL-42](backlog.md).
+
+`get_logger` gives every KnowCode logger a `StreamHandler(sys.stdout)` at INFO.
+A stdio MCP server's stdout carries JSON-RPC and nothing else, so any INFO line
+a request triggers lands in the protocol stream. Loading a generation logs
+`Rebuilt vector plane: 6567 vectors in 0.24s`, and the Python MCP client
+rejects it:
+
+```
+ValidationError: 1 validation error for JSONRPCMessage
+  Invalid JSON: trailing characters at line 1 column 5 [type=json_invalid,
+  input_value='2026-09-23 14:21:04,845 ...: 6567 vectors in 0.24s', input_type=str]
+```
+
+That client logs the line and carries on, so every call in the session still
+answered. A client that treats an unparseable line as fatal would drop the
+connection, and no MCP test would notice, because none reads stdout for
+stray lines.
+
+**Reproduce.** Start `knowcode mcp-server --store <store>` over stdio against a
+store whose vector plane is rebuilt at load, call any `knowcode_retrieve`
+action, and read the client's stderr for `JSONRPCMessage` validation errors.
+
+**The fix is likely one line, and the decision behind it is not.** Pointing the
+handler at `sys.stderr` fixes the server, and it also moves `knowcode build`'s
+warnings off stdout, where users see them today. Decide that logs belong on
+stderr for every command, which is the usual convention, before changing it.
+
+### BL-44 - Voyage reranking still calls VoyageAI directly
+
+**Severity:** Medium. **Found:** 2026-09-23, closing [BL-42](backlog.md).
+
+Chat and embeddings now reach their providers only through the LiteLLM proxy.
+The reranker does not. `get_voyageai_client` builds
+`voyageai.Client(api_key=...)` with no address, so every search that reranks
+calls `api.voyageai.com` with `VOYAGE_API_KEY_1`. That is the route the
+deployment's routing rule forbids, and it is the one reason KnowCode still reads
+`VOYAGE_API_KEY_1`.
+
+**Reproduce.** `SearchEngine` constructs `Reranker(use_voyageai=True, ...)`, and
+`src/knowcode/llm/voyageai_client.py` builds the client from a key alone. Any
+process with `VOYAGE_API_KEY_1` exported reranks against the provider directly.
+
+**Blocked on the proxy as well as the code.** The proxy serves `voyage-code-3`
+and three `voyage-4` embedding models and no reranker, so there is nothing to
+route to yet. Register `rerank-2.5` on the proxy first. Then send reranking to
+LiteLLM's `/rerank` endpoint with `LITELLM_MASTER_KEY`, and confirm the reranked
+order is unchanged on a fixed query set before deleting the direct client,
+because the reranker decides what a search returns.
+
+### BL-43 - Windows CI has never run the test suite, and 73 tests fail when it does
+
+**Severity:** Medium, pending a scope decision that could make it either
+Critical or nothing at all. **Found:** 2026-09-23 in run `35816034884`, the
+first run in which a Windows job ever reached `pytest`.
+
+Every Windows job used to stop at `mypy`, so `windows-latest` has sat in the
+matrix for the life of the project without once executing a test. With the type
+error fixed, all three Windows jobs run the suite and report
+`73 failed, 2094 passed, 2 skipped`.
+
+| class | count | example |
+| --- | --- | --- |
+| `AssertionError` | 53 | `assert 'D:/repo/root...c/mod.py::foo' == '/repo/root/src/mod.py::foo'` |
+| `ValueError` | 4 | root encoding rejects a drive-qualified path |
+| `TypeError` | 4 | |
+| `AttributeError` | 3 | |
+| `PermissionError` | 1 | `WinError 32`, a file held open during an incremental index |
+
+**Most of this is fixture portability rather than product portability.** The
+id-encoding tests root their fixtures at POSIX literals like `/repo/root`, which
+`Path` resolves to `D:/repo/root` on Windows, so `relativize_id` correctly
+declines to strip a root the fixture never gave it. The concentration says the
+same: `test_id_root_encoding.py`, `test_knowledge_root_encoding.py`,
+`test_chunk_repo_root_encoding.py`, and `test_graph_builder_receiver_types.py`
+account for 33 of the 73.
+
+**Two are not fixtures.** `test_every_telemetry_file_is_owner_only` asserts a
+POSIX permission model Windows does not have, and the `WinError 32` in
+`test_incremental_indexer_reuses_embeddings` is Windows refusing to replace a
+file another handle holds open, which is a real difference in how a generation
+swap must work there.
+
+**The decision comes before the work.** If Windows is a supported platform, this
+is a real defect and the two non-fixture failures are the interesting half. If
+it is not, `windows-latest` should leave the matrix, and the honest version of
+that is to say so rather than to keep a job that has never tested anything. Do
+not fix the 53 fixture assertions before that decision is made.
+
+**Decision (2026-09-23):** the pytest step in `ci-cd.yml` runs with
+`continue-on-error` on `windows-latest`. Every PR was blocked on a suite that
+has never been green, while the failures stay visible as step annotations.
+Removing the flag belongs to closing this item; nothing else depends on it.
+
+### BL-41 - A build whose embeddings all fail publishes a chunkless generation, and every check passes it
+
+**Severity:** Critical. **Found:** 2026-09-23, rebuilding this repository's own
+served index after [BL-37](backlog.md) changed the default embedding route.
+
+Every embedding call failed. The build printed four warnings, then this:
+
+```
+✓ Build complete!
+  Entities: 4956
+  Relationships: 26512
+  Errors: 4
+  Indexed chunks: 0
+```
+
+It exited 0, published generation `20260923T035253724946Z-a906d9ac`, and
+retired a superseded one. `doctor` over that generation then passed every
+single check:
+
+```
+[PASS] Index generation: ... is complete (4956 entities, 0 chunks, 0 vectors; 2 retained)
+[PASS] Semantic index: ... (schema v8, voyageai/voyage-code-3, dimension 1024)
+[PASS] Freshness: Knowledge store and semantic index are fresh and match the source tree.
+```
+
+**A generation with no chunks has no retrieval at all.** The semantic, FTS, and
+exact planes all read chunk rows, so this store answers nothing, and the MCP
+server serving it says nothing is wrong. "Complete" is asserted over a count of
+zero, "Semantic index" reports the configured model rather than whether any
+vector exists, and "Freshness" is true and irrelevant: the artifacts are newer
+than the source and empty.
+
+This is the [BL-35](backlog.md) family with the label problem solved and the
+count problem left. BL-35 made the recorded provider honest; nothing yet
+compares chunk or vector counts against the entities they were built from.
+
+**Reproduce.** Point the embedding provider at an endpoint that rejects every
+request, then `knowcode build . -i "docs/**" -i "*.md"` and `knowcode doctor`
+over the published generation. [BL-42](backlog.md) is one way to arrange that
+and was how this was found.
+
+**Two candidate gates, and they are not the same gate.** `build` should not
+publish a generation whose chunk count is zero while its entity count is not,
+and should not exit 0 having said `Errors: 4`. `doctor` should compare chunks
+and vectors against entities rather than reporting a completeness flag that a
+zero satisfies. The first prevents the artifact; the second catches one that
+already exists, including one restored from elsewhere. A third, carried over
+from BL-42, is for `doctor` to send one embedding request through the
+configured route, which turns a build that will fail silently into a readiness
+check that fails first.
+
+**Rolled back by hand, which is itself a gap.** There is no CLI to select a
+generation, so recovery meant editing `knowcode_index/current.json` to name the
+previous generation id and its `created_at`. That file is the publication
+pointer, and hand-editing it is the only lever a user has after a bad publish.
+
+**The next build then deleted the rollback target.** `retire_generations`
+keeps the two newest generation ids plus the current one, and ids sort by
+creation time. So the first good build after the rollback retired
+`20260911T015321471897Z-b09cf92b`, the generation the pointer had been rolled
+back to, and kept the unpublished chunkless `20260923T035253724946Z-a906d9ac`
+because it was newer. Retention counts age, not publication, so after a hand
+rollback the only good copy left was a backup made outside the index.
+
 ### BL-38 - Retrieval quality fell between two commits and the cause is unlocated
 
 **Severity:** High. **Found:** 2026-09-09 in `knowcode-evals`, re-binding the
@@ -152,6 +340,13 @@ worker's, it first waits until `replace_file` has been entered a second time.
 The final assertion then fails on every run, and timing the `TestClient` exit
 shows the ten seconds.
 
+**BL-46 is the same overrun.** PR #32 hit it on 2026-09-23 while reworking
+this test, and changed the test so its precondition no longer rests on the
+clock (`7a20eee`, `64dbd45`). The description and the Reproduce recipe above
+match the test as of `5721e5d`, before that rework. The wait in `stop()` is
+still unfixed. The two rows were filed on separate branches and merged
+together. Read both before fixing either.
+
 ### BL-40 - A watched edit did not reach the graph once, on one CI job
 
 **Severity:** Medium. **Found:** 2026-09-15 in CI run `34928841437`, job
@@ -174,7 +369,9 @@ regression rather than a flaky assertion.
 
 | Item | Resolution |
 | --- | --- |
-| CI committed a changelog that is not in version control, and failed on every push to `main` (BL-46) | Closed 2026-09-23 by removing the commit step, not by tracking the file again. `82fdc14` stopped tracking `CHANGELOG.md` and `.gitignore` lists it, so the `Generate Changelog` job's `git add CHANGELOG.md` has failed ever since. The job still generates the entry and uploads it as the `changelog-update` artifact, and the workflow token drops to `contents: read` because nothing writes to the repository any more. **The changelog now persists nowhere.** The artifact expires with its run, the `changelog_summary` dispatch input only shapes that artifact, and the one copy holding the `[Unreleased]` section is a maintainer's untracked local file. Whether to track it again is a release-notes decision rather than a CI one, and it belongs to whoever owns releases. |
+| CI committed a changelog that is not in version control, and failed on every push to `main` (BL-47) | Closed 2026-09-23 by removing the commit step, not by tracking the file again. `82fdc14` stopped tracking `CHANGELOG.md` and `.gitignore` lists it, so the `Generate Changelog` job's `git add CHANGELOG.md` has failed ever since. The job still generates the entry and uploads it as the `changelog-update` artifact, and the workflow token drops to `contents: read` because nothing writes to the repository any more. **The changelog now persists nowhere.** The artifact expires with its run, the `changelog_summary` dispatch input only shapes that artifact, and the one copy holding the `[Unreleased]` section is a maintainer's untracked local file. Whether to track it again is a release-notes decision rather than a CI one, and it belongs to whoever owns releases. Filed as BL-46 on `ci/green-pipeline`. PR #32 filed a different BL-46 the same day and landed first, so this row took the next free id at merge. |
+| Voyage embeddings on the proxy route sent the wrong key and the wrong model name, to a proxy with no embedding model (BL-42) | Fixed 2026-09-23, the day it was filed. **The filed diagnosis named one cause of three.** The row blamed the proxy's model list and called the build's `400 No connected db` misleading. That error was accurate. KnowCode sent `VOYAGE_API_KEY_1` as its bearer, and LiteLLM reads any bearer other than its master key as a virtual key, which with no database connected it answers with exactly that error. Probed against the live proxy once the operator had registered `voyage-code-3`, the master key with `voyage-code-3` returns 200 and 1,024 dimensions, `VOYAGE_API_KEY_1` or `GLM_API_KEY` returns `400 No connected db` whatever the model, and the master key with `voyage/voyage-code-3` returns `Invalid model name`. So three defects stacked. **The proxy served no embedding model**, which the operator fixed by registering `voyage-code-3` against `api.voyageai.com`. **Every proxy-routed entry named its provider's key**, so `aimodels.yaml` now names `LITELLM_MASTER_KEY` for `glm-5` and `voyage-code-3`. An entry that names no key now defaults to the key its route accepts, the proxy's only for `z-ai`, `glm` and `voyageai` (`_DEFAULT_KEY_ENV_BY_PROVIDER` in `knowcode/config.py`). The first version of that default ignored the provider, and code review caught it sending the proxy's key, which fronts every provider key the proxy holds, to OpenAI and OpenRouter entries. A `reranking_models` entry now names `VOYAGE_API_KEY_1`, because reranking still calls VoyageAI directly and doctor had stopped checking that key once embeddings no longer named it. The test session now scrubs credentials from the environment. Run with a proxy key exported and the route pointed at a stand-in, the suite sent it 1,449 embedding requests before being stopped after eighteen minutes, and with the scrub it sends none and passes in under a minute. The chat half had carried this since BL-26, so `knowcode ask` could not reach the proxy either, and now answers with only the proxy key in the environment. **`_embed_via_proxy` asked for `voyage/<model>`**, the prefix BL-26 said LiteLLM routes on, but a proxy serves only the names it registers, so it now sends the configured name. **Stubbed clients are why none of this showed.** BL-26's routing tests replaced the OpenAI client, so one of them pinned `voyage/voyage-code-3` as correct and none met the proxy's authentication. The new tests read requests off the wire from a local stand-in, for a code entry, a prose entry and the built-in default, on both the document and query paths, and for an OpenAI entry that must not receive the proxy's key. Each half of the fix was mutation-probed red. **Parity is measured, not assumed.** Rebuilt through the proxy, the served index holds 6,567 chunks and 6,567 vectors, where the build that found this held none. 886 of its chunks have text unchanged since generation `20260911T015321471897Z-b09cf92b` but were embedded again, and against the direct-API vectors stored there they score a median cosine of 0.99996 and a minimum of 0.9983. Thirteen sampled texts sent as `query` score a median of 0.981, and with no `input_type` 0.960, so the proxy forwards `input_type` and routing through it costs no retrieval quality. The reranker still bypasses the proxy, filed as [BL-44](backlog.md). Full suite 2,179 passed; `mypy --strict` and ruff clean. |
+| Voyage embeddings still bypassed the mandatory LiteLLM route by default (BL-37) | Fixed 2026-09-22. This follow-up supersedes BL-26's direct-client default: `build_provider_from_model` now uses `http://127.0.0.1:4000` when `VOYAGE_BASE_URL` is unset, matching the routing module's single-route contract and the GLM client. `VOYAGE_BASE_URL` remains the deployment override. Pinned by `test_voyage_provider_targets_litellm_proxy_by_default`. |
 | `doctor` crashed on a configured embedding model it cannot build (BL-36) | Fixed 2026-09-11, the day it was filed. An `embedding_models` entry naming `provider: local` with its key exported cleared the key gate in `create_embedding_provider`, reached `build_provider_from_model`, and raised `NotImplementedError` out through `effective_embedding_config` into `_check_semantic_index`. **The blast radius was wider than the command's exit code.** `_check_semantic_index` is called unguarded, so the traceback also cost the four checks sequenced after it -- disk footprint, agent rules, supported languages, freshness -- and a diagnostic that reports less than it ran is the one thing it must not do. Selection now steps over an entry this build cannot construct and continues to the next model, which is what "first usable model" always meant. **The skip predicate is `embedding_config_for_model` itself, not a catch around the build**, for two reasons: it is the same function doctor's Config check calls, so "skipped by selection" and "named by the diagnostic" cannot drift apart the way BL-35's two yardsticks could; and catching around the construction would swallow a genuine client error as though it were an unsupported provider. The prose plane had the same defect at the same gate -- `create_prose_embedding_provider` would have raised out of a *build* rather than falling through to the code embedder its own docstring promises as step 3 -- so it is fixed there too. **Reporting it is the Config check's job, not the embedding comparison's.** BL-35's comparison provably cannot catch this case: `configured_embedding_config` steps over the unusable entry too, so both yardsticks read `dummy` and agree, exactly the vacuous comparison BL-35 existed to remove. Severity there is what the bad entry costs rather than that it exists -- beside a buildable entry it is dead weight selection skips (`warn`), as the last one standing it means nothing configured can ever embed (`fail`), and its hint names the providers that do work, pinned by a test so the advice cannot drift into a dead spelling. `_warn_dummy_fallback` had to change with it: its BL-35 sentence asserts no key is set, which is false on this path, so it now names the reason per entry. Verified on the original two-line config: `doctor` completes all fourteen checks and fails Config naming `bge-m3`.
 | `doctor` vouched for a dummy semantic index when credentials were absent, and `build` never said it had selected one (BL-35) | Fixed 2026-09-11. `_check_semantic_index` compared the manifest's embedding label against `effective_embedding_config`, which resolves through the same key-gated fallback the build did, so with no key both sides read `dummy`, the comparison was vacuous, and doctor printed `[PASS] Semantic index ... dummy/deterministic-sha256` over vectors carrying no semantic signal. BL-27's honest labels could not catch it alone, because the value they are compared against degrades the same way. The check now holds two yardsticks from one module, so they cannot drift: `effective_embedding_config` still answers what this process would query with (which is what catches a real index the running process has no key to read), and the new `configured_embedding_config` answers what `aimodels.yaml` asks for, key-independent, built from the `embedding_config_for_model` derivation `build_provider_from_model` now also uses. A manifest recording `dummy` while a real embedder is configured fails, whether or not a key happens to be present. Configuring no embedding model at all keeps passing, because then the dummy is the intent rather than a substitution. **The hint had to change too**: `knowcode build` does not clear this failure, since the rebuild selects the same fallback, so with no usable key the hint names the key first. **The build half** is fixed at selection rather than in the reporting, because selection is the only place that knows the substitution happened and every caller (build, retrieval, MCP, the API) passes through it: `create_embedding_provider` now logs a warning naming the fallback, the models it skipped, and their key variables, beside the git-commit warning that proved the command was not generally quiet. Verified end to end on a two-file corpus: same store, same command, only the environment differing, the BL-35 table now reads FAIL/FAIL where it read PASS/FAIL. Seven integration and e2e tests were asserting the old verdict; each builds offline and then called `run_doctor` with no config, silently inheriting this repository's own `aimodels.yaml` from the cwd — a verdict that depended on a file outside the fixture. They now write an explicit no-embedding-model config (`tests/helpers/offline_config.py`, placed beside the store root rather than inside it, where freshness would read it as a changed source), so an offline test declares that it is offline. Pinned by six doctor tests (both key states, the configured-dummy escape hatch, a real index the process cannot query, and both hints) and five embedding tests, among them the relational one holding `configured != effective` exactly when the key is absent, which is the property the whole check rests on. Each new guard was mutation-probed red. Full suite 2,159 passed; `mypy --strict` and ruff clean. |
 | 502 receiver holes the BL-33 pass could not see: module-scope bindings, literal types, and qualified factory returns (BL-34) | Fixed 2026-09-01, the day BL-33's residue was decomposed. BL-33 typed receivers from function-scope knowledge only, so three statement kinds the same file still makes were invisible to it: top-level assignments (a module body is a scope every function in the file closes over — `logger = logging.getLogger(__name__)` alone accounted for 85 holes), literal displays and constants (`seen = {}`, `prefix = "x"` state their builtin type exactly as an annotation would, worth ~240), and factory return annotations that name their own origin (`-> logging.Logger`, without which an in-repo `get_logger` cannot honestly say where `.info` lives, worth ~130). The module-scope table lives in `FileKnowledge`, built from direct top-level statements only — a binding inside a conditional import-time `if` is conditional, which one pass cannot treat as unconditional — and is consulted after the function's own table, with the shadowing order the runtime uses: an ambiguous local binding, and any parameter annotated or not, stops the lookup; a module binding shadows the imports. That last rule fixed a latent BL-33 defect the new tests caught: a locally ambiguous name used to fall through to its from-import binding. The builder gained the matching halves: `unique_top_level` now searches a package subtree for re-exported factories and classes by the same reasoning `unique_class` already had, and `_return_annotation_origin` reads a module-qualified return as its own origin — an in-repo module links the class, any other module answers `external::<module>::<Class.method>`. Resolution rate 0.764 → 0.790 (15,350/19,427; external answers 6,380 → 6,906, among them `external::logging::Logger.warning` traced through this repository's own `get_logger` signature). The remaining 4,077 holes barely moved in character: 2,867 receiver-qualified calls whose file states no type at all, 1,210 ambiguous or unknown bare names (116 of them `receiver_unknown` calls the scoped pass correctly refuses to name-link, verified as by-design), and 37 typed-but-unbound. Pinned by six new parser tests (module factories, imported constructors, literals, parameter shadowing, conflicting top-level producers) and six new builder tests (external producer answers, package-subtree class links, literal builtins answers, qualified returns in-repo and external, shadowed-hole guard). Full suite 2,112 passed; `mypy --strict` and ruff clean. |

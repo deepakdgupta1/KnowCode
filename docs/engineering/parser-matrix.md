@@ -1,13 +1,15 @@
 # Parser Construct Support Matrix
 
-**Status:** Step 07 snapshot of the hardening blueprint
+**Status:** Living reference
 
 **Scope:** What each KnowCode parser extracts today, and the explicit
-limitations a user or downstream step can rely on. This matrix is enforced by
-the cross-language integrity gates in `tests/unit/indexing/` and
-`tests/unit/parsers/`, and the exact fixture contracts in
-`tests/fixtures/parser_contracts/`. It is the single
-source of truth referenced by the release gate (blueprint Step 22).
+limitations a user or downstream step can rely on. This matrix is maintained
+directly as the single source of truth referenced by the release gate; it
+supersedes the Step 07 snapshot in the archived
+[hardening blueprint](../archive/knowcode-parser-concurrency-security-hardening.md),
+which is kept for history only. It is enforced by the cross-language integrity
+gates in `tests/unit/indexing/` and `tests/unit/parsers/`, and the exact
+fixture contracts in `tests/fixtures/parser_contracts/`.
 
 The parser and graph invariants themselves live in
 [ADR 1](adr/adr-0001-entity-and-file-identity.md). Anything not listed
@@ -48,11 +50,11 @@ below; the mixed-language fixture contains no `.java` file, so the gates do
 not cover it.
 
 Duplicate declarations in one file never produce duplicate entity IDs: the
-parser keeps the first and reports the dropped collision (Step 07). The
-synthetic per-file *module* entity (named after the file stem) is intentionally
-excluded from that dedupe so a top-level declaration whose name matches the file
-stem — notably a Java `public class` in `ClassName.java` — remains a redundant
-wrapper that the graph merge resolves in favor of the declaration.
+parser keeps the first and reports the dropped collision. Since ADR 11
+(module-scoped qualified names, BL-9), top-level declarations are module-scoped
+and no name collision with the file's MODULE entity arises; every tree-sitter
+parser, including Java and Vue, emits the MODULE entity via `_module_scope`
+(`src/knowcode/parsers/base.py:122`, `vue_parser.py:128-134`).
 
 ## JavaScript and TypeScript (tree-sitter)
 
@@ -95,6 +97,13 @@ wrapper that the graph merge resolves in favor of the declaration.
 - Scoped call resolution: a call resolves to the lexical scope that owns it and
   never leaks across nested definition boundaries.
 - Imports (external) and inheritance.
+
+Reference resolution goes beyond lexical scope (BL-31→BL-34): the graph
+classifies import-bound references with repository knowledge, binds stated
+receiver types — constructor calls, annotated parameters and assignments,
+`self`/`cls` attributes, in-file factories — and types module-scope bindings,
+literals, and qualified factory returns (`8572c33`, `ec330f2`, `d9021c0`).
+Preflight splits the remaining unresolved evidence by hole class (`979f399`).
 
 **Limitations:**
 
@@ -180,11 +189,16 @@ wrapper that the graph merge resolves in favor of the declaration.
 
 - Endpoint forms predate [ADR 1](adr/adr-0001-entity-and-file-identity.md):
   imports emit `external::<dotted.name>` (e.g. `external::java.util.List`)
-  instead of `external::<namespace>::<symbol>`, and internal IDs are raw
-  `file::name` strings without the shared normalization helpers, so
-  `classify_endpoint_id` marks them invalid.
+  instead of `external::<namespace>::<symbol>`, and internal IDs are still
+  minted with local f-strings rather than the shared normalization helpers.
+  They are no longer bare `file::name` strings, though: declarations root in
+  the file's module scope (`java_parser.py:95` uses `_module_scope`), so a
+  top-level `ClassName` and the file's MODULE entity no longer collide on one
+  ID.
 - `ref::` placeholders without a matching local entity linger in the graph
-  instead of becoming `unresolved::` endpoints.
+  instead of becoming `unresolved::` endpoints (emitted at
+  `java_parser.py:111,222,235` for superclass, call, and constructor
+  targets).
 - Nested method invocations can emit duplicate `CALLS` edges (the cursor walk
   re-visits a parent invocation after its children).
 - Class fields, enum declarations, and annotation declarations are not

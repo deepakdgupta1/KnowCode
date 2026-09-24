@@ -11,6 +11,7 @@ from typing import Any, cast
 
 from knowcode.config import AppConfig, ModelConfig
 from knowcode.data_models import EmbeddingConfig
+from knowcode.llm.routing import DEFAULT_LITELLM_BASE_URL
 from knowcode.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -217,14 +218,16 @@ class VoyageAIEmbeddingProvider(EmbeddingProvider):
     def _embed_via_proxy(self, texts: list[str], input_type: str) -> list[list[float]]:
         """Embed through the OpenAI-compatible proxy endpoint.
 
-        The model name carries the ``voyage/`` prefix LiteLLM routes on, and
+        The model is asked for by the name the proxy serves it under, which
+        is the configured name. A proxy answers a ``voyage/`` prefix with
+        ``Invalid model name`` unless it registers that spelling too.
         ``input_type`` travels in the request body -- the one Voyage-specific
         field the OpenAI schema has no slot for -- so proxied embeddings keep
         the query/document distinction the native client sends.
         """
         client = self._get_proxy_client()
         response = client.embeddings.create(
-            model=f"voyage/{self.config.model_name}",
+            model=self.config.model_name,
             input=texts,
             extra_body={"input_type": input_type},
         )
@@ -379,7 +382,7 @@ def build_provider_from_model(model: ModelConfig) -> EmbeddingProvider:
         return VoyageAIEmbeddingProvider(
             config,
             api_key_env=model.api_key_env,
-            base_url=os.environ.get("VOYAGE_BASE_URL"),
+            base_url=os.environ.get("VOYAGE_BASE_URL") or DEFAULT_LITELLM_BASE_URL,
         )
 
     base_url = (

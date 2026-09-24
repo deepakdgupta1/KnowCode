@@ -19,6 +19,8 @@ the [MCP contract](../mcp-contract.md).
 
 ::: knowcode.retrieval.hybrid_index.HybridIndex
 
+::: knowcode.retrieval.response_profiles
+
 ## Context synthesis
 
 ::: knowcode.analysis.context_synthesizer.ContextSynthesizer
@@ -27,6 +29,14 @@ the [MCP contract](../mcp-contract.md).
 
 ::: knowcode.storage.knowledge_store.KnowledgeStore
 
+::: knowcode.storage.chunk_repository.ChunkRepository
+
+::: knowcode.storage.sqlite_chunk_repository.SqliteChunkRepository
+
 ## LLM agent
 
 ::: knowcode.llm.agent.Agent
+
+## Routing policy
+
+::: knowcode.routing_policy

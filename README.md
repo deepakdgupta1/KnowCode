@@ -30,8 +30,8 @@ knowcode install
 uvx --python 3.12 --from "/path/to/KnowCode[all,mcp,voyageai]" knowcode doctor
 
 # Set API keys (only needed for the features you use; see aimodels.yaml)
-export GLM_API_KEY="..."        # LLM (GLM, default provider) for `knowcode ask`
-export VOYAGE_API_KEY_1="..."   # embeddings + reranking (semantic search)
+export LITELLM_MASTER_KEY="..." # LiteLLM proxy key, for embeddings and `knowcode ask` (GLM)
+export VOYAGE_API_KEY_1="..."   # reranking (semantic search)
 export OPENAI_API_KEY="..."     # embeddings (alternative to VoyageAI)
 export GOOGLE_API_KEY="..."     # LLM (Gemini) for `knowcode ask` (alternative)
 ```
@@ -89,7 +89,9 @@ of hard-coding separate thresholds or token budgets in each client.
 
 KnowCode follows a layered pipeline: **Scanner** (file discovery with
 gitignore support) → **Parsers** (Python AST; tree-sitter for JS/TS/Java/
-Rust; custom Vue SFC, Markdown, RST, and YAML scanners) → **Graph Builder** (semantic graph) →
+Rust; Markdown, RST, and YAML scanners; and Vue — a custom SFC scanner
+(`parsers/vue_parser.py`) that delegates embedded script blocks to the
+tree-sitter JS/TS parsers) → **Graph Builder** (semantic graph) →
 **Knowledge Store** (in-memory + JSON/SQLite persistence) → **Indexer**
 (embeddings + hybrid BM25/vector retrieval) → **Context Synthesizer**
 (token-budgeted bundles with priority ranking) → **CLI / REST / MCP
@@ -114,12 +116,12 @@ pytest              # tests (conftest sets KNOWCODE_TESTING=1)
 mypy src/           # strict type checking
 ruff check src/     # lint
 ruff format src/    # format
-mkdocs build --strict  # docs site must build warning-free
+uv run mkdocs build                        # docs site must build warning-free (strict mode is off: docs link into src/)
+uv run python scripts/check_doc_links.py   # every relative docs link must resolve
 ```
 
 The forward plan and release gates live in the [roadmap](docs/roadmap.md);
-known defects in the [engineering backlog](docs/engineering/backlog.md);
-release history in the [changelog](CHANGELOG.md).
+known defects in the [engineering backlog](docs/engineering/backlog.md).
 
 ## License
 
