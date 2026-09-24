@@ -50,20 +50,26 @@ git authorship and per-entity change history.
 ### P2 — AI coding agent (primary)
 
 **UC6: Retrieve context without reading files.**
-The agent calls MCP tool `retrieve_context_for_query` with
+The agent calls MCP tool `knowcode_retrieve` with `action="query"` and
 `verbosity="minimal"`; KnowCode returns compact `context_text`, a
 `sufficiency_score`, and token counts. Escalation (more entities, then more
 detail) happens only when the score is below threshold. The canonical
 policy is the [MCP contract](../mcp-contract.md).
 
 **UC7: Look up known symbols precisely.**
-MCP tools `search_codebase`, `get_entity_context`, `trace_calls` for
-follow-up once retrieval identifies the entity of interest.
+MCP tool `knowcode_retrieve` with `action="search"` (find entities by
+name) and `action="trace"` (callers/callees) for follow-up once retrieval
+identifies the entity of interest.
 
 **UC8: Judge a codebase before working in it.**
-MCP tool `assess_codebase_quality` returns the preflight report card, so an
-agent (or its user) can decide how much to trust local context on an
-unfamiliar repository.
+MCP tool `knowcode_inspect` with `action="quality"` returns the preflight
+report card, so an agent (or its user) can decide how much to trust local
+context on an unfamiliar repository.
+
+The five original flat tools (`retrieve_context_for_query`,
+`search_codebase`, `get_entity_context`, `trace_calls`,
+`assess_codebase_quality`) remain available behind
+`knowcode mcp-server --legacy-tools`.
 
 ### P3 — Locally hosted agent / service
 

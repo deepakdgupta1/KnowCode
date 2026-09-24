@@ -2,6 +2,8 @@
 
 *Consolidated from design discussion. Scope: scaling code-intelligence retrieval to very large (50M+ LOC) repositories under a tight memory budget while preserving strict correctness guarantees.*
 
+> **Status: point-in-time synthesis (2026-08-12).** §1.2 "As-Built" predates the SQLite storage plane — the tree now publishes `knowledge.db`/`chunks.db` inside immutable generations with a LanceDB vector backend (see [docs/engineering/internals/storage-formats.md](../engineering/internals/storage-formats.md), [ADR 0009](../engineering/adr/adr-0009-derived-vector-plane.md)). Several proposals here were subsequently executed by [storage_optimization_2026_v4.md](storage_optimization_2026_v4.md). Read the baseline section as history, not as a description of the current build.
+
 ---
 
 ## 0. Operating Constraints & Core Principle

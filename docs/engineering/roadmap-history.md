@@ -166,7 +166,7 @@ roadmap cannot carry: the decision and its reason. Measured storage numbers
 belong in §17, defects in the [backlog](backlog.md).
 
 - **2026-09-09 — Roadmap split.** The forward plan and this record separated at
-  `f91fcd2`. P2 was found still open: its 2026-08-11 conformance audit had
+  `3c4043a`. P2 was found still open: its 2026-08-11 conformance audit had
   validated a tool surface P3 replaced, and the MCP contract's appendix still
   described tool consolidation and summary-first responses as proposed after
   both had shipped. The appendix was corrected and the source-hungry task-type

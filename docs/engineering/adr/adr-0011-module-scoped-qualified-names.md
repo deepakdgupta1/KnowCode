@@ -74,3 +74,5 @@ name there resolves a reference to an id no entity was emitted under.
 
 Vue is the remaining exception. `VueParser` emits no entity for the file at all,
 so its declarations root under the component name instead. That is BL-10.
+
+> **Update (2026-09-22):** The Vue exception above is closed. BL-10 was fixed on 2026-08-31: `VueParser` now emits the file's MODULE entity through `_module_scope` (`src/knowcode/parsers/vue_parser.py:128-134`). Vue is no longer an exception to this ADR.

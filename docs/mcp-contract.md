@@ -1,6 +1,6 @@
 # KnowCode MCP Retrieval Contract
 
-**Last Updated:** 2026-08-28
+**Last Updated:** 2026-09-22
 
 This is the canonical operating policy for agents that use the KnowCode MCP
 server. Keep agent rules, setup guides, and prompts pointed here instead of
@@ -49,9 +49,11 @@ never seen is bootstrapped through the surface itself:
 {"tool": "knowcode_lifecycle", "action": "build"}
 ```
 
-That returns a `job_id` immediately and indexes in the background — indexing
-costs one embedding round-trip per file with no cross-file batching, so a
-cold build on a large repository runs for many minutes. Poll until terminal:
+Indexing embeds pending chunks in cross-file batches with bounded concurrency
+and retry/backoff (`src/knowcode/indexing/embedding_batch.py`); large first
+builds still take a while, which is why lifecycle actions return a `job_id`
+immediately and are polled via `knowcode_inspect action=job_status`. Poll
+until terminal:
 
 ```json
 {"tool": "knowcode_inspect", "action": "job_status", "job_id": "j-…"}
@@ -61,6 +63,11 @@ Never report a build as successful before `state` is `succeeded` and
 `result.published` is `true`. A build that fails after parsing leaves the
 previously published generation current, so a non-zero entity count does not
 mean retrieval improved.
+
+Two lifecycle guardrails: `knowcode_lifecycle action="export"` **requires** an
+`output` argument or validation fails (`mcp/lifecycle.py:148-149`), and only
+one lifecycle job may run at a time — a concurrent submit returns
+`code="job_already_running"` (`mcp/jobs.py:57-66`).
 
 From a terminal, the equivalent remains:
 
@@ -160,6 +167,21 @@ for focused follow-up:
 - `knowcode_inspect action="freshness"`: whether artifacts lag the working
   tree. Check this before trusting context on an actively edited repository.
 
+## Error Codes
+
+Typed failures surface as a `code` plus a `hint` naming the next action.
+Beyond the two cases noted above, the catalog:
+
+| Code | Raised by | Meaning |
+|---|---|---|
+| `missing_knowledge_store` | `query` | no knowledge store; run the lifecycle build the hint names |
+| `entity_not_found` | `trace` | bare name resolved to no entity |
+| `missing_semantic_index` | `semantic_search` | no usable vector plane in the index generation |
+| `path_outside_root` | root resolution | requested path escapes the MCP server root |
+| `unknown_job` / `no_jobs` | `inspect action=job_status` | job id not found / no jobs recorded yet |
+| `missing_preflight_report` | `inspect action=quality` | generation has no `preflight_report.json` |
+| `job_already_running` | `knowcode_lifecycle` | one lifecycle job at a time; submit again after it finishes |
+
 ## Agent Rule Snippet
 
 Use this compact rule in agent-specific config files:
@@ -184,6 +206,10 @@ This document outlines the sources of token overhead when using the KnowCode MCP
 ## Where the Tokens Are Burned
 
 The MCP approach can be token-expensive due to the following overhead sources:
+
+> The estimates below were measured against the superseded pre-consolidation
+> five-tool surface, before Strategies 1–5 shipped. They record the baseline
+> the strategies were justified against, not today's per-call cost.
 
 | Overhead Source                                                   | Est. Tokens/Call | Notes                                                                                |
 | ----------------------------------------------------------------- | ---------------- | ------------------------------------------------------------------------------------ |
@@ -229,7 +255,7 @@ The response from the query path returned 12 fields. The agent realistically onl
 
 ### 3. Slash `max_tokens` and `limit_entities` — *Implemented* (~60% content savings)
 
-The previous defaults in the MCP server were `max_tokens=6000` and `limit_entities=3` (now `max_tokens=4000` by default). For most day-to-day queries, this is excessive.
+The previous defaults in the MCP server were `max_tokens=6000` and `limit_entities=3`. `max_tokens` defaults: **1500** for `knowcode_retrieve action=query` (`mcp/server.py:380`); 4000 for direct `RetrievalOrchestrator` use, the legacy flat tool, and the REST query endpoint. For most day-to-day queries, this is excessive.
 **Recommendation:** Update your agent rules (`.agent/rules/context.md`) to use tiered budgets:
 
 - `max_tokens=1500, limit_entities=1` is sufficient for "locate" and "explain" queries.
@@ -278,11 +304,14 @@ response of that type.
 
 ## Combined Impact Estimate
 
-If all strategies are implemented, the token savings would be dramatic:
+If all strategies are implemented, the token savings would be dramatic. The
+first row's projection assumed the superseded five-tool surface; the shipped
+consolidated surface is pinned under 1200 tokens by
+`tests/unit/mcp/test_consolidated_surface.py:79`:
 
 | Strategy                      | Est. Token Savings                               |
 | ----------------------------- | ------------------------------------------------ |
-| Single tool (vs 5 schemas)    | ~400 tokens saved per turn                       |
+| Tool consolidation (3 tools vs the old 5 schemas) | schema pinned under 1200 tokens per turn |
 | Stripped response metadata    | ~800 tokens saved per call                       |
 | Lower default token limits    | ~3000 tokens saved per call                      |
 | Compact JSON formatting       | ~300 tokens saved per call                       |
@@ -295,8 +324,8 @@ If all strategies are implemented, the token savings would be dramatic:
 
 The following optimizations have been fully implemented in the KnowCode codebase:
 
-1. **Stripped Response Metadata (Strategy 2 — Implemented)**: The default `minimal` verbosity mode now returns only `context_text`, `sufficiency_score`, and `total_tokens`. All non-essential fields (such as query echo, task confidence, evidence lists, etc.) are excluded, saving ~800 tokens per call.
-2. **Lowered default token limits (Strategy 3 — Implemented)**: The default `max_tokens` has been reduced from `6000` to `4000` across `RetrievalOrchestrator` and `KnowCodeMCPServer`.
+1. **Stripped Response Metadata (Strategy 2 — Implemented)**: The default `minimal` mode returns `context_text`, `sufficiency_score`, and `total_tokens`, **plus**: the `freshness` block the service appends to every query response; `reduction_summary` when the response was summarized, or `source_included: true` when raw source was included (task types `debug`/`review`, or verbosity ≥ `standard`); and `errors` when present (`src/knowcode/retrieval/orchestrator.py:342-364`, `src/knowcode/service.py:643`). Strip-and-compact narratives must treat these fields as part of the minimal payload. All non-essential fields (such as query echo, task confidence, evidence lists, etc.) are excluded, saving ~800 tokens per call.
+2. **Lowered default token limits (Strategy 3 — Implemented)**: `max_tokens` defaults: **1500** for `knowcode_retrieve action=query` (`mcp/server.py:380`); 4000 for direct `RetrievalOrchestrator` use, the legacy flat tool, and the REST query endpoint.
 3. **Compact JSON Formatting (Strategy 4 — Implemented)**: Responses in `server.py` are serialized using `json.dumps(result, separators=(',', ':'))`, eliminating unnecessary whitespace and saving ~300 tokens per call.
 
 4. **Tool consolidation (Strategy 1 — Implemented)**: the default surface is

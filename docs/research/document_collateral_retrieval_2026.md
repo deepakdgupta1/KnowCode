@@ -73,7 +73,7 @@ FAISS flat index · SQLite FTS5 BM25 · RRF (re-tuned) · VoyageAI rerank (upgra
 
 ### 2.1 Where D10–D15 came from
 
-D1–D9 were derived from this corpus. D10–D15 come from auditing a shipped sibling system, the `gpt-actions-rag` RFP knowledge base in [`docs/research/gpt-actions-rag/`](./gpt-actions-rag/). It solves the same shape of problem, grounded answers over templated business prose with citations, and it has been running against a real corpus long enough for its failure modes to surface. Reading them off a live system is cheaper than rediscovering them at P2.
+D1–D9 were derived from this corpus. D10–D15 come from auditing a shipped sibling system, the `gpt-actions-rag` RFP knowledge base in `docs/research/gpt-actions-rag/`. It solves the same shape of problem, grounded answers over templated business prose with citations, and it has been running against a real corpus long enough for its failure modes to surface. Reading them off a live system is cheaper than rediscovering them at P2.
 
 The audit ran the system against its own ten-document corpus. Four findings transfer directly:
 

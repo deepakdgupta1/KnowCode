@@ -12,13 +12,13 @@ Decision records: [ADR 3](../adr/adr-0003-durable-embedding-representation.md),
 |---|---|---|---|
 | Knowledge store (JSON) | `knowcode_knowledge.json` | 2 | Entities + relationships; readable by the legacy exporter but cannot mix into a current generation |
 | Knowledge store (SQLite) | `knowledge.db` | generation-scoped | Canonical in generations |
-| Chunk repository | `chunks.db` (SQLite) | 2 | Chunks + durable embeddings |
+| Chunk repository | `chunks.db` (SQLite) | 4 | Chunks + durable embeddings |
 | Vector store | none on disk | 2 (LanceDB) / 3 (FAISS) | **Derived, never published** ([ADR 9](../adr/adr-0009-derived-vector-plane.md)); rebuilt in memory from `chunks.db`. Generations written before 2026-08-29 carry `vectors.lancedb`/`vectors.index` + `vectors.json` and still load. |
 | Generation manifest | `manifest.json` | 3 | Contract version, generation ID, checksums, embedding config, knowledge/chunk/vector counts |
 | Preflight report | `preflight_report.json` | — | Written beside generation artifacts; loaded by doctor/MCP/CLI |
 | Telemetry | `knowcode_telemetry.jsonl` | versioned | Store root, never inside `knowcode_index/` (see [telemetry](../../user/telemetry.md)) |
 
-## SQLite chunk schema (v2)
+## SQLite chunk schema (v4)
 
 - Embeddings persist as **little-endian float32 BLOBs with an explicit
   dimension**; insert and load validate byte length, configured dimension,
@@ -32,6 +32,20 @@ Decision records: [ADR 3](../adr/adr-0003-durable-embedding-representation.md),
 - File updates go through transactional `replace_file(file_id, chunks)` —
   prepare/commit, returning previous and committed IDs with generation
   metadata.
+
+## Chunk content is zlib-deflated
+
+`chunks.content` is stored zlib-deflated at level 6 (storage plan §17): writes
+land as plain TEXT and `compact` rewrites each row as the zlib BLOB before the
+generation is digested, so a watch batch's TEXT rows can sit beside the
+previous generation's deflated ones. SQLite's own storage class — TEXT or
+BLOB — is the discriminator, and one inflater,
+`inflate_chunk_content`, recovers text from either. A `LIKE` cannot read
+compressed bytes, so the exact-match plane inflates each row while it scans.
+A `schema_meta` table records schema facts (the row's `version` is
+`SCHEMA_VERSION`), and the storage floor is SQLite ≥ 3.43
+(`MINIMUM_SQLITE_VERSION`), the release that introduced the
+`contentless_delete` FTS5 option the term index requires.
 
 ## The vector plane is derived
 
@@ -55,8 +69,8 @@ vector twice. It cost 28.5% of a generation.
   artifact, and loads the persisted plane when it does.
 
 Above roughly 100,000 vectors an in-memory plane stops being the right default.
-The disk-backed cache for that case is not built; see the
-[backlog](../backlog.md).
+A disk-backed chunk cache was considered and rejected
+([BL-3](../backlog.md)); the backlog's Open section is empty.
 
 ## Vector backends
 

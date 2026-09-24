@@ -16,10 +16,12 @@ The four:
 2. **An empty LanceDB index cannot be saved as a loadable artifact.** The
    backend residual is contained at the caller: ``flush()`` never writes an
    index nobody built.
-3. **A watched edit refreshes retrieval but not the knowledge graph.** Chunk and
-   vector membership follow a watched edit; ``knowledge.db`` does not, so graph
-   queries go stale until a rebuild. ``knowcode doctor`` warns, and retrieval —
-   the primary entry point — stays fresh.
+3. **A watched edit refreshes retrieval and the graph for the parsed file.**
+   Chunk and vector membership follow a watched edit, and so do the edited
+   file's graph rows and the edges leaving them (BL-17); only cross-file
+   edges — one *arriving* from a file the watch commit did not parse — still
+   need a rebuild. ``knowcode doctor`` no longer warns
+   ``store_stale_source_changed`` after a watch commit.
 4. **The prompt boundary adds bounded instruction/envelope overhead.** It is a
    small, declared, proportional cost, accepted for the security property it
    buys and because the local-first router keeps most queries off the provider.
@@ -143,7 +145,8 @@ def test_flush_never_writes_an_index_nobody_built(tmp_path: Path) -> None:
 
 
 # ----------------------------------------------------------------------
-# 3. A watched edit refreshes retrieval but not the graph (Step 18b discovery)
+# 3. A watched edit refreshes retrieval and the parsed file's graph
+#    (Step 18b discovery, resolved by BL-17)
 # ----------------------------------------------------------------------
 
 

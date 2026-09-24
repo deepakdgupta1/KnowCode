@@ -335,3 +335,60 @@ config:
 
     with pytest.raises(ValueError, match="entity_source"):
         AppConfig.load(str(config_file))
+
+
+# --- An entry's default key is the one its route accepts (BL-42) ------------
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+@pytest.mark.parametrize(
+    ("section", "provider", "expected"),
+    [
+        ("natural_language_models", "z-ai", "LITELLM_MASTER_KEY"),
+        ("natural_language_models", "google", "GOOGLE_API_KEY"),
+        ("embedding_models", "voyageai", "LITELLM_MASTER_KEY"),
+        ("embedding_models", "openai", "OPENAI_API_KEY"),
+        ("embedding_models", "openrouter", "OPENROUTER_API_KEY"),
+        ("prose_embedding_models", "voyageai", "LITELLM_MASTER_KEY"),
+        ("reranking_models", "voyageai", "VOYAGE_API_KEY_1"),
+    ],
+)
+def test_an_entry_that_names_no_key_reads_the_key_its_route_accepts(
+    tmp_path: Path, section: str, provider: str, expected: str
+) -> None:
+    """Only proxy-routed entries default to the proxy's key.
+
+    That key fronts every provider key the proxy holds, so an entry for a
+    provider KnowCode calls directly must never inherit it. Reranking calls
+    VoyageAI directly, which is why a voyageai reranking entry differs from a
+    voyageai embedding entry.
+    """
+    config_file = tmp_path / "aimodels.yaml"
+    _write(config_file, f"{section}:\n  - name: some-model\n    provider: {provider}\n")
+
+    config = AppConfig.load(str(config_file))
+    entries = {
+        "natural_language_models": config.models,
+        "embedding_models": config.embedding_models,
+        "prose_embedding_models": config.prose_embedding_models,
+        "reranking_models": config.reranking_models,
+    }[section]
+
+    assert [entry.api_key_env for entry in entries] == [expected]
+
+
+def test_the_shipped_config_sends_each_route_the_key_it_accepts() -> None:
+    """The proxy rejects a provider key with ``400 No connected db``."""
+    config = AppConfig.load(str(_REPO_ROOT / "aimodels.yaml"))
+    proxied = [
+        entry
+        for entry in config.models + config.embedding_models
+        if entry.provider in {"z-ai", "glm", "voyageai", "voyage"}
+    ]
+
+    assert proxied, "the shipped config routes nothing through the proxy"
+    assert {entry.api_key_env for entry in proxied} == {"LITELLM_MASTER_KEY"}
+    assert {entry.api_key_env for entry in config.reranking_models} == {
+        "VOYAGE_API_KEY_1"
+    }

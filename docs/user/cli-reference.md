@@ -37,7 +37,11 @@ knowcode install [--upgrade] [--user] [--dry-run]
 ### `analyze`
 
 Scan and parse a directory to build the knowledge store (semantic graph of
-entities and relationships). Graph only — no semantic index.
+entities and relationships). Like `build`, `analyze` stages the call graph
+**and** the semantic index into one generation and publishes both together
+(`src/knowcode/service.py:1501-1508`). Differences from `build`: `analyze`
+requires a directory and adds `--output`/`--coverage`; `build` adds
+`--incremental`/`--config` and defaults to the current directory.
 
 ```bash
 knowcode analyze <directory> [--output <path>] [--ignore <pattern>] [--temporal] [--coverage <cobertura.xml>]
@@ -94,11 +98,20 @@ knowcode preflight [<directory>] [--ignore <pattern>] [--config <path>] [--json]
 
 ### `doctor`
 
-Check whether the local setup is ready for daily use: strict config loading,
-required API keys, knowledge store schema, semantic index schema and
-embedding dimensions, artifact disk footprint (default threshold 500 MB),
-unsupported-language warnings, freshness, and optionally a live MCP stdio
-handshake.
+Check whether the local setup is ready for daily use. The checks run in
+code order: strict config loading, required API keys, knowledge store
+schema, native dependencies (FAISS), optional dependencies, the Python
+runtime (warns on 3.13+ under uvx), the published index generation
+(checksums and digests prove all artifacts were published together),
+**builder drift** — it compares the store manifest's builder fingerprint
+against the running package, and on mismatch the fix is
+`uv cache clean && uv tool install --force` — semantic index schema and
+embedding dimensions (fails a dummy-built index when a real embedding
+provider is configured, and names the missing API key), artifact disk
+footprint (default threshold 500 MB), agent rules (presence of
+`.agent/rules/context.md`), unsupported-language warnings,
+freshness, codebase quality (grades the persisted preflight report against
+the configured minimum score), and optionally a live MCP stdio handshake.
 
 ```bash
 knowcode doctor [--store <path>] [--index <path>] [--config <path>] [--max-disk-mb <n>] [--mcp] [--json]
@@ -251,7 +264,10 @@ knowcode mcp-server [--store <path>] [--config <path>] [--legacy-tools]
 ```
 
 `--store` defaults to `$CLAUDE_PROJECT_DIR`, then the working directory, so
-one registration serves every repository. The server starts whether or not a
+one registration serves every repository. An explicitly passed `--store` must
+already exist (`click.Path(exists=True)`, `src/knowcode/cli/cli.py:970-973`) —
+only the *implicit* fallback chain (`--store` → `$CLAUDE_PROJECT_DIR` → cwd)
+is automatic. The server starts whether or not a
 knowledge store exists — a missing store is reported per action, so an agent
 can bootstrap a repository itself rather than requiring a terminal step.
 
@@ -282,7 +298,9 @@ retrieval policy is the [MCP contract](../mcp-contract.md).
 
 ### `telemetry show` / `telemetry clear`
 
-Summarize or delete the local telemetry log. Telemetry never leaves your
+Summarize or delete the local telemetry log. `telemetry show` also lists
+the telemetry files on disk and warns when raw capture is enabled
+(`src/knowcode/cli/cli.py:603-611`). Telemetry never leaves your
 machine and never contains your questions or code — see
 [Telemetry & Privacy](telemetry.md).
 
