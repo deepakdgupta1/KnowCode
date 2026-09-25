@@ -51,6 +51,11 @@ when the gate was made untimed and the test deadlocked deterministically:
 the worker holds the lock and waits on the gate, shutdown waits untimed on
 the lock, and the test's `finally` never runs to open the gate.
 
+**BL-39 is the same overrun.** It was found a day earlier, from this test's CI
+failures, and filed on `ci/green-pipeline` with a local reproduction. The two
+rows were filed on separate branches and merged together. Read both before
+fixing either.
+
 ### BL-45 - The MCP server writes log lines onto stdout, which is its protocol channel
 
 **Severity:** Medium. **Found:** 2026-09-23, calling the MCP server through
@@ -213,10 +218,158 @@ back to, and kept the unpublished chunkless `20260923T035253724946Z-a906d9ac`
 because it was newer. Retention counts age, not publication, so after a hand
 rollback the only good copy left was a backup made outside the index.
 
+### BL-38 - Retrieval quality fell between two commits and the cause is unlocated
+
+**Severity:** High. **Found:** 2026-09-09 in `knowcode-evals`, re-binding the
+golden set to KnowCode HEAD (P-1, `df5989f`), then confirmed by a keyed
+re-measurement recorded in `43a1787`.
+
+The first reading said retrieval had collapsed, MRR `0.682 → 0.344`. That
+reading was an artifact. `VOYAGE_API_KEY_1` was not exported, selection fell
+through to the dummy embedder, and the dense arm was a hash stub. The harness
+now refuses to score such a run at all (`1ca97ac`, rule in
+`tests/eval/harness/provenance.py`, escape hatch `--allow-stub-embeddings`), so
+that particular wrong number cannot be produced again.
+
+With the key exported and the index rebuilt on the same pinned corpus and the
+same 58 records, the real picture is a smaller regression that the stub had
+hidden:
+
+| commit | date | live MRR | R@10 | P@1 | locate MRR | easy P@1 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `48b6eaf` | 2026-06-11 | 0.514 | 0.549 | 0.379 | 0.738 | 12/15 |
+| `7e9ca96` | 2026-09-09 | 0.469 | 0.519 | 0.379 | 0.673 | 11/15 |
+
+The defect, if it is one, is that delta of 0.045 MRR and 0.065 locate MRR
+under identical conditions. **It is one run per commit with no variance
+estimate.** `P@1` is identical at 0.379, and easy `P@1` moved by one query, so
+the whole delta is a handful of rank changes over 58 records. The first reading
+of this same pair was an artifact, so repeat both measurements before spending
+anything on a bisect. [DR-4](../research/storage_optimization_2026_v4.md)
+forbids a phase that costs retrieval quality, and 185 commits separate these
+two, so if the delta holds, a phase that caused it is unidentified rather than
+absent.
+
+**Ruled out.** `d239b22`'s cut of `hybrid_alpha` from 0.5 to 0.2. Forcing 0.5
+back at the later commit gives 0.470 against 0.469, so reverting that commit
+does not recover the delta. Two points at one commit say nothing wider about
+how sensitive the blend is.
+
+**The open lead is coverage, and it is a lead rather than a finding.** The later
+commit indexes 7,555 chunks where the earlier indexes 7,946 from the identical
+tree. Fewer chunks is not by itself a loss: `ed537b1` made a class chunk carry
+its shell rather than its members' bodies, and `12c7b0a` replaced the prose
+extractor with heading-hierarchy chunking that merges small siblings. Both
+legitimately cover the same bytes with fewer rows. Whether any *content* stopped
+being reachable is unmeasured, and that measurement is the next step, not a
+bisect.
+
+**Reproduce.** In `knowcode-evals` on `main`, build an index at each commit and
+score the same golden set:
+
+```bash
+VOYAGE_API_KEY_1="<key>" uv run python scripts/evaluate.py \
+  tests/eval/golden/golden_v1.0.json <index_dir> --threshold 0.4
+```
+
+**Deferred on purpose.** Naming the commit needs a keyed bisect over those 185
+commits, and every point costs an index rebuild with live embedding calls, so
+the cost is real money and hours rather than a `git bisect run`. Roadmap P1 owns
+the harness this depends on, and its work item 3 re-selects the threshold over
+the same evidence.
+
+### BL-39 - Shutdown waits out an in-flight commit whatever its budget, and can then report a drain it cannot name
+
+**Severity:** Medium. **Found:** 2026-09-22 in CI run `35742967500`, job
+`macos-latest / py3.10`. Seen twice more on 2026-09-23 in run `35840662218`, on
+both `macos-latest / py3.10` and `macos-latest / py3.11`. Each time
+`test_lifespan_shutdown_reports_incomplete_work` was the only failure in its
+job, and neither the test nor the shutdown path runs git, so the test
+environment changes on this branch cannot reach it.
+
+```
+>       assert report.incomplete_work
+E       AssertionError: assert ()
+E        +  where () = ShutdownReport(completed=False, stages=(... StageOutcome(
+       name='worker', ok=False,
+       detail='0 path(s) not indexed as their events implied') ...),
+       incomplete_work=())
+```
+
+A report saying the worker stage failed while naming zero paths is the exact
+state that test exists to forbid: a drain that cannot finish is stated, never
+reported as clean. The count in the detail string and the empty tuple are the
+same value, so the message is self-consistent and the *report* is not.
+
+**The shutdown blocked, and the empty report follows from that.** The test
+gates the worker inside `replace_file` for up to five seconds per file and
+queues two files, but those waits run on the worker thread. The test's own
+thread reaches shutdown within a second of startup, with a 0.2-second budget.
+All three sightings logged the incomplete-shutdown warning about ten seconds
+after the app's first line: `14:51:18.162` to `14:51:28.296`, `09:04:47.935` to
+`09:04:58.234`, and `09:05:06.012` to `09:05:16.359`. Ten seconds is the two gated files expiring in turn, and the
+report can name nothing only if the worker had finished both, because it lists
+what is pending, in flight or failed. So the report was taken after the work it
+should describe had completed, about fifty times past the budget.
+
+**Reproduced locally, and the passing runs overrun the budget too.**
+`ServiceWatchWriter` holds one `RLock` across a whole commit, and the test's
+gated `replace_file` runs inside it. `BackgroundIndexer.stop()` then calls
+`_publish_pending()`, whose `publish_pending()` takes that lock with no
+deadline, and `_report()` reads `pending_paths()`, which takes it again. So
+shutdown waits for the in-flight commit however long it takes. Lock handoff
+between the two threads is not fair. When the worker re-takes the lock for its
+next file first, the report comes after both files have finished and names
+nothing, which is the CI failure. A scratch test that makes the shutdown thread
+wait for the worker's second commit before publishing reproduces it on every
+run, printing `shutdown took 10.1s against a 0.2s budget; commits=2
+completed=False incomplete_work=()`. Without that forcing the test passes, and
+shutdown still takes 10.1 seconds, because `pending_paths()` waits out the
+second commit.
+
+**Fix the wait, not the report.** `stop()` promises a bound "even when a commit
+hangs", and in watch mode a commit includes embedding calls over the network.
+Bounding the lock waits on the shutdown path, both for publishing and for
+reading unpublished paths, keeps the budget and lets the report name the files
+in flight and pending. Deriving `completed` from the report's own instant would
+instead hide a shutdown that overran its budget fiftyfold.
+
+**Reproduce.** In `test_lifespan_shutdown_reports_incomplete_work`, wrap the
+worker's `_publish_pending` so that, when called from any thread other than the
+worker's, it first waits until `replace_file` has been entered a second time.
+The final assertion then fails on every run, and timing the `TestClient` exit
+shows the ten seconds.
+
+**BL-46 is the same overrun.** PR #32 hit it on 2026-09-23 while reworking
+this test, and changed the test so its precondition no longer rests on the
+clock (`7a20eee`, `64dbd45`). The description and the Reproduce recipe above
+match the test as of `5721e5d`, before that rework. The wait in `stop()` is
+still unfixed. The two rows were filed on separate branches and merged
+together. Read both before fixing either.
+
+### BL-40 - A watched edit did not reach the graph once, on one CI job
+
+**Severity:** Medium. **Found:** 2026-09-15 in CI run `34928841437`, job
+`macos-latest / py3.10`, where
+`test_a_watched_edit_refreshes_retrieval_and_the_graph` failed at
+`assert service.search("gamma_handler")` with "the graph did not follow the
+watched edit", after `worker.stop(timeout=60)` had returned a completed report
+and the chunk-side assertion above it had passed.
+
+**Nothing is diagnosed here, and this row exists so the next sighting is the
+second one rather than the first.** It has not recurred in the four runs since
+(`35404359382`, `35742967500`, `35755451528`, `35816034884`), and the test
+passed nine consecutive times locally under py3.10, so by this backlog's own
+standard it is one observation short of being reproducible. It is filed rather than dropped because the
+retrieval half passing while the graph half fails is exactly the split
+[BL-17](backlog.md) closed, and a return of it would be a correctness
+regression rather than a flaky assertion.
+
 ## Closed
 
 | Item | Resolution |
 | --- | --- |
+| CI committed a changelog that is not in version control, and failed on every push to `main` (BL-47) | Closed 2026-09-23 by removing the commit step, not by tracking the file again. `82fdc14` stopped tracking `CHANGELOG.md` and `.gitignore` lists it, so the `Generate Changelog` job's `git add CHANGELOG.md` has failed ever since. The job still generates the entry and uploads it as the `changelog-update` artifact, and the workflow token drops to `contents: read` because nothing writes to the repository any more. **The changelog now persists nowhere.** The artifact expires with its run, the `changelog_summary` dispatch input only shapes that artifact, and the one copy holding the `[Unreleased]` section is a maintainer's untracked local file. Whether to track it again is a release-notes decision rather than a CI one, and it belongs to whoever owns releases. Filed as BL-46 on `ci/green-pipeline`. PR #32 filed a different BL-46 the same day and landed first, so this row took the next free id at merge. |
 | Voyage embeddings on the proxy route sent the wrong key and the wrong model name, to a proxy with no embedding model (BL-42) | Fixed 2026-09-23, the day it was filed. **The filed diagnosis named one cause of three.** The row blamed the proxy's model list and called the build's `400 No connected db` misleading. That error was accurate. KnowCode sent `VOYAGE_API_KEY_1` as its bearer, and LiteLLM reads any bearer other than its master key as a virtual key, which with no database connected it answers with exactly that error. Probed against the live proxy once the operator had registered `voyage-code-3`, the master key with `voyage-code-3` returns 200 and 1,024 dimensions, `VOYAGE_API_KEY_1` or `GLM_API_KEY` returns `400 No connected db` whatever the model, and the master key with `voyage/voyage-code-3` returns `Invalid model name`. So three defects stacked. **The proxy served no embedding model**, which the operator fixed by registering `voyage-code-3` against `api.voyageai.com`. **Every proxy-routed entry named its provider's key**, so `aimodels.yaml` now names `LITELLM_MASTER_KEY` for `glm-5` and `voyage-code-3`. An entry that names no key now defaults to the key its route accepts, the proxy's only for `z-ai`, `glm` and `voyageai` (`_DEFAULT_KEY_ENV_BY_PROVIDER` in `knowcode/config.py`). The first version of that default ignored the provider, and code review caught it sending the proxy's key, which fronts every provider key the proxy holds, to OpenAI and OpenRouter entries. A `reranking_models` entry now names `VOYAGE_API_KEY_1`, because reranking still calls VoyageAI directly and doctor had stopped checking that key once embeddings no longer named it. The test session now scrubs credentials from the environment. Run with a proxy key exported and the route pointed at a stand-in, the suite sent it 1,449 embedding requests before being stopped after eighteen minutes, and with the scrub it sends none and passes in under a minute. The chat half had carried this since BL-26, so `knowcode ask` could not reach the proxy either, and now answers with only the proxy key in the environment. **`_embed_via_proxy` asked for `voyage/<model>`**, the prefix BL-26 said LiteLLM routes on, but a proxy serves only the names it registers, so it now sends the configured name. **Stubbed clients are why none of this showed.** BL-26's routing tests replaced the OpenAI client, so one of them pinned `voyage/voyage-code-3` as correct and none met the proxy's authentication. The new tests read requests off the wire from a local stand-in, for a code entry, a prose entry and the built-in default, on both the document and query paths, and for an OpenAI entry that must not receive the proxy's key. Each half of the fix was mutation-probed red. **Parity is measured, not assumed.** Rebuilt through the proxy, the served index holds 6,567 chunks and 6,567 vectors, where the build that found this held none. 886 of its chunks have text unchanged since generation `20260911T015321471897Z-b09cf92b` but were embedded again, and against the direct-API vectors stored there they score a median cosine of 0.99996 and a minimum of 0.9983. Thirteen sampled texts sent as `query` score a median of 0.981, and with no `input_type` 0.960, so the proxy forwards `input_type` and routing through it costs no retrieval quality. The reranker still bypasses the proxy, filed as [BL-44](backlog.md). Full suite 2,179 passed; `mypy --strict` and ruff clean. |
 | Voyage embeddings still bypassed the mandatory LiteLLM route by default (BL-37) | Fixed 2026-09-22. This follow-up supersedes BL-26's direct-client default: `build_provider_from_model` now uses `http://127.0.0.1:4000` when `VOYAGE_BASE_URL` is unset, matching the routing module's single-route contract and the GLM client. `VOYAGE_BASE_URL` remains the deployment override. Pinned by `test_voyage_provider_targets_litellm_proxy_by_default`. |
 | `doctor` crashed on a configured embedding model it cannot build (BL-36) | Fixed 2026-09-11, the day it was filed. An `embedding_models` entry naming `provider: local` with its key exported cleared the key gate in `create_embedding_provider`, reached `build_provider_from_model`, and raised `NotImplementedError` out through `effective_embedding_config` into `_check_semantic_index`. **The blast radius was wider than the command's exit code.** `_check_semantic_index` is called unguarded, so the traceback also cost the four checks sequenced after it -- disk footprint, agent rules, supported languages, freshness -- and a diagnostic that reports less than it ran is the one thing it must not do. Selection now steps over an entry this build cannot construct and continues to the next model, which is what "first usable model" always meant. **The skip predicate is `embedding_config_for_model` itself, not a catch around the build**, for two reasons: it is the same function doctor's Config check calls, so "skipped by selection" and "named by the diagnostic" cannot drift apart the way BL-35's two yardsticks could; and catching around the construction would swallow a genuine client error as though it were an unsupported provider. The prose plane had the same defect at the same gate -- `create_prose_embedding_provider` would have raised out of a *build* rather than falling through to the code embedder its own docstring promises as step 3 -- so it is fixed there too. **Reporting it is the Config check's job, not the embedding comparison's.** BL-35's comparison provably cannot catch this case: `configured_embedding_config` steps over the unusable entry too, so both yardsticks read `dummy` and agree, exactly the vacuous comparison BL-35 existed to remove. Severity there is what the bad entry costs rather than that it exists -- beside a buildable entry it is dead weight selection skips (`warn`), as the last one standing it means nothing configured can ever embed (`fail`), and its hint names the providers that do work, pinned by a test so the advice cannot drift into a dead spelling. `_warn_dummy_fallback` had to change with it: its BL-35 sentence asserts no key is set, which is false on this path, so it now names the reason per entry. Verified on the original two-line config: `doctor` completes all fourteen checks and fails Config naming `bge-m3`.

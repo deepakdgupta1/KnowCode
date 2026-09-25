@@ -11,7 +11,7 @@ import sqlite3
 import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Literal, Optional, TextIO, cast
+from typing import Any, Literal, Optional
 
 from knowcode.config import AppConfig
 from knowcode.data_models import EmbeddingConfig
@@ -1074,16 +1074,16 @@ async def _check_mcp_handshake(
     )
     import tempfile
 
-    with tempfile.TemporaryFile(mode="w+t") as errlog:
-        # typeshed types TemporaryFile as _TemporaryFileWrapper[str] on
-        # Windows but IO[Any] on POSIX, and only the POSIX spelling is
-        # assignable to stdio_client's ``errlog: TextIO``. The object is a
-        # text-mode file on every platform; the cast asserts what the win32
-        # stub cannot express.
-        async with stdio_client(params, errlog=cast(TextIO, errlog)) as (
-            read_stream,
-            write_stream,
-        ):
+    # The child writes stderr in the platform's locale encoding, and on Windows
+    # it may still hold the file while the directory is removed. Neither may
+    # turn a handshake that passed into a failure.
+    with (
+        tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as errdir,
+        open(
+            Path(errdir) / "mcp-stderr.log", "w+", encoding="locale", errors="replace"
+        ) as errlog,
+    ):
+        async with stdio_client(params, errlog=errlog) as (read_stream, write_stream):
             async with ClientSession(read_stream, write_stream) as session:
                 await asyncio.wait_for(session.initialize(), timeout=timeout_seconds)
                 tools_result = await asyncio.wait_for(
